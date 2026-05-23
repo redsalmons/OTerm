@@ -1,88 +1,85 @@
-About
------
+# OceanTerm
 
-wxWidgets is a free and open source cross-platform C++ framework
-for writing advanced GUI applications using native controls.
+A modern terminal emulator application built with wxWidgets and libvterm.
 
-![wxWidgets Logo](https://www.wxwidgets.org/assets/img/header-logo.png)
+## Features
 
-wxWidgets allows you to write native-looking GUI applications for
-all the major desktop platforms and also helps with abstracting
-the differences in the non-GUI aspects between them. It is free
-for the use in both open source and commercial applications, comes
-with the full, easy to read and modify, source and extensive
-documentation and a collection of more than a hundred examples.
-You can learn more about wxWidgets at https://www.wxwidgets.org/
-and read its documentation online at https://docs.wxwidgets.org/
+- **Multiple Terminal Sessions**: Support for multiple SSH connections in tabbed interface
+- **File Transfer**: Built-in SFTP file transfer capabilities
+- **Custom Title Bar**: Customizable window title bar with tab management
+- **Internationalization**: Support for English and Chinese languages
+- **Device Management**: Save and manage connection profiles
+- **Dark Theme**: Modern dark UI design
 
+## Requirements
 
-Platforms
----------
+- C++11 compatible compiler
+- CMake 3.10 or higher
+- wxWidgets 3.2 or higher
+- libvterm
+- vcpkg (for dependency management)
 
-[![AppVeyor](https://img.shields.io/appveyor/build/wxWidgets/wxWidgets/master?label=AppVeyor&logo=appveyor)](https://ci.appveyor.com/project/wxWidgets/wxwidgets)
-[![Unix (make)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci.yml/badge.svg)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci.yml)
-[![Unix (CMake)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_cmake.yml/badge.svg)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_cmake.yml)
-[![MSW (MSVC)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_msw.yml/badge.svg)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_msw.yml)
-[![MSW (gcc)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_msw_cross.yml/badge.svg)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_msw_cross.yml)
-[![Mac](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_mac.yml/badge.svg)](https://github.com/wxWidgets/wxWidgets/actions/workflows/ci_mac.yml)
-[![OSS-Fuzz](https://oss-fuzz-build-logs.storage.googleapis.com/badges/wxwidgets.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:wxwidgets)
+## Building
 
-This version of wxWidgets supports the following primary platforms:
+### Windows (Visual Studio)
 
-- Windows 7, 8, 10 and 11 (32/64 bit Intel and ARM64).
-- Most Unix variants using the GTK+ toolkit (version 2.6 or newer or 3.x).
-- macOS (10.10 or newer) using Cocoa under both amd64 and ARM platforms.
+```bash
+# Install dependencies using vcpkg
+vcpkg install wxwidgets:x64-windows
 
-All C++11 compilers are supported including but not limited to:
+# Build the project
+mkdir build
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=[vcpkg-root]/scripts/buildsystems/vcpkg.cmake
+cmake --build . --config Release
+```
 
-- Microsoft Visual C++ 2015 or later (up to 2022).
-- g++ 4.8 or later (up to 15), including MinGW/MinGW-64/TDM under Windows.
-- Clang (up to 19/Xcode 16).
+### Linux
 
-Please use [3.2 branch](https://github.com/wxWidgets/wxWidgets/tree/3.2) if
-you must use wxWidgets with a C++98 compiler or support Windows XP.
+```bash
+# Install dependencies
+sudo apt-get install libwxgtk3.0-gtk3-dev libvterm-dev cmake build-essential
 
+# Build the project
+mkdir build
+cd build
+cmake ..
+make
+```
 
-Licence
--------
+### macOS
 
-[wxWidgets licence](https://github.com/wxWidgets/wxWidgets/blob/master/docs/licence.txt)
-is a modified version of LGPL explicitly allowing not distributing the sources
-of an application using the library even in the case of static linking.
+```bash
+# Install dependencies using Homebrew
+brew install wxwidgets libvterm cmake
 
+# Build the project
+mkdir build
+cd build
+cmake ..
+make
+```
 
-Building
---------
+## Usage
 
-For building the library, please see platform-specific documentation under
-`docs/<port>` directory, e.g. here are the instructions for
-[wxGTK](docs/gtk/install.md), [wxMSW](docs/msw/install.md) and
-[wxOSX](docs/osx/install.md).
+1. Run the application
+2. Click the "+" button to add a new terminal connection
+3. Configure SSH connection settings
+4. Connect to your remote server
+5. Use the drawer menu (hamburger icon) to access settings and overflow tabs
 
-If you're building the sources checked out from Git, and not from a released
-version, please see these additional [Git-specific notes](README-GIT.md).
+## Project Structure
 
+- `src/` - Source code files
+- `locales/` - Translation files (.po format)
+- `imgui/` - ImGui library integration
+- `libvterm/` - libvterm terminal emulation library
+- `build/` - Build output directory
 
-Further information
--------------------
+## Configuration
 
-If you are looking for community support, you can get it from
+Settings are saved in `settings.json` in the workspace directory.
 
-- [Mailing Lists](https://www.wxwidgets.org/support/mailing-lists/)
-- [Discussion Forums](https://forums.wxwidgets.org/)
-- [#wxwidgets IRC channel](https://www.wxwidgets.org/support/irc/)
-- [Stack Overflow](https://stackoverflow.com/questions/tagged/wxwidgets)
-  (tag your questions with `wxwidgets`)
-- And you can report bugs at [GitHub](https://github.com/wxWidgets/wxWidgets/issues/new/choose)
+## License
 
-[Commercial support](https://www.wxwidgets.org/support/commercial/) is also
-available.
-
-Finally, keep in mind that wxWidgets is an open source project collaboratively
-developed by its users and your contributions to it are always welcome. Please
-check [our guidelines](.github/CONTRIBUTING.md) if you'd like to do it.
-
-
-Have fun!
-
-The wxWidgets Team.
+See LICENSE file for details.
