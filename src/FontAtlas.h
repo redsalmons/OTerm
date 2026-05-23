@@ -18,7 +18,7 @@ public:
     ~FontAtlas();
     
     bool Initialize(const wxString& fontPath, int fontSize);
-    bool InitializeSystemFont(int fontSize);
+    bool InitializeSystemFont(int fontSize, const wxString& fontName = "");
     
     CharMetrics GetCharMetrics(char32_t charCode) const;
     unsigned int GetTextureID() const;

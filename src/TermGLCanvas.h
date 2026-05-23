@@ -62,6 +62,9 @@ private:
     int m_selection_start_col;
     int m_selection_end_row;
     int m_selection_end_col;
+    
+    // Font size for cell size calculation
+    int m_fontSize;
 
 };
 

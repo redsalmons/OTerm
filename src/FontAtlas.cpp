@@ -20,16 +20,28 @@ FontAtlas::~FontAtlas() {
     }
 }
 
-bool FontAtlas::InitializeSystemFont(int fontSize) {
+bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
     m_fontSize = fontSize;
-    m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
     
-    if (!m_font.IsOk()) {
-        SSH_LOG("FontAtlas: Failed to create font with size " << fontSize);
-        return false;
+    if (fontName.IsEmpty()) {
+        // Use default modern font if no font name specified
+        m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+    } else {
+        // Use specified font name
+        m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false, fontName);
     }
     
-    SSH_LOG("FontAtlas: Font created successfully, size=" << fontSize);
+    if (!m_font.IsOk()) {
+        SSH_LOG("FontAtlas: Failed to create font with name '" << fontName << "' and size " << fontSize);
+        // Fallback to default font
+        m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+        if (!m_font.IsOk()) {
+            SSH_LOG("FontAtlas: Fallback font also failed");
+            return false;
+        }
+    }
+    
+    SSH_LOG("FontAtlas: Font created successfully, name='" << m_font.GetFaceName() << "', size=" << fontSize);
     return GenerateTextureAtlas();
 }
 

@@ -3,6 +3,8 @@
 
 #include <wx/dialog.h>
 #include <wx/choice.h>
+#include <wx/fontpicker.h>
+#include <wx/spinctrl.h>
 
 class SettingsDialog : public wxDialog {
 public:
@@ -11,6 +13,8 @@ public:
 
 private:
     wxChoice* m_languageChoice;
+    wxFontPickerCtrl* m_fontPicker;
+    wxSpinCtrl* m_fontSizeSpin;
     
     void OnOK(wxCommandEvent& event);
     void OnCancel(wxCommandEvent& event);

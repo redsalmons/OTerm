@@ -10,7 +10,7 @@ wxBEGIN_EVENT_TABLE(SettingsDialog, wxDialog)
 wxEND_EVENT_TABLE()
 
 SettingsDialog::SettingsDialog(wxWindow* parent)
-    : wxDialog(parent, wxID_ANY, TranslationHelper::Tr("settings"), wxDefaultPosition, wxSize(400, 200)) {
+    : wxDialog(parent, wxID_ANY, TranslationHelper::Tr("settings"), wxDefaultPosition, wxSize(450, 300)) {
     
     wxPanel* panel = new wxPanel(this);
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
@@ -32,6 +32,27 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     
     languageSizer->Add(m_languageChoice, 1, wxEXPAND | wxALL, 10);
     mainSizer->Add(languageSizer, 0, wxEXPAND);
+    
+    // Font selection
+    wxBoxSizer* fontSizer = new wxBoxSizer(wxHORIZONTAL);
+    fontSizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("font")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 10);
+    
+    // Set current font
+    std::string currentFontName = GlobalConfig::GetFontName();
+    int currentFontSize = GlobalConfig::GetFontSize();
+    wxFont currentFont(currentFontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false, wxString::FromUTF8(currentFontName.c_str()));
+    
+    m_fontPicker = new wxFontPickerCtrl(panel, wxID_ANY, currentFont);
+    fontSizer->Add(m_fontPicker, 1, wxEXPAND | wxALL, 10);
+    mainSizer->Add(fontSizer, 0, wxEXPAND);
+    
+    // Font size
+    wxBoxSizer* fontSizeSizer = new wxBoxSizer(wxHORIZONTAL);
+    fontSizeSizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("fontSize")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 10);
+    
+    m_fontSizeSpin = new wxSpinCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 8, 72, currentFontSize);
+    fontSizeSizer->Add(m_fontSizeSpin, 0, wxALL, 10);
+    mainSizer->Add(fontSizeSizer, 0, wxEXPAND);
     
     // Buttons
     wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -55,6 +76,12 @@ void SettingsDialog::OnOK(wxCommandEvent& event) {
     
     // Save language to config
     GlobalConfig::SetLanguage(newLang);
+    
+    // Save font settings
+    wxFont selectedFont = m_fontPicker->GetSelectedFont();
+    GlobalConfig::SetFontName(selectedFont.GetFaceName().ToStdString());
+    GlobalConfig::SetFontSize(m_fontSizeSpin->GetValue());
+    
     GlobalConfig::SaveSettings();
     
     // Reload translations

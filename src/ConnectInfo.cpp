@@ -4,6 +4,7 @@
 #include "SSHManager.h"
 #include "FileTransferTask.h"
 #include "TranslationHelper.h"
+#include "GlobalConfig.h"
 #include <wx/display.h>
 #include <nlohmann/json.hpp>
 
@@ -75,18 +76,36 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     }
     SSH_LOG("ConnectInfo: TermGLCanvas cast successful");
 
-    // Calculate initial vterm size based on TermGLCanvas size
+    // Calculate initial vterm size based on TermGLCanvas size and configured font
     int initialRows = 30;
     int initialCols = 80;
     if (m_termCanvas) {
         wxSize canvasSize = m_termCanvas->GetSize();
-        int cellWidth = 12;
-        int cellHeight = 24;
+        
+        // Get configured font size
+        int fontSize = GlobalConfig::GetFontSize();
+        if (fontSize == 0) fontSize = 12; // Default if not configured
+        
+        // Scale for terminal rendering (same as in TermGLCanvas)
+        int terminalFontSize = fontSize * 2;
+        if (terminalFontSize < 12) terminalFontSize = 12;
+        if (terminalFontSize > 72) terminalFontSize = 72;
+        
+        // Calculate cell size based on font size
+        int cellWidth = terminalFontSize / 2;
+        int cellHeight = terminalFontSize;
+        
+        // Ensure minimum cell size
+        if (cellWidth < 6) cellWidth = 6;
+        if (cellHeight < 12) cellHeight = 12;
+        
         initialRows = canvasSize.GetHeight() / cellHeight;
         initialCols = canvasSize.GetWidth() / cellWidth;
         if (initialRows < 10) initialRows = 10;
         if (initialCols < 40) initialCols = 40;
         SSH_LOG("ConnectInfo: Canvas size: " << canvasSize.GetWidth() << "x" << canvasSize.GetHeight()
+                << ", Font size: " << fontSize << ", Terminal font size: " << terminalFontSize
+                << ", Cell size: " << cellWidth << "x" << cellHeight
                 << ", Initial vterm size calculated: " << initialRows << "x" << initialCols);
     }
 
@@ -364,9 +383,22 @@ void ConnectInfo::OnSize(wxSizeEvent& event) {
     if (m_termCanvas && m_terminalThread) {
         wxSize size = m_termCanvas->GetSize();
         
-        // Calculate rows and columns based on cell size
-        int cellWidth = 12;
-        int cellHeight = 24;
+        // Get configured font size
+        int fontSize = GlobalConfig::GetFontSize();
+        if (fontSize == 0) fontSize = 12; // Default if not configured
+        
+        // Scale for terminal rendering (same as in TermGLCanvas)
+        int terminalFontSize = fontSize * 2;
+        if (terminalFontSize < 12) terminalFontSize = 12;
+        if (terminalFontSize > 72) terminalFontSize = 72;
+        
+        // Calculate cell size based on font size
+        int cellWidth = terminalFontSize / 2;
+        int cellHeight = terminalFontSize;
+        
+        // Ensure minimum cell size
+        if (cellWidth < 6) cellWidth = 6;
+        if (cellHeight < 12) cellHeight = 12;
         
         int availableHeight = size.GetHeight();
         if (availableHeight < 100) availableHeight = 100;

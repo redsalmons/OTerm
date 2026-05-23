@@ -121,6 +121,12 @@ msgstr "Chinese"
 msgid "english"
 msgstr "English"
 
+msgid "font"
+msgstr "Font"
+
+msgid "fontSize"
+msgstr "Font Size"
+
 # CustomTitleBar
 msgid "oceanTerm"
 msgstr "OTerm"

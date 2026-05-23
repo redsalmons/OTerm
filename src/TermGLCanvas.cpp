@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <GL/gl.h>
 #include "SSHManager.h"
+#include "GlobalConfig.h"
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -21,7 +22,8 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_scroll_offset(0), 
       m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f),
       m_selecting(false), m_selection_start_row(0), m_selection_start_col(0),
-      m_selection_end_row(0), m_selection_end_col(0)
+      m_selection_end_row(0), m_selection_end_col(0),
+      m_fontSize(0)
 {
     // Calculate DPI scale
     if (GetHandle()) {
@@ -73,10 +75,20 @@ void TermGLCanvas::InitializeGL() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     
-    // Create font atlas
+    // Create font atlas with configured font and size
     m_fontAtlas = new FontAtlas();
-    if (!m_fontAtlas->InitializeSystemFont(48)) {
-        SSH_LOG("Failed to initialize font atlas");
+    std::string fontName = GlobalConfig::GetFontName();
+    int fontSize = GlobalConfig::GetFontSize();
+    
+    // Scale the configured font size for terminal rendering (multiply by 2 for better visibility)
+    int terminalFontSize = fontSize * 2;
+    if (terminalFontSize < 12) terminalFontSize = 12;
+    if (terminalFontSize > 72) terminalFontSize = 72;
+    
+    m_fontSize = terminalFontSize;
+    
+    if (!m_fontAtlas->InitializeSystemFont(terminalFontSize, wxString::FromUTF8(fontName.c_str()))) {
+        SSH_LOG("Failed to initialize font atlas with configured font");
         return;
     }
     
@@ -155,9 +167,13 @@ void TermGLCanvas::Render() {
     const float margin_x = 8.0f;
     const float margin_y = 4.0f;
     
-    // Cell size
-    const float cell_width = 12.0f;
-    const float cell_height = 24.0f;
+    // Cell size based on font size
+    float cell_width = static_cast<float>(m_fontSize) / 2.0f;
+    float cell_height = static_cast<float>(m_fontSize);
+    
+    // Ensure minimum cell size
+    if (cell_width < 6.0f) cell_width = 6.0f;
+    if (cell_height < 12.0f) cell_height = 12.0f;
     
     // 1. 绘制背景色 (不带纹理)
     glDisable(GL_TEXTURE_2D);

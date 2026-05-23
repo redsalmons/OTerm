@@ -121,6 +121,12 @@ msgstr "中文"
 msgid "english"
 msgstr "英文"
 
+msgid "font"
+msgstr "字体"
+
+msgid "fontSize"
+msgstr "字号"
+
 # CustomTitleBar
 msgid "oceanTerm"
 msgstr "OTerm"
