@@ -1,0 +1,154 @@
+# Chinese translation for OceanTerm
+# Copyright (C) 2026
+# This file is distributed under the same license as the OceanTerm package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: OceanTerm 1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-23 13:00+0800\n"
+"PO-Revision-Date: 2026-05-23 13:00+0800\n"
+"Last-Translator: \n"
+"Language-Team: Chinese\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# FileTransferDialog
+msgid "localDirectory"
+msgstr "本地目录: "
+
+msgid "remoteDirectory"
+msgstr "远程目录: "
+
+msgid "name"
+msgstr "名称"
+
+msgid "size"
+msgstr "大小"
+
+msgid "changed"
+msgstr "修改时间"
+
+msgid "action"
+msgstr "操作"
+
+msgid "local"
+msgstr "本地"
+
+msgid "remote"
+msgstr "远程"
+
+msgid "progress"
+msgstr "进度"
+
+msgid "status"
+msgstr "状态"
+
+msgid "result"
+msgstr "结果"
+
+# ConnectionDialog
+msgid "deviceName"
+msgstr "设备名称:"
+
+msgid "username"
+msgstr "登录名:"
+
+msgid "hostAddress"
+msgstr "设备地址:"
+
+msgid "port"
+msgstr "端口:"
+
+msgid "deviceGroup"
+msgstr "设备分组:"
+
+msgid "authMethod"
+msgstr "认证方式:"
+
+msgid "passwordKey"
+msgstr "密码/密钥:"
+
+msgid "browse"
+msgstr "浏览..."
+
+msgid "connect"
+msgstr "连接"
+
+msgid "save"
+msgstr "保存"
+
+msgid "cancel"
+msgstr "取消"
+
+msgid "password"
+msgstr "密码"
+
+msgid "key"
+msgstr "密钥"
+
+msgid "selectKeyFile"
+msgstr "选择密钥文件"
+
+msgid "devices"
+msgstr "设备"
+
+msgid "deviceList"
+msgstr "设备列表"
+
+msgid "fileTransfer"
+msgstr "文件传输"
+
+msgid "download"
+msgstr "下载"
+
+msgid "upload"
+msgstr "上传"
+
+msgid "settings"
+msgstr "设置"
+
+msgid "language"
+msgstr "语言"
+
+msgid "chinese"
+msgstr "中文"
+
+msgid "english"
+msgstr "英文"
+
+# CustomTitleBar
+msgid "oceanTerm"
+msgstr "OTerm"
+
+msgid "home"
+msgstr "首页"
+
+# Task status
+msgid "pending"
+msgstr "等待中"
+
+msgid "waiting"
+msgstr "等待中"
+
+msgid "processing"
+msgstr "处理中"
+
+msgid "transferring"
+msgstr "传输中"
+
+msgid "completed"
+msgstr "已完成"
+
+msgid "failed"
+msgstr "失败"
+
+msgid "success"
+msgstr "成功"
+
+msgid "transferFailed"
+msgstr "传输失败"

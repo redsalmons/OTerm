@@ -1,0 +1,154 @@
+# English translation for OceanTerm
+# Copyright (C) 2026
+# This file is distributed under the same license as the OceanTerm package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: OceanTerm 1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-23 13:00+0800\n"
+"PO-Revision-Date: 2026-05-23 13:00+0800\n"
+"Last-Translator: \n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# FileTransferDialog
+msgid "localDirectory"
+msgstr "Local Directory: "
+
+msgid "remoteDirectory"
+msgstr "Remote Directory: "
+
+msgid "name"
+msgstr "Name"
+
+msgid "size"
+msgstr "Size"
+
+msgid "changed"
+msgstr "Changed"
+
+msgid "action"
+msgstr "Action"
+
+msgid "local"
+msgstr "Local"
+
+msgid "remote"
+msgstr "Remote"
+
+msgid "progress"
+msgstr "Progress"
+
+msgid "status"
+msgstr "Status"
+
+msgid "result"
+msgstr "Result"
+
+# ConnectionDialog
+msgid "deviceName"
+msgstr "Device Name:"
+
+msgid "username"
+msgstr "Username:"
+
+msgid "hostAddress"
+msgstr "Host Address:"
+
+msgid "port"
+msgstr "Port:"
+
+msgid "deviceGroup"
+msgstr "Device Group:"
+
+msgid "authMethod"
+msgstr "Auth Method:"
+
+msgid "passwordKey"
+msgstr "Password/Key:"
+
+msgid "browse"
+msgstr "Browse..."
+
+msgid "connect"
+msgstr "Connect"
+
+msgid "save"
+msgstr "Save"
+
+msgid "cancel"
+msgstr "Cancel"
+
+msgid "password"
+msgstr "Password"
+
+msgid "key"
+msgstr "Key"
+
+msgid "selectKeyFile"
+msgstr "Select Key File"
+
+msgid "devices"
+msgstr "Devices"
+
+msgid "deviceList"
+msgstr "Device List"
+
+msgid "fileTransfer"
+msgstr "File Transfer"
+
+msgid "download"
+msgstr "Download"
+
+msgid "upload"
+msgstr "Upload"
+
+msgid "settings"
+msgstr "Settings"
+
+msgid "language"
+msgstr "Language"
+
+msgid "chinese"
+msgstr "Chinese"
+
+msgid "english"
+msgstr "English"
+
+# CustomTitleBar
+msgid "oceanTerm"
+msgstr "OTerm"
+
+msgid "home"
+msgstr "Home"
+
+# Task status
+msgid "pending"
+msgstr "Pending"
+
+msgid "waiting"
+msgstr "Waiting"
+
+msgid "processing"
+msgstr "Processing"
+
+msgid "transferring"
+msgstr "Transferring"
+
+msgid "completed"
+msgstr "Completed"
+
+msgid "failed"
+msgstr "Failed"
+
+msgid "success"
+msgstr "Success"
+
+msgid "transferFailed"
+msgstr "Transfer Failed"

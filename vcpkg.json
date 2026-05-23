@@ -1,0 +1,10 @@
+{
+  "name": "oceanterm",
+  "version": "1.0.0",
+  "dependencies": [
+    "nlohmann-json",
+    "libuv",
+    "libssh2",
+    "wxwidgets"
+  ]
+}

@@ -1,0 +1,85 @@
+# Build directories
+build/
+vcpkg_installed/
+
+# Log directories
+logs/
+
+# Data directories
+data/
+resource/
+
+# macOS system files
+.DS_Store
+
+# ImGui configuration
+imgui.ini
+
+# Backup and archive files
+*.zip
+*.tar
+*.gz
+backup_final.sh
+
+# Test files
+basic_test.cpp
+
+# Autoconf/automake generated files
+Makefile.in
+aclocal.m4
+autoconf_inc.m4
+config.guess
+config.sub
+install-sh
+mkinstalldirs
+setup.h.in
+setup.h_vms
+wx-config.in
+wxwin.m4
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Visual Studio generated files
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.dll
+*.suo
+*.user
+*.sdf
+*.opensdf
+*.vcxproj.user
+*.log
+*.ipch
+*.vs
+
+# Compiled Object files
+*.o
+*.lo
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.a
+*.la
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
