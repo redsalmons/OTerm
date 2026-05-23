@@ -132,26 +132,19 @@ void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int 
     int charWidth = extent.x;
     int charHeight = extent.y;
     
-    // DEBUG: Log first few characters
-    static int loggedCount = 0;
-    if (loggedCount < 3) {
-        SSH_LOG("FontAtlas: Char '" << text.ToStdString() << "' extent=" << charWidth << "x" << charHeight 
-                << " pos=(" << x << "," << y << ")");
-        loggedCount++;
-    }
+    // Draw character at top of cell with padding
+    dc.DrawText(text, x + 2, y + 2);
     
-    // Draw character
-    dc.DrawText(text, x + 2, y + 2); // 恢复 padding
-    
-    // Store metrics (使用实际的字符尺寸)
+    // Store metrics with padding to prevent texture bleeding
     CharMetrics metrics;
-    metrics.u = static_cast<float>(x) / m_textureWidth;
-    metrics.v = static_cast<float>(y) / m_textureHeight;
-    metrics.w = static_cast<float>(charWidth) / m_textureWidth; // 使用实际宽度
-    metrics.h = static_cast<float>(charHeight) / m_textureHeight; // 使用实际高度
+    float padding = 1.0f / m_textureWidth; // 1 pixel padding in texture coordinates
+    metrics.u = (static_cast<float>(x) + 1.0f) / m_textureWidth; // Add 1 pixel padding
+    metrics.v = (static_cast<float>(y) + 1.0f) / m_textureHeight; // Add 1 pixel padding
+    metrics.w = (static_cast<float>(charWidth) - 2.0f) / m_textureWidth; // Subtract 2 pixels from width
+    metrics.h = (static_cast<float>(charHeight) - 2.0f) / m_textureHeight; // Subtract 2 pixels from height
     metrics.advance = static_cast<float>(charWidth);
     metrics.bearingX = 0.0f;
-    metrics.bearingY = static_cast<float>(charHeight);
+    metrics.bearingY = 0.0f;
     
     m_charMetrics[charCode] = metrics;
 }

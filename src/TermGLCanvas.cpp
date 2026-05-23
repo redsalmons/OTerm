@@ -143,9 +143,9 @@ void TermGLCanvas::Render() {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     
-    // Margin offset: 8px left/right, 4px top/bottom (DPI-scaled)
-    const float margin_x = 8.0f * m_dpiScale;
-    const float margin_y = 4.0f * m_dpiScale;
+    // Margin offset: 8px left/right, 4px top/bottom (not DPI-scaled for rendering)
+    const float margin_x = 8.0f;
+    const float margin_y = 4.0f;
     
     // 1. 绘制背景色 (不带纹理)
     glDisable(GL_TEXTURE_2D);
@@ -178,25 +178,25 @@ void TermGLCanvas::Render() {
         
         for (const auto& [key, cell] : m_screen_cells) {
             if (cell.char_code < 32 || cell.char_code > 126) continue;
-            
+
             float x = static_cast<int>(cell.cell_x) * 12.0f + margin_x;
             float y = static_cast<int>(cell.cell_y) * 24.0f + margin_y;
-            
+
             CharMetrics metrics = m_fontAtlas->GetCharMetrics(cell.char_code);
             if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) continue;
-            
+
             // 直接使用正确的 metrics 值
             float test_u1 = metrics.u;
             float test_v1 = metrics.v;
             float test_u2 = metrics.u + metrics.w;
             float test_v2 = metrics.v + metrics.h;
-            
+
             // 使用真实的前景色
             uint8_t fg_r = (cell.fg_color >> 24) & 0xFF;
             uint8_t fg_g = (cell.fg_color >> 16) & 0xFF;
             uint8_t fg_b = (cell.fg_color >> 8) & 0xFF;
             glColor3f(fg_r / 255.0f, fg_g / 255.0f, fg_b / 255.0f);
-            
+
             glBegin(GL_QUADS);
                 glTexCoord2f(test_u1, test_v1); glVertex2f(x, y);
                 glTexCoord2f(test_u2, test_v1); glVertex2f(x + 12.0f, y);
@@ -254,12 +254,12 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
     // Update cached cell height when size changes
     m_cached_cell_height = 24; // Fixed for now
     
-    // Update OpenGL viewport with 8px left/right, 4px top/bottom margin (DPI-scaled)
+    // Update OpenGL viewport with 8px left/right, 4px top/bottom margin
     if (m_glInitialized && m_glContext) {
         m_glContext->SetCurrent(*this);
         wxSize size = GetSize();
-        const int margin_x = static_cast<int>(8.0f * m_dpiScale);
-        const int margin_y = static_cast<int>(4.0f * m_dpiScale);
+        const int margin_x = 8;
+        const int margin_y = 4;
         glViewport(margin_x, margin_y, size.GetWidth() - margin_x * 2, size.GetHeight() - margin_y * 2);
     }
     

@@ -369,8 +369,12 @@ void SSHManager::request_shell() {
         ssh_state_ = SSH_READY;
         // Don't stop polling - keep it active for data reading in READY state
 
-        // Don't trigger initial resize callback - vterm is already initialized with correct size
-        // The resize callback is only needed when the user explicitly resizes the terminal
+        // Trigger resize callback to send initial terminal size to SSH
+        // This ensures vi and other applications receive the correct terminal size
+        if (resize_callback_) {
+            SSH_LOG("SSH connection ready, triggering resize callback to send terminal size");
+            resize_callback_(-1, -1); // Special values to indicate initial resize
+        }
 
         SSH_LOG("SSH connection ready, polling continues for data reading");
     } else if (shell_result == LIBSSH2_ERROR_EAGAIN) {

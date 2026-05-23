@@ -182,7 +182,10 @@ wxThread::ExitCode TerminalThread::Entry() {
                 
                 // Update SSH terminal size
                 if (m_sshManager.is_ready()) {
+                    SSH_LOG("TerminalThread: Calling resize_terminal with " << new_rows << "x" << new_cols);
                     m_sshManager.resize_terminal(new_rows, new_cols);
+                } else {
+                    SSH_LOG("TerminalThread: SSH not ready, skipping resize_terminal");
                 }
                 
                 m_rows = new_rows;
@@ -256,6 +259,15 @@ void TerminalThread::setup_callbacks() {
     // SSH data callback -> feed to VTerm
     m_sshManager.set_data_callback([this](const char* data, int length) {
         m_vtermManager.write_input(data, length);
+    });
+    
+    // SSH resize callback -> send terminal size to SSH
+    m_sshManager.set_resize_callback([this](int rows, int cols) {
+        if (rows == -1 && cols == -1) {
+            // Initial resize request from SSH ready event
+            SSH_LOG("TerminalThread: Initial resize request from SSH ready, sending terminal size: " << m_rows << "x" << m_cols);
+            m_sshManager.resize_terminal(m_rows, m_cols);
+        }
     });
     
     // VTerm damage callback -> update back buffer

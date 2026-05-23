@@ -83,3 +83,7 @@ Makefile
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+
+imgui
+libvterm

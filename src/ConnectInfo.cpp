@@ -86,7 +86,8 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         initialCols = canvasSize.GetWidth() / cellWidth;
         if (initialRows < 10) initialRows = 10;
         if (initialCols < 40) initialCols = 40;
-        SSH_LOG("ConnectInfo: Initial vterm size calculated: " << initialRows << "x" << initialCols);
+        SSH_LOG("ConnectInfo: Canvas size: " << canvasSize.GetWidth() << "x" << canvasSize.GetHeight()
+                << ", Initial vterm size calculated: " << initialRows << "x" << initialCols);
     }
 
     // Create TerminalThread
