@@ -158,3 +158,6 @@ msgstr "成功"
 
 msgid "transferFailed"
 msgstr "传输失败"
+
+msgid "welcomeSlogan"
+msgstr "依然我爱你"

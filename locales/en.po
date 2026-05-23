@@ -158,3 +158,6 @@ msgstr "Success"
 
 msgid "transferFailed"
 msgstr "Transfer Failed"
+
+msgid "welcomeSlogan"
+msgstr "And yet, love remains"
