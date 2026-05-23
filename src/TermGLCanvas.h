@@ -25,6 +25,7 @@ public:
     
     typedef std::function<void(int lines)> ScrollCallback;
     void SetScrollCallback(ScrollCallback callback) { scroll_callback_ = callback; }
+    
 
 private:
     void OnPaint(wxPaintEvent& event);
@@ -32,8 +33,13 @@ private:
     void OnKeyDown(wxKeyEvent& event);
     void OnChar(wxKeyEvent& event);
     void OnMouseWheel(wxMouseEvent& event);
+    void OnMouseLeftDown(wxMouseEvent& event);
+    void OnMouseLeftUp(wxMouseEvent& event);
+    void OnMouseMove(wxMouseEvent& event);
+    void OnMouseRightDown(wxMouseEvent& event);
     void InitializeGL();
     void Render();
+    void CopySelectionToClipboard();
 
     wxGLContext* m_glContext;
     FontAtlas* m_fontAtlas;
@@ -49,6 +55,14 @@ private:
     ScrollCallback scroll_callback_;
     bool m_glInitialized;
     float m_dpiScale;
+
+    // Selection state
+    bool m_selecting;
+    int m_selection_start_row;
+    int m_selection_start_col;
+    int m_selection_end_row;
+    int m_selection_end_col;
+
 };
 
 #endif

@@ -1,8 +1,10 @@
 #include "TermGLCanvas.h"
 #include <wx/wx.h>
 #include <wx/display.h>
+#include <wx/clipbrd.h>
 #include <iostream>
 #include <iomanip>
+#include <algorithm>
 #include <GL/gl.h>
 #include "SSHManager.h"
 
@@ -17,7 +19,9 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_fontAtlas(nullptr),
       m_testTextureID(0),
       m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_scroll_offset(0), 
-      m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f)
+      m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f),
+      m_selecting(false), m_selection_start_row(0), m_selection_start_col(0),
+      m_selection_end_row(0), m_selection_end_col(0)
 {
     // Calculate DPI scale
     if (GetHandle()) {
@@ -37,6 +41,10 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
     Bind(wxEVT_KEY_DOWN, &TermGLCanvas::OnKeyDown, this);
     Bind(wxEVT_CHAR, &TermGLCanvas::OnChar, this);
     Bind(wxEVT_MOUSEWHEEL, &TermGLCanvas::OnMouseWheel, this);
+    Bind(wxEVT_LEFT_DOWN, &TermGLCanvas::OnMouseLeftDown, this);
+    Bind(wxEVT_LEFT_UP, &TermGLCanvas::OnMouseLeftUp, this);
+    Bind(wxEVT_MOTION, &TermGLCanvas::OnMouseMove, this);
+    Bind(wxEVT_RIGHT_DOWN, &TermGLCanvas::OnMouseRightDown, this);
     
     SSH_LOG("TermGLCanvas constructed, IsShown: " << IsShown() << ", IsEnabled: " << IsEnabled() << ", DPI scale: " << m_dpiScale);
 }
@@ -147,13 +155,17 @@ void TermGLCanvas::Render() {
     const float margin_x = 8.0f;
     const float margin_y = 4.0f;
     
+    // Cell size
+    const float cell_width = 12.0f;
+    const float cell_height = 24.0f;
+    
     // 1. 绘制背景色 (不带纹理)
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
     
     for (const auto& [key, cell] : m_screen_cells) {
-        float x = static_cast<int>(cell.cell_x) * 12.0f + margin_x;
-        float y = static_cast<int>(cell.cell_y) * 24.0f + margin_y;
+        float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
+        float y = static_cast<int>(cell.cell_y) * cell_height + margin_y;
         
         uint8_t bg_r = (cell.bg_color >> 24) & 0xFF;
         uint8_t bg_g = (cell.bg_color >> 16) & 0xFF;
@@ -162,10 +174,38 @@ void TermGLCanvas::Render() {
         glColor3f(bg_r / 255.0f, bg_g / 255.0f, bg_b / 255.0f);
         glBegin(GL_QUADS);
             glVertex2f(x, y);
-            glVertex2f(x + 12.0f, y);
-            glVertex2f(x + 12.0f, y + 24.0f);
-            glVertex2f(x, y + 24.0f);
+            glVertex2f(x + cell_width, y);
+            glVertex2f(x + cell_width, y + cell_height);
+            glVertex2f(x, y + cell_height);
         glEnd();
+    }
+    
+    // 1.5 绘制选择高亮
+    if (m_selecting || (m_selection_start_row != m_selection_end_row || m_selection_start_col != m_selection_end_col)) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0.2f, 0.4f, 0.8f, 0.5f); // Darker blue with more transparency
+        
+        int start_row = std::min(m_selection_start_row, m_selection_end_row);
+        int end_row = std::max(m_selection_start_row, m_selection_end_row);
+        int start_col = std::min(m_selection_start_col, m_selection_end_col);
+        int end_col = std::max(m_selection_start_col, m_selection_end_col);
+        
+        for (int row = start_row; row <= end_row; row++) {
+            for (int col = start_col; col <= end_col; col++) {
+                float x = col * cell_width + margin_x;
+                float y = row * cell_height + margin_y;
+                
+                glBegin(GL_QUADS);
+                    glVertex2f(x, y);
+                    glVertex2f(x + cell_width, y);
+                    glVertex2f(x + cell_width, y + cell_height);
+                    glVertex2f(x, y + cell_height);
+                glEnd();
+            }
+        }
+        
+        glDisable(GL_BLEND);
     }
     
     // 2. 绘制前景色文字 (带纹理映射)
@@ -179,8 +219,8 @@ void TermGLCanvas::Render() {
         for (const auto& [key, cell] : m_screen_cells) {
             if (cell.char_code < 32 || cell.char_code > 126) continue;
 
-            float x = static_cast<int>(cell.cell_x) * 12.0f + margin_x;
-            float y = static_cast<int>(cell.cell_y) * 24.0f + margin_y;
+            float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
+            float y = static_cast<int>(cell.cell_y) * cell_height + margin_y;
 
             CharMetrics metrics = m_fontAtlas->GetCharMetrics(cell.char_code);
             if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) continue;
@@ -199,9 +239,9 @@ void TermGLCanvas::Render() {
 
             glBegin(GL_QUADS);
                 glTexCoord2f(test_u1, test_v1); glVertex2f(x, y);
-                glTexCoord2f(test_u2, test_v1); glVertex2f(x + 12.0f, y);
-                glTexCoord2f(test_u2, test_v2); glVertex2f(x + 12.0f, y + 24.0f);
-                glTexCoord2f(test_u1, test_v2); glVertex2f(x, y + 24.0f);
+                glTexCoord2f(test_u2, test_v1); glVertex2f(x + cell_width, y);
+                glTexCoord2f(test_u2, test_v2); glVertex2f(x + cell_width, y + cell_height);
+                glTexCoord2f(test_u1, test_v2); glVertex2f(x, y + cell_height);
             glEnd();
         }
         
@@ -212,16 +252,16 @@ void TermGLCanvas::Render() {
     
     // 3. 绘制光标
     if (m_cursor_visible) {
-        float cursor_x = m_cursor_col * 12.0f + margin_x;
-        float cursor_y = m_cursor_row * 24.0f + margin_y;
+        float cursor_x = m_cursor_col * cell_width + margin_x;
+        float cursor_y = m_cursor_row * cell_height + margin_y;
         glColor4f(1.0f, 1.0f, 1.0f, 0.5f);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBegin(GL_QUADS);
             glVertex2f(cursor_x, cursor_y);
-            glVertex2f(cursor_x + 12.0f, cursor_y);
-            glVertex2f(cursor_x + 12.0f, cursor_y + 24.0f);
-            glVertex2f(cursor_x, cursor_y + 24.0f);
+            glVertex2f(cursor_x + cell_width, cursor_y);
+            glVertex2f(cursor_x + cell_width, cursor_y + cell_height);
+            glVertex2f(cursor_x, cursor_y + cell_height);
         glEnd();
         glDisable(GL_BLEND);
     }
@@ -268,6 +308,12 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 }
 
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
+    // Check for Ctrl+C to copy selection
+    if (event.ControlDown() && event.GetKeyCode() == 'C') {
+        CopySelectionToClipboard();
+        return;
+    }
+    
     // Let the system handle special keys
     event.Skip();
 }
@@ -305,6 +351,7 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
     int delta = event.GetWheelRotation();
     int lines = delta / event.GetWheelDelta();
     
+    // Normal scrolling
     SSH_LOG("TermGLCanvas::OnMouseWheel: delta=" << delta << ", lines=" << lines);
     
     // Call scroll callback if set
@@ -313,5 +360,123 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
     }
     
     Refresh();
+    
     event.Skip();
+}
+
+void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
+    wxPoint pos = event.GetPosition();
+    const float margin_x = 8.0f;
+    const float margin_y = 4.0f;
+    
+    // Convert pixel position to cell coordinates
+    int col = static_cast<int>((pos.x - margin_x) / 12.0f);
+    int row = static_cast<int>((pos.y - margin_y) / 24.0f);
+    
+    m_selecting = true;
+    m_selection_start_row = row;
+    m_selection_start_col = col;
+    m_selection_end_row = row;
+    m_selection_end_col = col;
+    
+    CaptureMouse();
+    Refresh();
+    event.Skip();
+}
+
+void TermGLCanvas::OnMouseLeftUp(wxMouseEvent& event) {
+    if (m_selecting) {
+        m_selecting = false;
+        ReleaseMouse();
+        Refresh();
+    }
+    event.Skip();
+}
+
+void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
+    if (m_selecting && event.LeftIsDown()) {
+        wxPoint pos = event.GetPosition();
+        const float margin_x = 8.0f;
+        const float margin_y = 4.0f;
+        
+        // Convert pixel position to cell coordinates
+        int col = static_cast<int>((pos.x - margin_x) / 12.0f);
+        int row = static_cast<int>((pos.y - margin_y) / 24.0f);
+        
+        m_selection_end_row = row;
+        m_selection_end_col = col;
+        
+        Refresh();
+    }
+    event.Skip();
+}
+
+void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
+    // Copy selection to clipboard on right click
+    SSH_LOG("OnMouseRightDown called");
+    CopySelectionToClipboard();
+    event.Skip();
+}
+
+void TermGLCanvas::CopySelectionToClipboard() {
+    SSH_LOG("CopySelectionToClipboard called");
+    SSH_LOG("Selection: start(" << m_selection_start_row << "," << m_selection_start_col 
+            << ") end(" << m_selection_end_row << "," << m_selection_end_col << ")");
+    
+    if (m_selection_start_row == m_selection_end_row && 
+        m_selection_start_col == m_selection_end_col) {
+        SSH_LOG("No selection, skipping copy");
+        return; // No selection
+    }
+    
+    // Determine selection bounds
+    int start_row = std::min(m_selection_start_row, m_selection_end_row);
+    int end_row = std::max(m_selection_start_row, m_selection_end_row);
+    int start_col = std::min(m_selection_start_col, m_selection_end_col);
+    int end_col = std::max(m_selection_start_col, m_selection_end_col);
+    
+    SSH_LOG("Selection bounds: rows " << start_row << "-" << end_row << ", cols " << start_col << "-" << end_col);
+    
+    // Build selected text
+    wxString selected_text;
+    
+    for (int row = start_row; row <= end_row; row++) {
+        for (int col = start_col; col <= end_col; col++) {
+            std::pair<int, int> key = {col, row};
+            auto it = m_screen_cells.find(key);
+            if (it != m_screen_cells.end()) {
+                char c = static_cast<char>(it->second.char_code);
+                if (c >= 32 && c <= 126) {
+                    selected_text += c;
+                } else {
+                    selected_text += ' ';
+                }
+            } else {
+                selected_text += ' ';
+            }
+        }
+        if (row < end_row) {
+            selected_text += '\n';
+        }
+    }
+    
+    SSH_LOG("Selected text: '" << selected_text << "'");
+    
+    // Copy to clipboard
+    if (wxTheClipboard->Open()) {
+        SSH_LOG("Clipboard opened successfully");
+        wxTheClipboard->SetData(new wxTextDataObject(selected_text));
+        wxTheClipboard->Close();
+        SSH_LOG("Copied selection to clipboard: " << selected_text.length() << " characters");
+    } else {
+        SSH_LOG("Failed to open clipboard");
+    }
+    
+    // Clear selection after copy
+    m_selecting = false;
+    m_selection_start_row = 0;
+    m_selection_start_col = 0;
+    m_selection_end_row = 0;
+    m_selection_end_col = 0;
+    Refresh();
 }
