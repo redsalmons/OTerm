@@ -78,6 +78,7 @@ public:
     
     // Reset scroll to bottom (thread-safe, called from UI thread)
     void ResetScrollToBottom();
+    void ClearUIHandler();
     
 protected:
     virtual ExitCode Entry() override;

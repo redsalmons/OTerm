@@ -434,8 +434,9 @@ void SSHManager::start_polling() {
 
     if (uv_poll_start(poll_handle_, UV_READABLE | UV_WRITABLE, on_poll_event) != 0) {
         SSH_ERR("Failed to start polling");
-        uv_close((uv_handle_t*)poll_handle_, nullptr);
-        delete poll_handle_;
+        uv_close((uv_handle_t*)poll_handle_, [](uv_handle_t* handle) {
+            delete reinterpret_cast<uv_poll_t*>(handle);
+        });
         poll_handle_ = nullptr;
         return;
     }
@@ -450,8 +451,11 @@ void SSHManager::stop_polling() {
     }
 
     uv_poll_stop(poll_handle_);
-    uv_close((uv_handle_t*)poll_handle_, nullptr);
-    delete poll_handle_;
+    if (!uv_is_closing((uv_handle_t*)poll_handle_)) {
+        uv_close((uv_handle_t*)poll_handle_, [](uv_handle_t* handle) {
+            delete reinterpret_cast<uv_poll_t*>(handle);
+        });
+    }
     poll_handle_ = nullptr;
     poll_active_ = false;
     SSH_LOG("Stopped polling socket");

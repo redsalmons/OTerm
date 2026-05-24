@@ -355,6 +355,8 @@ void TerminalThread::cleanup() {
     m_vtermManager.cleanup();
     
     // Close libuv loop
+    while (uv_run(&m_loop, UV_RUN_NOWAIT) != 0) {
+    }
     uv_loop_close(&m_loop);
     
     // Notify UI thread that thread is exiting

@@ -1,7 +1,18 @@
 #include "SSHFileThread.h"
 #include <wx/arrstr.h>
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#define closesocket close
+#define WSACleanup() ((void)0)
+#define WSAStartup(version, data) 0
+#define MAKEWORD(a, b) 0
+typedef int WSADATA;
+#endif
 #include "SSHManager.h"
 
 #ifndef LIBSSH2_SOCKET

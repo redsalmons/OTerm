@@ -5,7 +5,11 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#else
 #include <GL/gl.h>
+#endif
 #include "SSHManager.h"
 #include "GlobalConfig.h"
 

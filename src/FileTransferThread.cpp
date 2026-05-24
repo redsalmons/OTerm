@@ -106,10 +106,18 @@ bool FileTransferThread::ConnectSSH() {
     libssh2_session_set_blocking(m_sshSession, 0);
     
     // Perform handshake
+#ifdef _WIN32
     rc = libssh2_session_handshake(m_sshSession, static_cast<int>(reinterpret_cast<uintptr_t>(sock)));
+#else
+    rc = libssh2_session_handshake(m_sshSession, static_cast<int>(sock));
+#endif
     while (rc == LIBSSH2_ERROR_EAGAIN) {
         uv_run(&m_loop, UV_RUN_ONCE);
+#ifdef _WIN32
         rc = libssh2_session_handshake(m_sshSession, static_cast<int>(reinterpret_cast<uintptr_t>(sock)));
+#else
+        rc = libssh2_session_handshake(m_sshSession, static_cast<int>(sock));
+#endif
     }
     
     if (rc != 0) {

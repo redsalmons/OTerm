@@ -13,6 +13,7 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook)
     
     // Calculate title bar height based on DPI scale
     double dpiScale = 1.0;
+#ifdef _WIN32
     if (GetHandle()) {
         dpiScale = GetDPIScaleFactor();
     } else {
@@ -25,6 +26,7 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook)
         }
     }
     if (dpiScale <= 0.0) dpiScale = 1.0;
+#endif
     
     int baseHeight = 50;
     int scaledHeight = static_cast<int>(baseHeight * dpiScale);
@@ -102,7 +104,7 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook)
 
 void CustomTitleBar::UpdateMaxTabContainerWidth() {
     int totalWidth = GetClientSize().GetWidth();
-    int titleWidth = m_titleText->GetSize().GetWidth() + 20;
+    int titleWidth = m_titleText->GetSize().GetWidth() + 40;
     int newTabWidth = m_newTabButton->GetSize().GetWidth();
     int drawerWidth = m_drawerButton->GetSize().GetWidth();
     int minBtnWidth = m_minimizeButton->GetSize().GetWidth();
@@ -117,7 +119,7 @@ void CustomTitleBar::UpdateMaxTabContainerWidth() {
 
 int CustomTitleBar::CalcMaxVisibleTabs() const {
     int totalWidth = GetClientSize().GetWidth();
-    int titleWidth = m_titleText->GetSize().GetWidth() + 20;
+    int titleWidth = m_titleText->GetSize().GetWidth() + 40;
 
     // Get actual button sizes (they are DPI-scaled now)
     int newTabWidth = m_newTabButton->GetSize().GetWidth();
@@ -141,6 +143,10 @@ int CustomTitleBar::CalcMaxVisibleTabs() const {
     // Set minimum and maximum tab width
     int minTabWidth = 120;
     int maxTabWidth = 200;
+#ifdef __APPLE__
+    minTabWidth /= 2;
+    maxTabWidth /= 2;
+#endif
     tabWidth = std::max(minTabWidth, std::min(maxTabWidth, tabWidth));
 
     if (tabWidth <= 0) return 0;
@@ -177,7 +183,7 @@ ConnectInfo* CustomTitleBar::GetLastTab() {
 
 int CustomTitleBar::CalculateTabWidth() const {
     int totalWidth = GetClientSize().GetWidth();
-    int titleWidth = m_titleText->GetSize().GetWidth() + 20;
+    int titleWidth = m_titleText->GetSize().GetWidth() + 40;
     
     // Get actual button sizes (they are DPI-scaled now)
     int newTabWidth = m_newTabButton->GetSize().GetWidth();
@@ -193,7 +199,13 @@ int CustomTitleBar::CalculateTabWidth() const {
     // Each tab has 3px margin on all sides (6px total per tab)
     int tabMargin = 6;
     int totalTabs = (int)m_tabs.size();
-    if (totalTabs == 0) return 120;
+    if (totalTabs == 0) {
+#ifdef __APPLE__
+        return 60;
+#else
+        return 120;
+#endif
+    }
     
     // Calculate tab width dynamically based on available space
     int tabWidth = (availWidth - tabMargin * totalTabs) / totalTabs;
@@ -201,6 +213,10 @@ int CustomTitleBar::CalculateTabWidth() const {
     // Set minimum and maximum tab width
     int minTabWidth = 120;
     int maxTabWidth = 200;
+#ifdef __APPLE__
+    minTabWidth /= 2;
+    maxTabWidth /= 2;
+#endif
     tabWidth = std::max(minTabWidth, std::min(maxTabWidth, tabWidth));
     
     return tabWidth;
