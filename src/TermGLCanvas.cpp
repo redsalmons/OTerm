@@ -312,7 +312,7 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
 void TermGLCanvas::OnSize(wxSizeEvent& event) {
     // Update cached cell height when size changes
-    m_cached_cell_height = 24; // Fixed for now
+    m_cached_cell_height = std::max(12, m_fontSize);
     
     // Update OpenGL viewport with 8px left/right, 4px top/bottom margin
     if (m_glInitialized && m_glContext) {
@@ -388,10 +388,14 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
     wxPoint pos = event.GetPosition();
     const float margin_x = 8.0f;
     const float margin_y = 4.0f;
+    float cell_width = static_cast<float>(m_fontSize) / 2.0f;
+    float cell_height = static_cast<float>(m_fontSize);
+    if (cell_width < 6.0f) cell_width = 6.0f;
+    if (cell_height < 12.0f) cell_height = 12.0f;
     
     // Convert pixel position to cell coordinates
-    int col = static_cast<int>((pos.x - margin_x) / 12.0f);
-    int row = static_cast<int>((pos.y - margin_y) / 24.0f);
+    int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
+    int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
     
     m_selecting = true;
     m_selection_start_row = row;
@@ -418,10 +422,14 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
         wxPoint pos = event.GetPosition();
         const float margin_x = 8.0f;
         const float margin_y = 4.0f;
+        float cell_width = static_cast<float>(m_fontSize) / 2.0f;
+        float cell_height = static_cast<float>(m_fontSize);
+        if (cell_width < 6.0f) cell_width = 6.0f;
+        if (cell_height < 12.0f) cell_height = 12.0f;
         
         // Convert pixel position to cell coordinates
-        int col = static_cast<int>((pos.x - margin_x) / 12.0f);
-        int row = static_cast<int>((pos.y - margin_y) / 24.0f);
+        int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
+        int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
         
         m_selection_end_row = row;
         m_selection_end_col = col;

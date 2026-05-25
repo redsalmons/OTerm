@@ -3,12 +3,23 @@
 #include <wx/filedlg.h>
 
 ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
-    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxSize(850, 850)) {
+    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition,
+#ifdef __APPLE__
+               wxSize(425, 425)
+#else
+               wxSize(850, 850)
+#endif
+    ) {
 
     wxBoxSizer* mainSizer = new wxBoxSizer(wxHORIZONTAL);
 
     // Left Panel (Tree Control)
-    m_treeCtrl = new wxTreeCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(250, -1));
+#ifdef __APPLE__
+    int treeWidth = 125;
+#else
+    int treeWidth = 250;
+#endif
+    m_treeCtrl = new wxTreeCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(treeWidth, -1));
     mainSizer->Add(m_treeCtrl, 1, wxEXPAND | wxALL, 5);
 
     // Right Panel (Form)
@@ -80,7 +91,11 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
     mainSizer->Add(formPanel, 2, wxEXPAND | wxALL, 5);
 
     SetSizerAndFit(mainSizer);
+#ifdef __APPLE__
+    SetSize(wxSize(425, 425));
+#else
     SetSize(wxSize(850, 850));
+#endif
     Centre();
 
     LoadConfig();

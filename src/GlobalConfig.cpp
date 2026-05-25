@@ -13,12 +13,12 @@ int GlobalConfig::s_fontSize = 0;
 
 std::string GlobalConfig::GetWorkspacePath() {
     if (s_workspacePath.empty()) {
-        // Default to program directory if not set
         wxStandardPaths& stdPaths = wxStandardPaths::Get();
         wxString exePath = stdPaths.GetExecutablePath();
         wxFileName fn(exePath);
-        wxString dir = fn.GetPath();
-        s_workspacePath = dir.ToStdString();
+        wxFileName workspaceDir(fn.GetPath(), "");
+        workspaceDir.RemoveLastDir();
+        s_workspacePath = workspaceDir.GetPath().ToStdString();
     }
     return s_workspacePath;
 }

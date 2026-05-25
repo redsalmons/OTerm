@@ -1,4 +1,5 @@
 #include "DeviceConfig.h"
+#include "GlobalConfig.h"
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <wx/stdpaths.h>
@@ -9,11 +10,16 @@
 using json = nlohmann::json;
 
 static wxString GetConfigPath() {
-    return "K:\\OceanTerm\\OceanTerm\\config\\oc.json";
+    wxFileName configPath(wxString::FromUTF8(GlobalConfig::GetWorkspacePath()), "");
+    configPath.AppendDir("config");
+    configPath.SetFullName("oc.json");
+    return configPath.GetFullPath();
 }
 
 static wxString GetConfigDir() {
-    return "K:\\OceanTerm\\OceanTerm\\config";
+    wxFileName configDir(wxString::FromUTF8(GlobalConfig::GetWorkspacePath()), "");
+    configDir.AppendDir("config");
+    return configDir.GetPath();
 }
 
 static std::string base64_decode(const std::string& encoded) {
