@@ -29,29 +29,47 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     }
     if (dpiScale <= 0.0) dpiScale = 1.0;
     
-    // Set tab height based on DPI scale
+    // Set tab height based on DPI scale (macOS Retina: do NOT scale, wxWidgets handles it)
     int baseTabHeight = 35;
+#ifdef __APPLE__
+    int scaledTabHeight = baseTabHeight;
+#else
     int scaledTabHeight = static_cast<int>(baseTabHeight * dpiScale);
+#endif
     SetMinSize(wxSize(120, scaledTabHeight));
     
-    m_label = new wxStaticText(this, wxID_ANY, label);
+    m_label = new wxStaticText(this, wxID_ANY, label, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
     m_label->SetForegroundColour(*wxWHITE);
+#ifdef __APPLE__
+    {
+        wxFont labelFont = m_label->GetFont();
+        int labelPointSize = labelFont.GetPointSize();
+        if (labelPointSize > 0) {
+            labelFont.SetPointSize(std::max(1, labelPointSize));
+            m_label->SetFont(labelFont);
+        }
+    }
+#endif
     m_label->Refresh();
     int baseCloseButtonSize = 20;
+#ifdef __APPLE__
+    int scaledCloseButtonSize = baseCloseButtonSize;
+#else
     int scaledCloseButtonSize = static_cast<int>(baseCloseButtonSize * dpiScale);
+#endif
     m_closeButton = new wxButton(this, wxID_ANY, "x", wxDefaultPosition, wxSize(scaledCloseButtonSize, scaledCloseButtonSize), wxBORDER_NONE);
     m_closeButton->Show(showCloseButton);
 
     wxBoxSizer* h_sizer = new wxBoxSizer(wxHORIZONTAL);
-    h_sizer->AddStretchSpacer();
-    h_sizer->Add(m_label, 0, wxALIGN_CENTER);
+    h_sizer->Add(m_label, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
     if (showCloseButton) {
-        h_sizer->Add(m_closeButton, 0, wxALIGN_CENTER | wxLEFT, 5);
+        h_sizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
     }
-    h_sizer->AddStretchSpacer();
 
     wxBoxSizer* v_sizer = new wxBoxSizer(wxVERTICAL);
-    v_sizer->Add(h_sizer, 1, wxALIGN_CENTER);
+    v_sizer->AddStretchSpacer(1);
+    v_sizer->Add(h_sizer, 0, wxEXPAND);
+    v_sizer->AddStretchSpacer(1);
     SetSizer(v_sizer);
 
     // Bind events for all tabs (including non-terminal tabs like Dashboard)
@@ -117,6 +135,11 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     if (m_termCanvas) {
         m_termCanvas->SetKeyCallback([this](const char* data, int length) {
             if (m_terminalThread) {
+                if (length >= 2 && data[0] == '\x1b') {
+                    m_terminalThread->QueueInput(std::string(data, length));
+                    return;
+                }
+
                 // Process keyboard input
                 std::string modified_data;
                 
@@ -145,6 +168,8 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                             }
                             
                             m_currentInput.clear();
+                        } else {
+                            modified_data += data[i];
                         }
                     } else if (data[i] == 127 || data[i] == 8) {
                         // Backspace - remove last character
@@ -173,6 +198,27 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         m_termCanvas->SetScrollCallback([this](int lines) {
             if (m_terminalThread) {
                 m_terminalThread->ScrollVTerm(lines);
+            }
+        });
+        
+        // Set mouse callback for vi mouse mode (X10 protocol)
+        m_termCanvas->SetMouseCallback([this](int row, int col, int button) {
+            SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false));
+            if (m_terminalThread && m_terminalThread->IsInAlternateScreen()) {
+                // X10 mouse protocol: \x1b[M<btn><col><row>
+                // btn: 0=left, 1=middle, 2=right
+                // col: column + 33 (ASCII '!' is 33)
+                // row: row + 33
+                char seq[6];
+                seq[0] = '\x1b';
+                seq[1] = '[';
+                seq[2] = 'M';
+                seq[3] = static_cast<char>(button + 32);
+                seq[4] = static_cast<char>(col + 33);
+                seq[5] = static_cast<char>(row + 33);
+                std::string seq_str(seq, 6);
+                SSH_LOG("Sending X10 mouse sequence: " << std::hex << (int)(unsigned char)seq[0] << " " << (int)(unsigned char)seq[1] << " " << (int)(unsigned char)seq[2] << " " << (int)(unsigned char)seq[3] << " " << (int)(unsigned char)seq[4] << " " << (int)(unsigned char)seq[5] << std::dec);
+                m_terminalThread->QueueInput(seq_str);
             }
         });
     }
@@ -222,7 +268,7 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
     
     m_termCanvas->ClearScreenData();
     m_termCanvas->UpdateScreenData(instances);
-    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col);
+    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, m_terminalThread->IsInAlternateScreen());
     
     // Set cursor visibility based on event
     TerminalDamageEvent* damageEvent = dynamic_cast<TerminalDamageEvent*>(&event);

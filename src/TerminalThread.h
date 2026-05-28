@@ -79,6 +79,7 @@ public:
     // Reset scroll to bottom (thread-safe, called from UI thread)
     void ResetScrollToBottom();
     void ClearUIHandler();
+    bool IsInAlternateScreen() const { return m_vtermManager.is_in_alternate_screen(); }
     
 protected:
     virtual ExitCode Entry() override;

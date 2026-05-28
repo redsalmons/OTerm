@@ -29,7 +29,11 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook)
 #endif
     
     int baseHeight = 50;
+#ifdef __APPLE__
+    int scaledHeight = 50;
+#else
     int scaledHeight = static_cast<int>(baseHeight * dpiScale);
+#endif
     SetMinSize(wxSize(-1, scaledHeight));
     
     int baseButtonSize = 30;

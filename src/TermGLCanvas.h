@@ -16,7 +16,7 @@ public:
     ~TermGLCanvas();
 
     void UpdateScreenData(const std::vector<CellInstance>& instances);
-    void SetCursorPosition(int row, int col);
+    void SetCursorPosition(int row, int col, bool in_alt_screen = false);
     void SetCursorVisible(bool visible) { m_cursor_visible = visible; }
     void ClearScreenData();
 
@@ -25,6 +25,9 @@ public:
     
     typedef std::function<void(int lines)> ScrollCallback;
     void SetScrollCallback(ScrollCallback callback) { scroll_callback_ = callback; }
+    
+    typedef std::function<void(int row, int col, int button)> MouseCallback;
+    void SetMouseCallback(MouseCallback callback) { mouse_callback_ = callback; }
     
 
 private:
@@ -53,6 +56,7 @@ private:
     int m_cached_cell_height;
     KeyCallback key_callback_;
     ScrollCallback scroll_callback_;
+    MouseCallback mouse_callback_;
     bool m_glInitialized;
     float m_dpiScale;
 

@@ -228,23 +228,13 @@ int VTermManager::vterm_damage_callback(VTermRect rect, void *user) {
 int VTermManager::vterm_movecursor_callback(VTermPos pos, VTermPos oldpos, int visible, void *user) {
     VTermManager* manager = static_cast<VTermManager*>(user);
     
-    // Track cursor position for scroll detection - store NEW position
+    // In alternate screen mode (vi), if cursor moves to the last row, it's likely
+    // a temporary move to the status line. Don't update the cached position.
+    if (manager->in_alternate_screen_ && pos.row == manager->rows_ - 1) {
+        return 1;
+    }
+    
     manager->last_cursor_pos_ = pos;
-    
-    // Debug logging for cursor movement (commented out to reduce noise)
-    // std::cout << "CURSOR MOVE: (" << oldpos.row << "," << oldpos.col << ") -> (" 
-    //           << pos.row << "," << pos.col << ") Visible: " << visible << std::endl;
-    
-    // Check if this movement could trigger scrolling
-    if (pos.row == manager->rows_ - 1 && oldpos.col == manager->cols_ - 1) {
-        // std::cout << "SCROLL TRIGGER: Cursor at bottom-right, potential scroll upcoming" << std::endl;
-    }
-    
-    // Check if we just wrapped to next line (potential scroll trigger)
-    if (pos.row > oldpos.row && pos.col < oldpos.col) {
-        // std::cout << "LINE WRAP DETECTED: Possible scroll trigger" << std::endl;
-    }
-    
     return 1;
 }
 
@@ -639,8 +629,9 @@ void VTermManager::clear_scroll_history() {
     scroll_history_.clear();
 }
 const std::vector<VTermManager::TerminalCell>& VTermManager::get_screen_row(int row) const {
-    // When scrolling up (current_scroll_offset_ > 0), show history at the top
-    if (current_scroll_offset_ > 0) {
+    // In alternate screen (vi mode), ignore scroll offset - no scrollback
+    if (!in_alternate_screen_ && current_scroll_offset_ > 0) {
+        // When scrolling up (current_scroll_offset_ > 0), show history at the top
         // Calculate how many history lines to show
         int history_lines_to_show = (current_scroll_offset_ < (int)scroll_history_.size()) ? current_scroll_offset_ : (int)scroll_history_.size();
         
@@ -660,7 +651,7 @@ const std::vector<VTermManager::TerminalCell>& VTermManager::get_screen_row(int 
             }
         }
     }
-    // Not scrolling, get from current screen normally
+    // Not scrolling or in alternate screen, get from current screen normally
     else if (row >= 0 && row < rows_ && row < (int)cell_buffer_.size()) {
         return cell_buffer_[row];
     }
@@ -720,6 +711,11 @@ VTermPos VTermManager::get_cursor_pos() const {
         VTermState* state = vterm_obtain_state(vt_);
         if (state) {
             vterm_state_get_cursorpos(state, &pos);
+            // In alternate screen mode (vi), if cursor is on the last row,
+            // it's likely a temporary move to the status line. Use cached position.
+            if (in_alternate_screen_ && pos.row == rows_ - 1) {
+                return last_cursor_pos_;
+            }
             return pos;
         }
     }

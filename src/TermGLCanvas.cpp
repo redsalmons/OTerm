@@ -136,9 +136,15 @@ void TermGLCanvas::ClearScreenData() {
     m_screen_cells.clear();
 }
 
-void TermGLCanvas::SetCursorPosition(int row, int col) {
+void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen) {
     m_cursor_row = row;
     m_cursor_col = col;
+    
+    // In alternate screen (vi mode), don't calculate scroll offset
+    if (in_alt_screen) {
+        m_scroll_offset = 0;
+        return;
+    }
     
     // Calculate scroll offset to keep cursor visible
     wxSize size = GetSize();
@@ -333,6 +339,35 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
         CopySelectionToClipboard();
         return;
     }
+
+    if (key_callback_) {
+        const char* sequence = nullptr;
+        switch (event.GetKeyCode()) {
+            case WXK_RETURN:
+            case WXK_NUMPAD_ENTER:
+                sequence = "\r";
+                break;
+            case WXK_UP:
+                sequence = "\x1b[A";
+                break;
+            case WXK_DOWN:
+                sequence = "\x1b[B";
+                break;
+            case WXK_RIGHT:
+                sequence = "\x1b[C";
+                break;
+            case WXK_LEFT:
+                sequence = "\x1b[D";
+                break;
+            default:
+                break;
+        }
+
+        if (sequence) {
+            key_callback_(sequence, static_cast<int>(strlen(sequence)));
+            return;
+        }
+    }
     
     // Let the system handle special keys
     event.Skip();
@@ -349,14 +384,15 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
                 len = 1;
             } else {
                 // For Unicode characters, convert to UTF-8
-                wxString str = wxString::FromUTF8((const char*)&keycode, 1);
-                len = str.length();
+                wxString str;
+                str << (wxChar)keycode;
+                wxCharBuffer buffer = str.ToUTF8();
+                len = buffer.length();
                 if (len > 0 && len <= 4) {
-                    memcpy(data, str.mb_str(), len);
+                    memcpy(data, buffer.data(), len);
                 } else {
-                    // Fallback
-                    data[0] = (char)keycode;
-                    len = 1;
+                    // Fallback: ignore non-ASCII characters
+                    len = 0;
                 }
             }
             if (len > 0) {
@@ -396,6 +432,11 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
     // Convert pixel position to cell coordinates
     int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
     int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
+    
+    // Send mouse event to callback (for vi mouse mode)
+    if (mouse_callback_) {
+        mouse_callback_(row, col, 0);  // 0 = left button
+    }
     
     m_selecting = true;
     m_selection_start_row = row;
