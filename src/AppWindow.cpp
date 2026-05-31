@@ -133,7 +133,7 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     this->SetThemeEnabled(false);
     m_notebook = new wxSimplebook(this, wxID_ANY);
     m_notebook->SetBackgroundColour(wxColour(10, 10, 10));
-    m_titleBar = new CustomTitleBar(this, m_notebook);
+    m_titleBar = new CustomTitleBar(this, m_notebook, this);
 
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(m_titleBar, 0, wxEXPAND);
@@ -222,6 +222,10 @@ void AppWindow::CreateTerminalTab() {
             SSH_LOG("Calling Connect() on tab");
             newTab->Connect();
             SSH_LOG("Connect() returned");
+            
+            // Show IME input box by triggering tab selection
+            terminalCanvas->ShowIMEInputBox();
+            SSH_LOG("IME input box shown for new tab");
         }
     }
 }

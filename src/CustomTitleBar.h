@@ -15,7 +15,7 @@ class wxSimplebook;
 
 class CustomTitleBar : public wxPanel {
 public:
-    CustomTitleBar(wxWindow* parent, wxSimplebook* notebook);
+    CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow = nullptr);
     ConnectInfo* AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true);
     ConnectInfo* GetLastTab();
     void NotifyAllTabsResize();
@@ -55,4 +55,5 @@ private:
     std::vector<ConnectInfo*> m_tabs;
     std::vector<int> m_overflowIndices;
     int m_maxTabContainerWidth;
+    wxWindow* m_appWindow;
 };

@@ -108,6 +108,7 @@ private:
     void perform_authentication();
     void open_ssh_channel();
     void request_pty();
+    void request_locale();
     void request_shell();
     void start_polling();
     void stop_polling();

@@ -18,16 +18,18 @@
 #endif
 
 TermGLCanvas::TermGLCanvas(wxWindow* parent)
-    : wxGLCanvas(parent, wxID_ANY, nullptr, wxDefaultPosition, wxDefaultSize, 
+    : wxGLCanvas(parent, wxID_ANY, nullptr, wxDefaultPosition, wxDefaultSize,
                  wxFULL_REPAINT_ON_RESIZE | wxWANTS_CHARS | wxCLIP_CHILDREN | wxBORDER_NONE),
       m_glContext(nullptr),
       m_fontAtlas(nullptr),
       m_testTextureID(0),
-      m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_scroll_offset(0), 
+      m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_scroll_offset(0),
       m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f),
       m_selecting(false), m_selection_start_row(0), m_selection_start_col(0),
       m_selection_end_row(0), m_selection_end_col(0),
-      m_fontSize(0)
+      m_fontSize(0),
+      m_imeInputBox(nullptr),
+      m_imeInputBoxVisible(false)
 {
     // Calculate DPI scale
     if (GetHandle()) {
@@ -46,18 +48,43 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
     Bind(wxEVT_SIZE, &TermGLCanvas::OnSize, this);
     Bind(wxEVT_KEY_DOWN, &TermGLCanvas::OnKeyDown, this);
     Bind(wxEVT_CHAR, &TermGLCanvas::OnChar, this);
+    Bind(wxEVT_CHAR_HOOK, &TermGLCanvas::OnCharHook, this);
     Bind(wxEVT_MOUSEWHEEL, &TermGLCanvas::OnMouseWheel, this);
     Bind(wxEVT_LEFT_DOWN, &TermGLCanvas::OnMouseLeftDown, this);
     Bind(wxEVT_LEFT_UP, &TermGLCanvas::OnMouseLeftUp, this);
     Bind(wxEVT_MOTION, &TermGLCanvas::OnMouseMove, this);
     Bind(wxEVT_RIGHT_DOWN, &TermGLCanvas::OnMouseRightDown, this);
+    Bind(wxEVT_SET_FOCUS, &TermGLCanvas::OnSetFocus, this);
+    Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnKillFocus, this);
+
+    // Create invisible proxy input box (12x18 pixels)
+    m_imeInputBox = new wxTextCtrl(this, wxID_ANY, wxEmptyString,
+                                   wxDefaultPosition, wxSize(12, 18),
+                                   wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS);
+    // Set background to blue to match cursor color
+    wxColour cursor_color = wxColour(0, 120, 215); // Blue cursor color
+    m_imeInputBox->SetBackgroundColour(cursor_color);
+    m_imeInputBox->SetForegroundColour(cursor_color); // Text color same as background
+    m_imeInputBox->Hide(); // Keep it hidden by default
     
+    // Additional styling to hide border completely
+    m_imeInputBox->SetWindowStyleFlag(wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS);
+    
+    // Bind IME input box events
+    m_imeInputBox->Bind(wxEVT_TEXT, &TermGLCanvas::OnProxyTextReceived, this);
+    m_imeInputBox->Bind(wxEVT_KEY_DOWN, &TermGLCanvas::OnProxyKeyDown, this);
+    m_imeInputBox->Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnIMETextLostFocus, this);
+
     SSH_LOG("TermGLCanvas constructed, IsShown: " << IsShown() << ", IsEnabled: " << IsEnabled() << ", DPI scale: " << m_dpiScale);
 }
 
 TermGLCanvas::~TermGLCanvas() {
     delete m_fontAtlas;
     delete m_glContext;
+    if (m_imeInputBox) {
+        delete m_imeInputBox;
+        m_imeInputBox = nullptr;
+    }
 }
 
 void TermGLCanvas::InitializeGL() {
@@ -140,6 +167,36 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen) {
     m_cursor_row = row;
     m_cursor_col = col;
     
+    // Update IME input box position and size if visible
+    if (m_imeInputBox && m_imeInputBoxVisible) {
+        // Calculate position and size at cursor
+        int fontSize = m_fontAtlas ? m_fontAtlas->GetFontSize() : 12;
+        int cell_width = fontSize / 2;
+        int cell_height = fontSize;
+        
+        if (cell_width < 6) cell_width = 6;
+        if (cell_height < 12) cell_height = 12;
+        
+        int x = col * cell_width + 7; // Add 7px offset to correct position (5+2)
+        int y = row * cell_height + 5; // Add 5px offset to correct position
+        
+        // Bounds check
+        wxSize size = GetSize();
+        if (x > size.GetWidth() - cell_width) x = size.GetWidth() - cell_width;
+        if (y > size.GetHeight() - cell_height) y = size.GetHeight() - cell_height;
+        
+        // Set input box size and position to match cursor cell exactly
+        m_imeInputBox->SetSize(x, y, cell_width, cell_height);
+        SSH_LOG("IME input box position and size updated to: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
+        
+        // On macOS, notify input method about position
+#ifdef __WXMAC__
+        // Use NSTextInputClient to set first rect for line
+        // This is a simplified approach - for production you might need more sophisticated handling
+        // The SetSize call above should help with basic alignment
+#endif
+    }
+    
     // In alternate screen (vi mode), don't calculate scroll offset
     if (in_alt_screen) {
         m_scroll_offset = 0;
@@ -190,18 +247,25 @@ void TermGLCanvas::Render() {
     glDisable(GL_BLEND);
     
     for (const auto& [key, cell] : m_screen_cells) {
+        // Skip continuation cells (char_code = 0 for wide character continuation)
+        if (cell.char_code == 0) continue;
+
         float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
         float y = static_cast<int>(cell.cell_y) * cell_height + margin_y;
-        
+
+        // Use cell width for wide characters
+        uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
+        float render_width = cell_width * cell_width_multiplier;
+
         uint8_t bg_r = (cell.bg_color >> 24) & 0xFF;
         uint8_t bg_g = (cell.bg_color >> 16) & 0xFF;
         uint8_t bg_b = (cell.bg_color >> 8) & 0xFF;
-        
+
         glColor3f(bg_r / 255.0f, bg_g / 255.0f, bg_b / 255.0f);
         glBegin(GL_QUADS);
             glVertex2f(x, y);
-            glVertex2f(x + cell_width, y);
-            glVertex2f(x + cell_width, y + cell_height);
+            glVertex2f(x + render_width, y);
+            glVertex2f(x + render_width, y + cell_height);
             glVertex2f(x, y + cell_height);
         glEnd();
     }
@@ -243,13 +307,25 @@ void TermGLCanvas::Render() {
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
         
         for (const auto& [key, cell] : m_screen_cells) {
-            if (cell.char_code < 32 || cell.char_code > 126) continue;
+            // Skip continuation cells (char_code = 0 for wide character continuation)
+            if (cell.char_code == 0) continue;
+            if (cell.char_code < 32) continue;
 
             float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
             float y = static_cast<int>(cell.cell_y) * cell_height + margin_y;
 
+            // Use cell width for wide characters (Chinese characters use 2 cells)
+            uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
+            float render_width = cell_width * cell_width_multiplier;
+
             CharMetrics metrics = m_fontAtlas->GetCharMetrics(cell.char_code);
-            if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) continue;
+            if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) {
+                // Log missing characters (especially Chinese)
+                if (cell.char_code > 127) {
+                    SSH_LOG("Character not found in font atlas: 0x" << std::hex << cell.char_code << std::dec);
+                }
+                continue;
+            }
 
             // 直接使用正确的 metrics 值
             float test_u1 = metrics.u;
@@ -265,8 +341,8 @@ void TermGLCanvas::Render() {
 
             glBegin(GL_QUADS);
                 glTexCoord2f(test_u1, test_v1); glVertex2f(x, y);
-                glTexCoord2f(test_u2, test_v1); glVertex2f(x + cell_width, y);
-                glTexCoord2f(test_u2, test_v2); glVertex2f(x + cell_width, y + cell_height);
+                glTexCoord2f(test_u2, test_v1); glVertex2f(x + render_width, y);
+                glTexCoord2f(test_u2, test_v2); glVertex2f(x + render_width, y + cell_height);
                 glTexCoord2f(test_u1, test_v2); glVertex2f(x, y + cell_height);
             glEnd();
         }
@@ -334,6 +410,8 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 }
 
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
+    SSH_LOG("TermGLCanvas::OnKeyDown called - KeyCode: " << event.GetKeyCode() << ", ControlDown: " << event.ControlDown());
+    
     // Check for Ctrl+C to copy selection
     if (event.ControlDown() && event.GetKeyCode() == 'C') {
         CopySelectionToClipboard();
@@ -359,6 +437,15 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
             case WXK_LEFT:
                 sequence = "\x1b[D";
                 break;
+            case WXK_BACK:
+                sequence = "\x7f"; // Backspace
+                break;
+            case WXK_DELETE:
+                sequence = "\x1b[3~"; // Delete
+                break;
+            case WXK_TAB:
+                sequence = "\t";
+                break;
             default:
                 break;
         }
@@ -369,37 +456,32 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
         }
     }
     
-    // Let the system handle special keys
+    // For regular text input, let CHAR_HOOK handle it
     event.Skip();
 }
 
 void TermGLCanvas::OnChar(wxKeyEvent& event) {
     if (key_callback_) {
+        // Get the Unicode key - this handles basic character input
         int keycode = event.GetUnicodeKey();
+
         if (keycode != WXK_NONE) {
-            char data[4];
-            int len = 0;
-            if (keycode < 128) {
-                data[0] = (char)keycode;
-                len = 1;
-            } else {
-                // For Unicode characters, convert to UTF-8
-                wxString str;
-                str << (wxChar)keycode;
-                wxCharBuffer buffer = str.ToUTF8();
-                len = buffer.length();
-                if (len > 0 && len <= 4) {
-                    memcpy(data, buffer.data(), len);
-                } else {
-                    // Fallback: ignore non-ASCII characters
-                    len = 0;
-                }
-            }
+            wxString str;
+            str << (wxChar)keycode;
+            wxCharBuffer buffer = str.ToUTF8();
+            int len = buffer.length();
+
             if (len > 0) {
-                key_callback_(data, len);
+                // Send UTF-8 encoded character to terminal
+                key_callback_(buffer.data(), len);
             }
         }
     }
+    // Don't skip - we handled it
+}
+
+void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
+    // Let OnChar handle the character
     event.Skip();
 }
 
@@ -421,6 +503,15 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
 }
 
 void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
+    SSH_LOG("TermGLCanvas::OnMouseLeftDown called");
+    
+    // Set focus to enable IME input
+    SetFocus();
+    
+    // Show IME input box on any click
+    SSH_LOG("Calling ShowIMEInputBox from mouse click");
+    ShowIMEInputBox();
+    
     wxPoint pos = event.GetPosition();
     const float margin_x = 8.0f;
     const float margin_y = 4.0f;
@@ -514,11 +605,21 @@ void TermGLCanvas::CopySelectionToClipboard() {
             std::pair<int, int> key = {col, row};
             auto it = m_screen_cells.find(key);
             if (it != m_screen_cells.end()) {
-                char c = static_cast<char>(it->second.char_code);
-                if (c >= 32 && c <= 126) {
-                    selected_text += c;
-                } else {
+                char32_t charCode = it->second.char_code;
+                if (charCode < 32) {
                     selected_text += ' ';
+                } else if (charCode < 128) {
+                    selected_text += static_cast<char>(charCode);
+                } else {
+                    // Convert Unicode (UTF-32) to UTF-8 for clipboard
+                    wxString str;
+                    str << static_cast<wxChar>(charCode);
+                    wxCharBuffer buffer = str.ToUTF8();
+                    if (buffer.length() > 0) {
+                        selected_text += wxString::FromUTF8(buffer);
+                    } else {
+                        selected_text += ' ';
+                    }
                 }
             } else {
                 selected_text += ' ';
@@ -548,4 +649,215 @@ void TermGLCanvas::CopySelectionToClipboard() {
     m_selection_end_row = 0;
     m_selection_end_col = 0;
     Refresh();
+}
+
+void TermGLCanvas::OnSetFocus(wxFocusEvent& event) {
+    // Canvas gained focus
+    SSH_LOG("TermGLCanvas gained focus");
+    event.Skip();
+}
+
+void TermGLCanvas::OnKillFocus(wxFocusEvent& event) {
+    // Canvas lost focus
+    SSH_LOG("TermGLCanvas lost focus");
+    // Don't hide IME input box here to avoid focus loop
+    event.Skip();
+}
+
+void TermGLCanvas::ShowIMEInputBox() {
+    SSH_LOG("TermGLCanvas::ShowIMEInputBox called - m_cursor_col: " << m_cursor_col << ", m_cursor_row: " << m_cursor_row);
+    
+    if (!m_imeInputBox) {
+        SSH_LOG("m_imeInputBox is null, cannot show IME input box");
+        return;
+    }
+
+    if (m_imeInputBoxVisible) {
+        SSH_LOG("IME input box already visible, skipping");
+        return;
+    }
+
+    // Set callback to send text to terminal
+    m_imeCallback = [this](const char* data, int length) {
+        if (key_callback_) {
+            key_callback_(data, length);
+        }
+    };
+    SSH_LOG("IME callback set");
+
+    // Calculate position and size at cursor
+    int fontSize = m_fontAtlas ? m_fontAtlas->GetFontSize() : 12;
+    int cell_width = fontSize / 2;
+    int cell_height = fontSize;
+    
+    if (cell_width < 6) cell_width = 6;
+    if (cell_height < 12) cell_height = 12;
+    
+    int x = m_cursor_col * cell_width + 7; // Add 7px offset to correct position (5+2)
+    int y = m_cursor_row * cell_height + 5; // Add 5px offset to correct position
+    
+    // Ensure it stays within canvas bounds
+    wxSize canvasSize = GetSize();
+    if (x > canvasSize.GetWidth() - cell_width) x = canvasSize.GetWidth() - cell_width;
+    if (y > canvasSize.GetHeight() - cell_height) y = canvasSize.GetHeight() - cell_height;
+    
+    // Set input box size and position to match cursor cell exactly
+    m_imeInputBox->SetSize(x, y, cell_width, cell_height);
+    m_imeInputBox->Show();
+    m_imeInputBox->SetFocus();
+    m_imeInputBoxVisible = true;
+    
+    SSH_LOG("IME input box shown at position: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
+}
+
+void TermGLCanvas::HideIMEInputBox() {
+    SSH_LOG("TermGLCanvas::HideIMEInputBox called");
+    if (m_imeInputBox && m_imeInputBoxVisible) {
+        m_imeInputBox->Hide();
+        m_imeInputBox->Clear();
+        m_imeInputBoxVisible = false;
+        m_imeCallback = nullptr;
+        SSH_LOG("IME input box hidden");
+    } else {
+        SSH_LOG("IME input box not visible or null, skipping hide");
+    }
+}
+
+void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
+    SSH_LOG("TermGLCanvas::OnProxyTextReceived called");
+    if (m_imeInputBox && m_imeCallback) {
+        wxString content = m_imeInputBox->GetValue();
+        if (content.IsEmpty()) return;
+
+        SSH_LOG("Proxy text received: '" << content << "'");
+        
+        // Extract the finalized UTF-8 string from IME
+        wxCharBuffer buffer = content.ToUTF8();
+        std::string utf8_str(buffer.data(), buffer.length());
+        
+        // Send clean data to terminal
+        m_imeCallback(utf8_str.c_str(), utf8_str.length());
+        SSH_LOG("IME text sent via callback, length: " << utf8_str.length());
+        
+        // Trigger refresh to update rendering
+        Refresh(false);
+        
+        // Clear proxy input box using ChangeValue to prevent triggering wxEVT_TEXT again
+        m_imeInputBox->ChangeValue("");
+        SSH_LOG("Proxy input box cleared");
+    } else {
+        SSH_LOG("IME input box or callback is null");
+    }
+}
+
+void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
+    int keycode = event.GetKeyCode();
+    SSH_LOG("TermGLCanvas::OnProxyKeyDown called, keycode: " << keycode);
+
+    // Preemptive position sync: move input box to current cursor position BEFORE IME responds
+    if (m_imeInputBox && m_imeInputBoxVisible) {
+        int fontSize = m_fontAtlas ? m_fontAtlas->GetFontSize() : 12;
+        int cell_width = fontSize / 2;
+        int cell_height = fontSize;
+        
+        if (cell_width < 6) cell_width = 6;
+        if (cell_height < 12) cell_height = 12;
+        
+        int x = m_cursor_col * cell_width + 7; // Add 7px offset to correct position (5+2)
+        int y = m_cursor_row * cell_height + 5; // Add 5px offset to correct position
+        
+        wxSize size = GetSize();
+        if (x > size.GetWidth() - cell_width) x = size.GetWidth() - cell_width;
+        if (y > size.GetHeight() - cell_height) y = size.GetHeight() - cell_height;
+        
+        // Set input box size and position to match cursor cell exactly
+        m_imeInputBox->SetSize(x, y, cell_width, cell_height);
+        SSH_LOG("Preemptive IME input box position and size sync to: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
+    }
+
+    // Check if IME is active (macOS)
+    bool is_ime_active = false;
+#ifdef __WXMAC__
+    // On macOS, we can check if the input method is active by checking the text input context
+    // This is a simplified check - in production you might need more sophisticated detection
+    is_ime_active = !m_imeInputBox->GetValue().IsEmpty();
+#endif
+
+    if (is_ime_active) {
+        // If IME is active, let it handle the key (for selecting candidates, etc.)
+        SSH_LOG("IME is active, skipping key handling");
+        event.Skip();
+        return;
+    }
+
+    // Handle control keys when IME is not active (pure English state)
+    if (keycode == WXK_RETURN || keycode == WXK_BACK || keycode == WXK_DELETE ||
+        keycode == WXK_TAB || keycode == WXK_ESCAPE ||
+        (keycode >= WXK_LEFT && keycode <= WXK_DOWN) ||
+        keycode == WXK_HOME || keycode == WXK_END || keycode == WXK_PAGEUP || keycode == WXK_PAGEDOWN)
+    {
+        SSH_LOG("Control key detected, sending to terminal: " << keycode);
+        
+        // Convert keycode to terminal escape sequence
+        std::string key_seq;
+        switch (keycode) {
+            case WXK_RETURN:
+                key_seq = "\r";
+                break;
+            case WXK_BACK:
+                key_seq = "\x7f"; // Backspace
+                break;
+            case WXK_DELETE:
+                key_seq = "\x1b[3~"; // Delete
+                break;
+            case WXK_TAB:
+                key_seq = "\t";
+                break;
+            case WXK_ESCAPE:
+                key_seq = "\x1b";
+                break;
+            case WXK_UP:
+                key_seq = "\x1b[A";
+                break;
+            case WXK_DOWN:
+                key_seq = "\x1b[B";
+                break;
+            case WXK_LEFT:
+                key_seq = "\x1b[D";
+                break;
+            case WXK_RIGHT:
+                key_seq = "\x1b[C";
+                break;
+            case WXK_HOME:
+                key_seq = "\x1b[H";
+                break;
+            case WXK_END:
+                key_seq = "\x1b[F";
+                break;
+            case WXK_PAGEUP:
+                key_seq = "\x1b[5~";
+                break;
+            case WXK_PAGEDOWN:
+                key_seq = "\x1b[6~";
+                break;
+            default:
+                break;
+        }
+        
+        if (!key_seq.empty() && m_imeCallback) {
+            m_imeCallback(key_seq.c_str(), key_seq.length());
+            SSH_LOG("Control key sent to terminal");
+        }
+    } else {
+        // Normal A-Z characters, let them pass through to wxTextCtrl
+        SSH_LOG("Normal character, skipping to text input");
+        event.Skip();
+    }
+}
+
+void TermGLCanvas::OnIMETextLostFocus(wxFocusEvent& event) {
+    SSH_LOG("TermGLCanvas::OnIMETextLostFocus called");
+    // Hide input box when it loses focus
+    HideIMEInputBox();
+    event.Skip();
 }

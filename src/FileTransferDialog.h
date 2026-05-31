@@ -40,7 +40,7 @@ public:
             
             // Parse drag data (format: "path|size")
             size_t pipePos = dragData.find('|');
-            if (pipePos != wxString::npos) {
+            if (pipePos != wxString::npos && pipePos + 1 < dragData.length()) {
                 remotePath = dragData.substr(0, pipePos);
                 wxString sizeStr = dragData.substr(pipePos + 1);
                 long long tempSize = 0;
@@ -53,7 +53,7 @@ public:
             
             // Extract filename from remote path and append to local path
             size_t lastSlash = remotePath.rfind('/');
-            if (lastSlash != wxString::npos) {
+            if (lastSlash != wxString::npos && lastSlash + 1 < remotePath.length()) {
                 wxString fileName = remotePath.substr(lastSlash + 1);
                 localPath = m_remotePath;  // m_remotePath stores local target path for download
                 if (!localPath.EndsWith(wxFileName::GetPathSeparator())) {

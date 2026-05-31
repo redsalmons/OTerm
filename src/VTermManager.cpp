@@ -367,9 +367,18 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             
             // Extract character code (handle multi-byte Unicode)
             uint32_t char_code = 0;
-            if (cell.chars[0] != 0) {
+            
+            // Check cell width to determine if this is a wide character cell
+            // For wide characters (like Chinese), only the first cell has the actual character code
+            // Subsequent cells are part of the same character but have empty chars[0] (0 or 0xffffffff)
+            if (cell.chars[0] != 0 && cell.chars[0] != 0xffffffff) {
                 char_code = cell.chars[0];
+            } else {
+                // This is a continuation cell for a wide character
+                // Set char_code to 0 so it won't be rendered
+                char_code = 0;
             }
+            
             
             // Extract colors using VTerm's actual color structure
             uint32_t fg_color = 0xffffffff; // Default white
@@ -445,6 +454,7 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
                 cell_buffer_[row][col].fg_color = fg_color;
                 cell_buffer_[row][col].bg_color = bg_color;
                 cell_buffer_[row][col].attrs = attrs;
+                cell_buffer_[row][col].width = cell.width;
                 cell_buffer_[row][col].dirty = true;
                 
                 // Debug output for first few cells (commented out to reduce noise)
@@ -497,7 +507,8 @@ void VTermManager::initialize_cell_buffer() {
                 .fg_color = 0xffffffff,
                 .bg_color = 0x00000000,
                 .attrs = 0x0,
-                .dirty = false
+                .dirty = false,
+                .width = 1
             };
         }
     }
@@ -516,11 +527,12 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
     for (int col = 0; col < cols; col++) {
         TerminalCell terminal_cell;
         
-        if (cells[col].chars[0] != 0) {
+        if (cells[col].chars[0] != 0 && cells[col].chars[0] != 0xffffffff) {
             terminal_cell.char_code = cells[col].chars[0];
         } else {
-            terminal_cell.char_code = ' ';
+            terminal_cell.char_code = 0; // Continuation cell, don't render
         }
+        terminal_cell.width = cells[col].width;
         
         // Extract colors using VTerm's actual color structure
         uint32_t fg_color = 0xffffffff; // Default white

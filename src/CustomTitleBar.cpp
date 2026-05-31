@@ -1,14 +1,15 @@
 #include "CustomTitleBar.h"
 #include "AppWindow.h"
 #include "TerminalThread.h"
+#include "TermGLCanvas.h"
 #include "TranslationHelper.h"
 #include "SettingsDialog.h"
 #include <wx/simplebook.h>
 #include <wx/display.h>
 #include <algorithm>
 
-CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook)
-    : wxPanel(parent, wxID_ANY), m_notebook(notebook), m_tabContainer(nullptr) {
+CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow)
+    : wxPanel(parent, wxID_ANY), m_notebook(notebook), m_tabContainer(nullptr), m_appWindow(appWindow) {
     SetBackgroundColour(wxColour(30, 30, 30));
     
     // Calculate title bar height based on DPI scale
@@ -433,6 +434,14 @@ void CustomTitleBar::OnTabSelected(wxCommandEvent& event) {
             }
             for (auto t : m_tabs) t->SetActive(false);
             tab->SetActive(true);
+            
+            // Show IME input box when tab is selected
+            if (m_appWindow) {
+                TermGLCanvas* canvas = tab->GetCanvas();
+                if (canvas) {
+                    canvas->ShowIMEInputBox();
+                }
+            }
             break;
         }
     }
@@ -485,31 +494,11 @@ void CustomTitleBar::OnMinimize(wxCommandEvent& event) {
 void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
     wxFrame* frame = (wxFrame*)GetParent();
     
-    if (frame->IsMaximized()) {
-        frame->Maximize(false);
+    if (frame->IsFullScreen()) {
+        frame->ShowFullScreen(false);
     } else {
-        // Get screen geometry
-        int screenNum = wxDisplay::GetFromWindow(frame);
-        if (screenNum != wxNOT_FOUND) {
-            wxDisplay display(screenNum);
-            wxRect screenRect = display.GetClientArea();
-            
-            // Maximize to screen area (not including taskbar)
-            frame->Maximize(true);
-            
-            // Ensure window doesn't exceed screen bounds
-            wxSize windowSize = frame->GetSize();
-            if (windowSize.GetWidth() > screenRect.width || windowSize.GetHeight() > screenRect.height) {
-                frame->SetSize(screenRect.width, screenRect.height);
-                frame->SetPosition(wxPoint(screenRect.x, screenRect.y));
-            }
-        } else {
-            frame->Maximize(true);
-        }
+        frame->ShowFullScreen(true);
     }
-    
-    // Force layout recalculation to ensure notebook expands
-    frame->Layout();
 }
 
 void CustomTitleBar::OnClose(wxCommandEvent& event) {

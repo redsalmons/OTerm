@@ -349,7 +349,7 @@ void SSHManager::request_pty() {
     if (pty_result == 0) {
         SSH_LOG("PTY granted -> " << state_name(SSH_SHELL_REQUESTING));
         ssh_state_ = SSH_SHELL_REQUESTING;
-        request_shell();
+        request_locale();
     } else if (pty_result == LIBSSH2_ERROR_EAGAIN) {
         // SSH_LOG("PTY request pending (EAGAIN), retrying...");
         start_polling();
@@ -359,6 +359,26 @@ void SSHManager::request_pty() {
         ssh_state_ = SSH_DISCONNECTED;
         stop_polling();
     }
+}
+
+void SSHManager::request_locale() {
+    // Try to set UTF-8 locale environment variables
+    // Note: Many SSH servers reject setenv, so we proceed regardless of result
+    int lang_result = libssh2_channel_setenv(ssh_channel_, "LANG", "zh_CN.UTF-8");
+    int lc_all_result = libssh2_channel_setenv(ssh_channel_, "LC_ALL", "zh_CN.UTF-8");
+    
+    if (lang_result == 0 || lc_all_result == 0) {
+        SSH_LOG("Locale environment variables set successfully");
+    } else if (lang_result == LIBSSH2_ERROR_EAGAIN || lc_all_result == LIBSSH2_ERROR_EAGAIN) {
+        // Locale setting pending, but proceed anyway
+        SSH_LOG("Locale setting pending, proceeding to shell");
+    } else {
+        // Most SSH servers reject setenv - this is expected
+        SSH_LOG("Locale setenv rejected by server (expected), proceeding to shell");
+    }
+    
+    // Proceed to shell request regardless of setenv result
+    request_shell();
 }
 
 void SSHManager::request_shell() {

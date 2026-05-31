@@ -51,10 +51,12 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
 
 bool FontAtlas::GenerateTextureAtlas() {
     int charCount = 95; 
-    int charSize = 64; // 使用固定尺寸 64，匹配字符高度
+    int charSize = 48; // Use 48px to fit all Chinese characters
     
-    m_textureWidth = 512;
-    m_textureHeight = 1024; // 增大高度以容纳所有字符
+    // Increase texture size to support Unicode characters including Chinese
+    // ASCII (32-126) + CJK Unified Ideographs (U+4E00-U+9FFF) subset
+    m_textureWidth = 8192;
+    m_textureHeight = 8192; // Larger texture for Unicode support
     
     SSH_LOG("FontAtlas: Generating texture atlas: " << m_textureWidth << "x" << m_textureHeight);
     
@@ -74,6 +76,7 @@ bool FontAtlas::GenerateTextureAtlas() {
     int y = 0;
     int rowHeight = charSize;
     
+    // Add ASCII characters (32-126)
     for (int i = 32; i <= 126; i++) {
         char32_t charCode = static_cast<char32_t>(i);
         AddCharToAtlas(charCode, dc, x, y, rowHeight);
@@ -84,6 +87,26 @@ bool FontAtlas::GenerateTextureAtlas() {
             y += rowHeight;
         }
     }
+    
+    // Add common Chinese characters (CJK Unified Ideographs)
+    // Adding a comprehensive range of frequently used Chinese characters
+    // U+4E00 to U+9FFF (CJK Unified Ideographs basic range)
+    int chars_added = 0;
+    for (char32_t charCode = 0x4E00; charCode <= 0x9FFF; charCode++) {
+        AddCharToAtlas(charCode, dc, x, y, rowHeight);
+        chars_added++;
+        
+        x += charSize;
+        if (x + charSize > m_textureWidth) {
+            x = 0;
+            y += rowHeight;
+        }
+        if (y + rowHeight > m_textureHeight) {
+            SSH_LOG("FontAtlas: Texture atlas full, stopped at char: 0x" << std::hex << static_cast<uint32_t>(charCode) << std::dec << " after adding " << chars_added << " Chinese characters");
+            break;
+        }
+    }
+    SSH_LOG("FontAtlas: Added " << chars_added << " Chinese characters to texture atlas");
     
     // 【关键修复】：在转成 wxImage 之前，必须解绑 wxBitmap
     dc.SelectObject(wxNullBitmap);
@@ -140,7 +163,24 @@ void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int 
     if (charCode < 128) {
         text = wxString::Format("%c", static_cast<char>(charCode));
     } else {
-        text = wxString::FromUTF8(reinterpret_cast<const char*>(&charCode), 4);
+        // Convert UTF-32 to UTF-8 for wxWidgets
+        char utf8_buf[5] = {0};
+        if (charCode <= 0x7F) {
+            utf8_buf[0] = static_cast<char>(charCode);
+        } else if (charCode <= 0x7FF) {
+            utf8_buf[0] = 0xC0 | ((charCode >> 6) & 0x1F);
+            utf8_buf[1] = 0x80 | (charCode & 0x3F);
+        } else if (charCode <= 0xFFFF) {
+            utf8_buf[0] = 0xE0 | ((charCode >> 12) & 0x0F);
+            utf8_buf[1] = 0x80 | ((charCode >> 6) & 0x3F);
+            utf8_buf[2] = 0x80 | (charCode & 0x3F);
+        } else {
+            utf8_buf[0] = 0xF0 | ((charCode >> 18) & 0x07);
+            utf8_buf[1] = 0x80 | ((charCode >> 12) & 0x3F);
+            utf8_buf[2] = 0x80 | ((charCode >> 6) & 0x3F);
+            utf8_buf[3] = 0x80 | (charCode & 0x3F);
+        }
+        text = wxString::FromUTF8(utf8_buf);
     }
     
     // Get character metrics
@@ -149,7 +189,12 @@ void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int 
     int charHeight = extent.y;
     
     // Draw character at top of cell with padding
-    dc.DrawText(text, x + 2, y + 2);
+    // Only apply vertical centering for wide characters (Chinese, etc.)
+    int vertical_offset = 0;
+    if (charCode > 127) {
+        vertical_offset = (rowHeight - charHeight) / 2;
+    }
+    dc.DrawText(text, x + 2, y + vertical_offset + 2);
     
     // Store metrics with padding to prevent texture bleeding
     CharMetrics metrics;

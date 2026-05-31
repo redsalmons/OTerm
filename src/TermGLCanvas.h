@@ -28,21 +28,27 @@ public:
     
     typedef std::function<void(int row, int col, int button)> MouseCallback;
     void SetMouseCallback(MouseCallback callback) { mouse_callback_ = callback; }
-    
 
 private:
     void OnPaint(wxPaintEvent& event);
     void OnSize(wxSizeEvent& event);
     void OnKeyDown(wxKeyEvent& event);
     void OnChar(wxKeyEvent& event);
+    void OnCharHook(wxKeyEvent& event);
     void OnMouseWheel(wxMouseEvent& event);
     void OnMouseLeftDown(wxMouseEvent& event);
     void OnMouseLeftUp(wxMouseEvent& event);
     void OnMouseMove(wxMouseEvent& event);
     void OnMouseRightDown(wxMouseEvent& event);
+    void OnSetFocus(wxFocusEvent& event);
+    void OnKillFocus(wxFocusEvent& event);
     void InitializeGL();
     void Render();
     void CopySelectionToClipboard();
+    
+public:
+    void ShowIMEInputBox();
+    void HideIMEInputBox();
 
     wxGLContext* m_glContext;
     FontAtlas* m_fontAtlas;
@@ -69,6 +75,16 @@ private:
     
     // Font size for cell size calculation
     int m_fontSize;
+
+    // Local IME input box
+    wxTextCtrl* m_imeInputBox;
+    bool m_imeInputBoxVisible;
+    std::function<void(const char*, int)> m_imeCallback;
+
+    // IME input box event handlers
+    void OnProxyTextReceived(wxCommandEvent& event);
+    void OnProxyKeyDown(wxKeyEvent& event);
+    void OnIMETextLostFocus(wxFocusEvent& event);
 
 };
 

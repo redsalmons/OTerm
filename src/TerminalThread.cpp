@@ -57,6 +57,7 @@ void TerminalThread::ScrollVTerm(int lines) {
             inst.fg_color = cell.fg_color;
             inst.bg_color = cell.bg_color;
             inst.char_code = cell.char_code;
+            inst.width = cell.width;
         }
     }
     
@@ -96,6 +97,7 @@ void TerminalThread::ResetScrollToBottom() {
             inst.fg_color = cell.fg_color;
             inst.bg_color = cell.bg_color;
             inst.char_code = cell.char_code;
+            inst.width = cell.width;
         }
     }
     
@@ -289,6 +291,7 @@ void TerminalThread::setup_callbacks() {
                 inst.fg_color = cell.fg_color;
                 inst.bg_color = cell.bg_color;
                 inst.char_code = cell.char_code;
+                inst.width = cell.width;
             }
         }
         // Update cursor position from VTerm AFTER screen content
@@ -348,6 +351,11 @@ void TerminalThread::send_damage_event(bool cursor_visible) {
 }
 
 void TerminalThread::cleanup() {
+    // Notify UI thread that thread is exiting (before cleanup)
+    if (m_ui_handler) {
+        wxQueueEvent(m_ui_handler, new wxThreadEvent(wxEVT_TERMINAL_EXIT));
+    }
+    
     // Cleanup SSH Manager
     m_sshManager.cleanup();
     
@@ -358,9 +366,4 @@ void TerminalThread::cleanup() {
     while (uv_run(&m_loop, UV_RUN_NOWAIT) != 0) {
     }
     uv_loop_close(&m_loop);
-    
-    // Notify UI thread that thread is exiting
-    if (m_ui_handler) {
-        wxQueueEvent(m_ui_handler, new wxThreadEvent(wxEVT_TERMINAL_EXIT));
-    }
 }

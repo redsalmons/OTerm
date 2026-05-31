@@ -19,6 +19,7 @@ public:
     void SetActive(bool active);
     wxWindow* GetContentPanel() const;
     DeviceConfig GetDeviceConfig() const;
+    TermGLCanvas* GetCanvas() const { return m_termCanvas; }
 
     void Connect();
     TerminalThread* GetTerminalThread() const { return m_terminalThread; }

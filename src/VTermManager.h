@@ -16,6 +16,7 @@ public:
         uint32_t bg_color;       // Background color (RGBA)
         uint8_t attrs;           // Text attributes (bold, underline, etc.)
         bool dirty;               // Flag for dirty rectangle tracking
+        uint8_t width;           // Cell width (1 for normal, 2 for wide characters like Chinese)
     };
 
     // Callback type for damage notifications

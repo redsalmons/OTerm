@@ -140,7 +140,12 @@ void ConnectionDialog::RebuildTree() {
                     pathItems[path] = m_treeCtrl->AppendItem(parentId, part);
                 }
                 parentId = pathItems[path];
-                group.erase(0, pos + 1);
+                // Safely erase: ensure we don't exceed string length
+                if (pos + 1 <= group.length()) {
+                    group.erase(0, pos + 1);
+                } else {
+                    group.clear();
+                }
             }
             // Add the last part
             if (!group.empty()) {
