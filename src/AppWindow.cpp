@@ -2,6 +2,7 @@
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
 #include "MasterPasswordDialog.h"
+#include "LocalTerminalThread.h"
 #include <iostream>
 #include <wx/simplebook.h>
 #include "ConnectionDialog.h"
@@ -235,49 +236,22 @@ AppWindow::~AppWindow() {
 }
 
 void AppWindow::CreateDashboardTab() {
-    wxPanel* dashboardPanel = new wxPanel(m_notebook, wxID_ANY);
-    dashboardPanel->SetBackgroundColour(wxColour(240, 240, 240));
-    
-    wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
-    
-    // Add vertical spacer to push content to center
-    mainSizer->AddStretchSpacer();
-    
-    // Create a container panel for the 3D text effect
-    wxPanel* textContainer = new wxPanel(dashboardPanel, wxID_ANY);
-    textContainer->SetBackgroundStyle(wxBG_STYLE_PAINT);
-    
-    // Create shadow text for 3D effect (45 degree perspective: offset down-right)
-    wxStaticText* shadowText = new wxStaticText(textContainer, wxID_ANY, 
-        TranslationHelper::Tr("welcomeSlogan"), wxPoint(3, 3));
-    wxFont shadowFont(36, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD);
-    shadowText->SetFont(shadowFont);
-    shadowText->SetForegroundColour(wxColour(180, 180, 180));
-    
-    // Create main slogan text
-    wxStaticText* sloganText = new wxStaticText(textContainer, wxID_ANY, 
-        TranslationHelper::Tr("welcomeSlogan"), wxPoint(0, 0));
-    
-    // Set font for slogan (large, bold)
-    wxFont sloganFont(36, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD);
-    sloganText->SetFont(sloganFont);
-    sloganText->SetForegroundColour(wxColour(50, 50, 50));
-    
-    // Center the text container both horizontally and vertically
-    wxBoxSizer* sloganSizer = new wxBoxSizer(wxHORIZONTAL);
-    sloganSizer->AddStretchSpacer();
-    sloganSizer->Add(textContainer, 0, wxALIGN_CENTER);
-    sloganSizer->AddStretchSpacer();
-    
-    mainSizer->Add(sloganSizer, 0, wxEXPAND | wxALL, 20);
-    
-    // Add vertical spacer to push content to center
-    mainSizer->AddStretchSpacer();
-    
-    dashboardPanel->SetSizer(mainSizer);
-    
+    // Create local terminal for home tab
+    int initialRows = 25;
+    int initialCols = 80;
+
+    // Create terminal canvas
+    TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
+
+    // Add tab with local terminal (isLocalTerminal = true)
     DeviceConfig emptyConfig;
-    m_titleBar->AddTab(TranslationHelper::Tr("home"), dashboardPanel, emptyConfig, false);
+    ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), terminalCanvas, emptyConfig, false, true);
+
+    // Connect to start the local terminal
+    if (homeTab) {
+        homeTab->Connect();
+        terminalCanvas->ShowIMEInputBox();
+    }
 }
 
 void AppWindow::CreateTerminalTab() {

@@ -1,6 +1,7 @@
 #include "ConnectInfo.h"
 #include "TermGLCanvas.h"
 #include "TerminalThread.h"
+#include "LocalTerminalThread.h"
 #include "SSHManager.h"
 #include "FileTransferTask.h"
 #include "TranslationHelper.h"
@@ -11,9 +12,9 @@
 wxDEFINE_EVENT(wxEVT_TAB_CLOSE, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_TAB_SELECTED, wxCommandEvent);
 
-ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton)
+ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal)
     : wxPanel(parent, wxID_ANY), m_contentPanel(contentPanel), m_deviceConfig(deviceConfig),
-      m_isActive(false), m_isHovered(false), m_terminalThread(nullptr), m_termCanvas(nullptr),
+      m_isActive(false), m_isHovered(false), m_isLocalTerminal(isLocalTerminal), m_terminalThread(nullptr), m_localTerminalThread(nullptr), m_termCanvas(nullptr),
       m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr) {
     // Calculate DPI scale
     double dpiScale = 1.0;
@@ -100,24 +101,24 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     int initialCols = 80;
     if (m_termCanvas) {
         wxSize canvasSize = m_termCanvas->GetSize();
-        
+
         // Get configured font size
         int fontSize = GlobalConfig::GetFontSize();
         if (fontSize == 0) fontSize = 12; // Default if not configured
-        
+
         // Scale for terminal rendering (same as in TermGLCanvas)
         int terminalFontSize = fontSize * 2;
         if (terminalFontSize < 12) terminalFontSize = 12;
         if (terminalFontSize > 72) terminalFontSize = 72;
-        
+
         // Calculate cell size based on font size
         int cellWidth = terminalFontSize / 2;
         int cellHeight = terminalFontSize;
-        
+
         // Ensure minimum cell size
         if (cellWidth < 6) cellWidth = 6;
         if (cellHeight < 12) cellHeight = 12;
-        
+
         initialRows = canvasSize.GetHeight() / cellHeight;
         initialCols = canvasSize.GetWidth() / cellWidth;
         if (initialRows < 10) initialRows = 10;
@@ -128,84 +129,106 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 << ", Initial vterm size calculated: " << initialRows << "x" << initialCols);
     }
 
-    // Create TerminalThread
-    m_terminalThread = new TerminalThread(this, initialRows, initialCols, m_deviceConfig);
-    SSH_LOG("ConnectInfo: TerminalThread created");
+    // Create appropriate thread based on terminal type
+    if (m_isLocalTerminal) {
+        // Create LocalTerminalThread for local shell
+        m_localTerminalThread = new LocalTerminalThread(this, initialRows, initialCols);
+        m_localTerminalThread->Start();
+        SSH_LOG("ConnectInfo: LocalTerminalThread created and started");
 
-    // Set keyboard callback to send input to thread
-    if (m_termCanvas) {
-        m_termCanvas->SetKeyCallback([this](const char* data, int length) {
-            if (m_terminalThread) {
-                if (length >= 2 && data[0] == '\x1b') {
-                    m_terminalThread->QueueInput(std::string(data, length));
-                    return;
+        // Set keyboard callback to send input to local thread
+        if (m_termCanvas) {
+            m_termCanvas->SetKeyCallback([this](const char* data, int length) {
+                if (m_localTerminalThread) {
+                    m_localTerminalThread->QueueInput(std::string(data, length));
                 }
+            });
+        }
+    } else {
+        // Create TerminalThread for SSH
+        m_terminalThread = new TerminalThread(this, initialRows, initialCols, m_deviceConfig);
+        SSH_LOG("ConnectInfo: TerminalThread created");
 
-                // Process keyboard input
-                std::string modified_data;
-                
-                for (int i = 0; i < length; i++) {
-                    if (data[i] == '\r' || data[i] == '\n') {
-                        // Enter key pressed - check if command is download or upload
-                        if (!m_currentInput.empty()) {
-                            SSH_LOG("Command entered: " << m_currentInput);
-                            
-                            // If command is "download" or "upload", show file transfer dialog
-                            if (m_currentInput == "download" || m_currentInput == "upload") {
-                                modified_data += '\x03';
-                                SSH_LOG("Detected download/upload command, showing file transfer dialog");
-                                
-                                // Show file transfer dialog (non-modal)
-                                if (!m_fileTransferDialog) {
-                                    m_fileTransferDialog = new FileTransferDialog(this,
-                                        TranslationHelper::Tr("fileTransfer"),
-                                        m_deviceConfig);
+        // Set keyboard callback to send input to thread
+        if (m_termCanvas) {
+            m_termCanvas->SetKeyCallback([this](const char* data, int length) {
+                if (m_terminalThread) {
+                    if (length >= 2 && data[0] == '\x1b') {
+                        m_terminalThread->QueueInput(std::string(data, length));
+                        return;
+                    }
+
+                    // Process keyboard input
+                    std::string modified_data;
+
+                    for (int i = 0; i < length; i++) {
+                        if (data[i] == '\r' || data[i] == '\n') {
+                            // Enter key pressed - check if command is download or upload
+                            if (!m_currentInput.empty()) {
+                                SSH_LOG("Command entered: " << m_currentInput);
+
+                                // If command is "download" or "upload", show file transfer dialog
+                                if (m_currentInput == "download" || m_currentInput == "upload") {
+                                    modified_data += '\x03';
+                                    SSH_LOG("Detected download/upload command, showing file transfer dialog");
+
+                                    // Show file transfer dialog (non-modal)
+                                    if (!m_fileTransferDialog) {
+                                        m_fileTransferDialog = new FileTransferDialog(this,
+                                            TranslationHelper::Tr("fileTransfer"),
+                                            m_deviceConfig);
+                                    } else {
+                                        m_fileTransferDialog->Show();
+                                        m_fileTransferDialog->Raise();
+                                    }
                                 } else {
-                                    m_fileTransferDialog->Show();
-                                    m_fileTransferDialog->Raise();
+                                    modified_data += data[i];
                                 }
+
+                                m_currentInput.clear();
                             } else {
                                 modified_data += data[i];
                             }
-                            
-                            m_currentInput.clear();
+                        } else if (data[i] == 127 || data[i] == 8) {
+                            // Backspace - remove last character
+                            if (!m_currentInput.empty()) {
+                                m_currentInput.pop_back();
+                            }
+                            modified_data += data[i];
+                        } else if (data[i] >= 32 && data[i] < 127) {
+                            // Printable character
+                            m_currentInput += data[i];
+                            modified_data += data[i];
                         } else {
+                            // Other control characters
                             modified_data += data[i];
                         }
-                    } else if (data[i] == 127 || data[i] == 8) {
-                        // Backspace - remove last character
-                        if (!m_currentInput.empty()) {
-                            m_currentInput.pop_back();
-                        }
-                        modified_data += data[i];
-                    } else if (data[i] >= 32 && data[i] < 127) {
-                        // Printable character
-                        m_currentInput += data[i];
-                        modified_data += data[i];
-                    } else {
-                        // Other control characters
-                        modified_data += data[i];
+                    }
+
+                    // Send to SSH
+                    if (!modified_data.empty()) {
+                        m_terminalThread->QueueInput(modified_data);
                     }
                 }
-                
-                // Send to SSH
-                if (!modified_data.empty()) {
-                    m_terminalThread->QueueInput(modified_data);
-                }
-            }
-        });
-        
-        // Set scroll callback to scroll vterm history
+            });
+        }
+    }
+
+    // Set scroll callback to scroll vterm history (shared for both terminal types)
+    if (m_termCanvas) {
         m_termCanvas->SetScrollCallback([this](int lines) {
-            if (m_terminalThread) {
+            if (m_isLocalTerminal && m_localTerminalThread) {
+                m_localTerminalThread->ScrollVTerm(lines);
+            } else if (m_terminalThread) {
                 m_terminalThread->ScrollVTerm(lines);
             }
         });
-        
+
         // Set mouse callback for vi mouse mode (X10 protocol)
         m_termCanvas->SetMouseCallback([this](int row, int col, int button) {
-            SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false));
-            if (m_terminalThread && m_terminalThread->IsInAlternateScreen()) {
+            bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
+            SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << inAltScreen);
+            if (inAltScreen) {
                 // X10 mouse protocol: \x1b[M<btn><col><row>
                 // btn: 0=left, 1=middle, 2=right
                 // col: column + 33 (ASCII '!' is 33)
@@ -219,7 +242,11 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 seq[5] = static_cast<char>(row + 33);
                 std::string seq_str(seq, 6);
                 SSH_LOG("Sending X10 mouse sequence: " << std::hex << (int)(unsigned char)seq[0] << " " << (int)(unsigned char)seq[1] << " " << (int)(unsigned char)seq[2] << " " << (int)(unsigned char)seq[3] << " " << (int)(unsigned char)seq[4] << " " << (int)(unsigned char)seq[5] << std::dec);
-                m_terminalThread->QueueInput(seq_str);
+                if (m_isLocalTerminal && m_localTerminalThread) {
+                    m_localTerminalThread->QueueInput(seq_str);
+                } else if (m_terminalThread) {
+                    m_terminalThread->QueueInput(seq_str);
+                }
             }
         });
     }
@@ -241,19 +268,30 @@ void ConnectInfo::Connect() {
 
 void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
     SSH_LOG("OnTerminalDamage called");
-    if (!m_termCanvas || !m_terminalThread) {
-        SSH_LOG("OnTerminalDamage: m_termCanvas or m_terminalThread is null");
-        return;
+
+    // Get the appropriate thread based on terminal type
+    const ScreenBuffer* buffer = nullptr;
+    if (m_isLocalTerminal) {
+        if (!m_termCanvas || !m_localTerminalThread) {
+            SSH_LOG("OnTerminalDamage: m_termCanvas or m_localTerminalThread is null");
+            return;
+        }
+        buffer = m_localTerminalThread->GetFrontBuffer();
+    } else {
+        if (!m_termCanvas || !m_terminalThread) {
+            SSH_LOG("OnTerminalDamage: m_termCanvas or m_terminalThread is null");
+            return;
+        }
+        buffer = m_terminalThread->GetFrontBuffer();
     }
-    
-    const ScreenBuffer* buffer = m_terminalThread->GetFrontBuffer();
+
     if (!buffer) {
         SSH_LOG("OnTerminalDamage: buffer is null");
         return;
     }
-    
+
     SSH_LOG("OnTerminalDamage: buffer rows=" << buffer->rows << ", cols=" << buffer->cols << ", cursor=" << buffer->cursor_row << "," << buffer->cursor_col);
-    
+
     // Convert entire buffer to CellInstance vector
     std::vector<CellInstance> instances;
     for (int row = 0; row < buffer->rows; row++) {
@@ -264,12 +302,15 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
             instances.push_back(cell);
         }
     }
-    
+
     SSH_LOG("OnTerminalDamage: created " << instances.size() << " cell instances");
-    
+
     m_termCanvas->ClearScreenData();
     m_termCanvas->UpdateScreenData(instances);
-    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, m_terminalThread->IsInAlternateScreen());
+
+    // Get alternate screen state from appropriate thread
+    bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
+    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, inAltScreen);
     
     // Set cursor visibility based on event
     TerminalDamageEvent* damageEvent = dynamic_cast<TerminalDamageEvent*>(&event);
@@ -431,29 +472,29 @@ void ConnectInfo::OnSelected(wxMouseEvent& event) {
 
 void ConnectInfo::OnSize(wxSizeEvent& event) {
     SSH_LOG("ConnectInfo::OnSize called");
-    if (m_termCanvas && m_terminalThread) {
+    if (m_termCanvas) {
         wxSize size = m_termCanvas->GetSize();
-        
+
         // Get configured font size
         int fontSize = GlobalConfig::GetFontSize();
         if (fontSize == 0) fontSize = 12; // Default if not configured
-        
+
         // Scale for terminal rendering (same as in TermGLCanvas)
         int terminalFontSize = fontSize * 2;
         if (terminalFontSize < 12) terminalFontSize = 12;
         if (terminalFontSize > 72) terminalFontSize = 72;
-        
+
         // Calculate cell size based on font size
         int cellWidth = terminalFontSize / 2;
         int cellHeight = terminalFontSize;
-        
+
         // Ensure minimum cell size
         if (cellWidth < 6) cellWidth = 6;
         if (cellHeight < 12) cellHeight = 12;
-        
+
         int availableHeight = size.GetHeight();
         if (availableHeight < 100) availableHeight = 100;
-        
+
         int rows = availableHeight / cellHeight;
         int cols = size.GetWidth() / cellWidth;
         
@@ -464,17 +505,19 @@ void ConnectInfo::OnSize(wxSizeEvent& event) {
         // Track previous vterm size to avoid unnecessary resizes
         static int prevRows = 0;
         static int prevCols = 0;
-        
+
         // Only resize if vterm size actually changed
         if (rows != prevRows || cols != prevCols) {
             SSH_LOG("ConnectInfo::OnSize - TermGLCanvas size: " << size.GetWidth() << "x" << size.GetHeight()
                     << ", Calculated vterm: " << rows << "x" << cols);
-            
-            // Resize vterm in thread
-            // The thread will send damage events after resize completes
-            // and automatically reset scroll to bottom
-            m_terminalThread->ResizeVTerm(rows, cols);
-            
+
+            // Resize vterm in appropriate thread
+            if (m_isLocalTerminal && m_localTerminalThread) {
+                m_localTerminalThread->ResizeVTerm(rows, cols);
+            } else if (m_terminalThread) {
+                m_terminalThread->ResizeVTerm(rows, cols);
+            }
+
             prevRows = rows;
             prevCols = cols;
         }

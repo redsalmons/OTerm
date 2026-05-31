@@ -8,13 +8,14 @@
 
 class TermGLCanvas;
 class TerminalThread;
+class LocalTerminalThread;
 
 wxDECLARE_EVENT(wxEVT_TAB_CLOSE, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_TAB_SELECTED, wxCommandEvent);
 
 class ConnectInfo : public wxPanel {
 public:
-    ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true);
+    ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true, bool isLocalTerminal = false);
 
     void SetActive(bool active);
     bool IsActive() const { return m_isActive; }
@@ -25,6 +26,7 @@ public:
 
     void Connect();
     TerminalThread* GetTerminalThread() const { return m_terminalThread; }
+    LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
 
     void UpdateVTermSize(int rows, int cols);
 
@@ -47,8 +49,10 @@ private:
     DeviceConfig m_deviceConfig;
     bool m_isActive;
     bool m_isHovered;
+    bool m_isLocalTerminal;
 
     TerminalThread* m_terminalThread;
+    LocalTerminalThread* m_localTerminalThread;
     TermGLCanvas* m_termCanvas;
     std::string m_currentInput; // Record current keyboard input
     FileTransferDialog* m_fileTransferDialog; // File transfer dialog

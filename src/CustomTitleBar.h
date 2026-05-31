@@ -16,7 +16,7 @@ class wxSimplebook;
 class CustomTitleBar : public wxPanel {
 public:
     CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow = nullptr);
-    ConnectInfo* AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true);
+    ConnectInfo* AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true, bool isLocalTerminal = false);
     ConnectInfo* GetLastTab();
     void NotifyAllTabsResize();
 

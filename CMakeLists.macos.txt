@@ -55,6 +55,8 @@ add_executable(OceanTerm
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
     src/MasterPasswordDialog.cpp
+    src/LocalTerminalManager.cpp
+    src/LocalTerminalThread.cpp
 )
 
 target_include_directories(OceanTerm PRIVATE

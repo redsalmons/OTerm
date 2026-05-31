@@ -242,9 +242,9 @@ int CustomTitleBar::CalculateTabWidth() const {
     return tabWidth;
 }
 
-ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton) {
+ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal) {
     m_notebook->AddPage(contentPanel, label, true);
-    ConnectInfo* newTab = new ConnectInfo(this, label, contentPanel, deviceConfig, showCloseButton);
+    ConnectInfo* newTab = new ConnectInfo(this, label, contentPanel, deviceConfig, showCloseButton, isLocalTerminal);
     m_tabs.push_back(newTab);
 
     // Calculate individual tab width based on its own label

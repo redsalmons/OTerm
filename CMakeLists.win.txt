@@ -41,6 +41,8 @@ add_executable(OceanTerm WIN32
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
     src/MasterPasswordDialog.cpp
+    src/LocalTerminalManager.cpp
+    src/LocalTerminalThread.cpp
 )
 
 # Add include directories
