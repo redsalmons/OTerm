@@ -234,7 +234,17 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
 }
 
 void ConnectionDialog::OnConnect(wxCommandEvent& event) {
-    m_selectedDevice = m_currentDevice;
+    // Reload config to ensure password is decrypted with current master password
+    LoadConfig();
+
+    // Find the selected device from the reloaded config
+    for (const auto& dev : m_devices) {
+        if (dev.id == m_currentDevice.id) {
+            m_selectedDevice = dev;
+            break;
+        }
+    }
+
     EndModal(wxID_OK);
 }
 

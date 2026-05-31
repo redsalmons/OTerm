@@ -20,6 +20,7 @@ find_package(libuv CONFIG REQUIRED)
 find_package(Libssh2 CONFIG REQUIRED)
 find_package(wxWidgets CONFIG REQUIRED COMPONENTS core base gl)
 find_package(OpenGL REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # Create executable
 add_executable(OceanTerm WIN32
@@ -39,6 +40,7 @@ add_executable(OceanTerm WIN32
     src/GlobalConfig.cpp
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
+    src/MasterPasswordDialog.cpp
 )
 
 # Add include directories
@@ -67,6 +69,7 @@ target_link_libraries(OceanTerm PRIVATE
     wx::base
     wx::gl
     OpenGL::GL
+    OpenSSL::Crypto
     )
 
 # Platform-specific libraries

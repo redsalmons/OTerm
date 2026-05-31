@@ -127,6 +127,9 @@ msgstr "字体"
 msgid "fontSize"
 msgstr "字号"
 
+msgid "basicConfig"
+msgstr "基础配置"
+
 # CustomTitleBar
 msgid "oceanTerm"
 msgstr "OTerm"
@@ -160,4 +163,59 @@ msgid "transferFailed"
 msgstr "传输失败"
 
 msgid "welcomeSlogan"
-msgstr "依然我爱你"
+msgstr "依然爱你"
+
+# Master Password
+msgid "masterPasswordConfig"
+msgstr "系统主密码配置"
+
+msgid "enterPassword"
+msgstr "输入密码:"
+
+msgid "confirmPassword"
+msgstr "确认密码:"
+
+msgid "set"
+msgstr "设置"
+
+msgid "reset"
+msgstr "重置"
+
+msgid "masterPasswordSet"
+msgstr "主密码已设置"
+
+msgid "passwordCannotBeEmpty"
+msgstr "密码不能为空"
+
+msgid "passwordsDoNotMatch"
+msgstr "两次输入的密码不匹配"
+
+msgid "masterPasswordSetSuccessfully"
+msgstr "主密码设置成功"
+
+msgid "masterPasswordSavedSuccessfully"
+msgstr "主密码保存成功"
+
+msgid "masterPasswordResetSuccessfully"
+msgstr "主密码重置成功"
+
+msgid "error"
+msgstr "错误"
+
+msgid "success"
+msgstr "成功"
+
+msgid "setupMasterPassword"
+msgstr "设置主密码"
+
+msgid "enterMasterPassword"
+msgstr "输入主密码"
+
+msgid "ok"
+msgstr "确定"
+
+msgid "incorrectPasswordAttempts"
+msgstr "密码错误，剩余尝试次数：%d"
+
+msgid "tooManyFailedAttempts"
+msgstr "密码错误次数过多，程序将退出"

@@ -42,7 +42,7 @@ void SSHManager::init_log_file() {
     }
 
     try {
-        std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetWorkspacePath()) / "logs";
+        std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetLogPath());
         std::filesystem::create_directories(log_dir);
 
         auto now = std::chrono::system_clock::now();

@@ -15,4 +15,6 @@ struct DeviceConfig {
 
     static std::vector<DeviceConfig> LoadFromFile();
     static void SaveToFile(const std::vector<DeviceConfig>& devices);
+
+    static bool ReencryptWithNewPassword(const std::string& oldPassword, const std::string& newPassword);
 };

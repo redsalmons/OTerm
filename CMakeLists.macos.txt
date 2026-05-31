@@ -18,6 +18,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(PkgConfig REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(nlohmann_json QUIET CONFIG)
+find_package(OpenSSL REQUIRED)
 
 pkg_check_modules(VTERM REQUIRED IMPORTED_TARGET vterm)
 pkg_check_modules(LIBUV REQUIRED IMPORTED_TARGET libuv)
@@ -53,6 +54,7 @@ add_executable(OceanTerm
     src/GlobalConfig.cpp
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
+    src/MasterPasswordDialog.cpp
 )
 
 target_include_directories(OceanTerm PRIVATE
@@ -70,6 +72,7 @@ target_link_libraries(OceanTerm PRIVATE
     PkgConfig::LIBUV
     PkgConfig::LIBSSH2
     OpenGL::GL
+    OpenSSL::Crypto
 )
 
 target_link_options(OceanTerm PRIVATE

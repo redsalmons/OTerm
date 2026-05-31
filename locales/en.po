@@ -127,6 +127,9 @@ msgstr "Font"
 msgid "fontSize"
 msgstr "Font Size"
 
+msgid "basicConfig"
+msgstr "Basic Configuration"
+
 # CustomTitleBar
 msgid "oceanTerm"
 msgstr "OTerm"
@@ -161,3 +164,58 @@ msgstr "Transfer Failed"
 
 msgid "welcomeSlogan"
 msgstr "And yet, love remains"
+
+# Master Password
+msgid "masterPasswordConfig"
+msgstr "System Master Password Configuration"
+
+msgid "enterPassword"
+msgstr "Enter Password:"
+
+msgid "confirmPassword"
+msgstr "Confirm Password:"
+
+msgid "set"
+msgstr "Set"
+
+msgid "reset"
+msgstr "Reset"
+
+msgid "masterPasswordSet"
+msgstr "Master password has been set"
+
+msgid "passwordCannotBeEmpty"
+msgstr "Password cannot be empty"
+
+msgid "passwordsDoNotMatch"
+msgstr "Passwords do not match"
+
+msgid "masterPasswordSetSuccessfully"
+msgstr "Master password set successfully"
+
+msgid "masterPasswordSavedSuccessfully"
+msgstr "Master password saved successfully"
+
+msgid "masterPasswordResetSuccessfully"
+msgstr "Master password reset successfully"
+
+msgid "error"
+msgstr "Error"
+
+msgid "success"
+msgstr "Success"
+
+msgid "setupMasterPassword"
+msgstr "Setup Master Password"
+
+msgid "enterMasterPassword"
+msgstr "Enter Master Password"
+
+msgid "ok"
+msgstr "OK"
+
+msgid "incorrectPasswordAttempts"
+msgstr "Incorrect password. Remaining attempts: %d"
+
+msgid "tooManyFailedAttempts"
+msgstr "Too many failed attempts. Application will exit."

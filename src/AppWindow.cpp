@@ -1,6 +1,7 @@
 #include "AppWindow.h"
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
+#include "MasterPasswordDialog.h"
 #include <iostream>
 #include <wx/simplebook.h>
 #include "ConnectionDialog.h"
@@ -46,12 +47,86 @@ bool MyApp::OnInit() {
 
         wxLog::SetActiveTarget(new wxLogStderr);
 
+        // Set application name for proper config directory
+        wxApp::SetAppName("OceanTerm");
+        wxApp::SetVendorName("OceanTerm");
+
         // Initialize global config from command line arguments
         GlobalConfig::InitializeFromCommandLine(argc, argv);
 
+        // Load translations based on system language
+        wxLocale locale;
+        locale.Init();
+        wxString sysLang = locale.GetCanonicalName();
+        if (sysLang.StartsWith("zh")) {
+            TranslationHelper::Load("zh_CN");
+        } else {
+            TranslationHelper::Load("en");
+        }
+
+        // Master password authentication
+        if (!GlobalConfig::HasMasterPassword()) {
+            // No master password set, show setup dialog
+            MasterPasswordDialog setupDialog(nullptr, true);
+            if (setupDialog.ShowModal() != wxID_OK) {
+                // User cancelled, exit application
+                return false;
+            }
+
+            wxString password = setupDialog.GetPassword();
+            GlobalConfig::SetMasterPassword(password.ToStdString());
+
+            // Initialize language, font, and font size to system defaults
+            wxLocale locale;
+            locale.Init();
+            wxString sysLang = locale.GetCanonicalName();
+            if (sysLang.StartsWith("zh")) {
+                GlobalConfig::SetLanguage("zh_CN");
+            } else {
+                GlobalConfig::SetLanguage("en");
+            }
+
+            // Font and font size will use system defaults (empty string and 0)
+            GlobalConfig::SetFontName("");
+            GlobalConfig::SetFontSize(0);
+
+            GlobalConfig::SaveSettings();
+            GlobalConfig::SetActiveMasterPassword(password.ToStdString());
+        } else {
+            // Master password exists, show login dialog
+            int maxAttempts = 3;
+            int attempts = 0;
+
+            while (attempts < maxAttempts) {
+                MasterPasswordDialog loginDialog(nullptr, false);
+                if (loginDialog.ShowModal() != wxID_OK) {
+                    // User cancelled, exit application
+                    return false;
+                }
+
+                wxString password = loginDialog.GetPassword();
+                if (GlobalConfig::VerifyMasterPassword(password.ToStdString())) {
+                    // Password correct, save to memory and continue
+                    GlobalConfig::SetActiveMasterPassword(password.ToStdString());
+                    break;
+                } else {
+                    attempts++;
+                    int remainingAttempts = maxAttempts - attempts;
+                    if (remainingAttempts > 0) {
+                        wxMessageBox(wxString::Format(TranslationHelper::Tr("incorrectPasswordAttempts"), remainingAttempts),
+                                    TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+                    } else {
+                        wxMessageBox(TranslationHelper::Tr("tooManyFailedAttempts"),
+                                    TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+                        return false;
+                    }
+                }
+            }
+        }
+
         // Initialize SSH log file early
         try {
-            std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetWorkspacePath()) / "logs";
+            std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetLogPath());
             std::filesystem::create_directories(log_dir);
 
             auto now = std::chrono::system_clock::now();
