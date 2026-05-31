@@ -29,9 +29,9 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     if (dpiScale <= 0.0) dpiScale = 1.0;
 #endif
     
-    int baseHeight = 50;
+    int baseHeight = 32;
 #ifdef __APPLE__
-    int scaledHeight = 50;
+    int scaledHeight = 32;
 #else
     int scaledHeight = static_cast<int>(baseHeight * dpiScale);
 #endif
@@ -189,18 +189,18 @@ ConnectInfo* CustomTitleBar::GetLastTab() {
 int CustomTitleBar::CalculateTabWidth() const {
     int totalWidth = GetClientSize().GetWidth();
     int titleWidth = m_titleText->GetSize().GetWidth() + 40;
-    
+
     // Get actual button sizes (they are DPI-scaled now)
     int newTabWidth = m_newTabButton->GetSize().GetWidth();
     int drawerWidth = m_drawerButton->GetSize().GetWidth();
     int minBtnWidth = m_minimizeButton->GetSize().GetWidth();
     int maxBtnWidth = m_maximizeButton->GetSize().GetWidth();
     int closeBtnWidth = m_closeButton->GetSize().GetWidth();
-    
+
     int buttonGap = 5;
     int rightButtonsWidth = drawerWidth + minBtnWidth + maxBtnWidth + closeBtnWidth + buttonGap * 4;
     int availWidth = totalWidth - titleWidth - newTabWidth - rightButtonsWidth - 20;
-    
+
     // Each tab has 3px margin on all sides (6px total per tab)
     int tabMargin = 6;
     int totalTabs = (int)m_tabs.size();
@@ -211,19 +211,34 @@ int CustomTitleBar::CalculateTabWidth() const {
         return 120;
 #endif
     }
-    
-    // Calculate tab width dynamically based on available space
-    int tabWidth = (availWidth - tabMargin * totalTabs) / totalTabs;
-    
+
+    // Calculate tab width based on title content
+    wxClientDC dc(const_cast<CustomTitleBar*>(this));
+    int maxTextWidth = 0;
+    for (const auto& tab : m_tabs) {
+        wxSize textSize = dc.GetTextExtent(tab->GetLabel());
+        maxTextWidth = std::max(maxTextWidth, textSize.GetWidth());
+    }
+
+    // Add padding for close button and margins
+    int tabWidth = maxTextWidth + 30; // 30px padding for close button and margins
+
     // Set minimum and maximum tab width
-    int minTabWidth = 120;
+    int minTabWidth = 80;
     int maxTabWidth = 200;
 #ifdef __APPLE__
     minTabWidth /= 2;
     maxTabWidth /= 2;
 #endif
     tabWidth = std::max(minTabWidth, std::min(maxTabWidth, tabWidth));
-    
+
+    // Ensure total tabs fit in available space
+    int totalRequiredWidth = tabWidth * totalTabs + tabMargin * totalTabs;
+    if (totalRequiredWidth > availWidth && totalTabs > 0) {
+        tabWidth = (availWidth - tabMargin * totalTabs) / totalTabs;
+        tabWidth = std::max(minTabWidth, tabWidth);
+    }
+
     return tabWidth;
 }
 
@@ -232,9 +247,13 @@ ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPane
     ConnectInfo* newTab = new ConnectInfo(this, label, contentPanel, deviceConfig, showCloseButton);
     m_tabs.push_back(newTab);
 
-    // Calculate dynamic tab width
-    int tabWidth = CalculateTabWidth();
+    // Calculate individual tab width based on its own label
+    wxClientDC dc(this);
+    wxSize textSize = dc.GetTextExtent(label);
+    int tabWidth = textSize.GetWidth() + 30; // 30px padding for close button and margins
+
     newTab->SetMinSize(wxSize(tabWidth, newTab->GetMinSize().GetHeight()));
+    newTab->SetSize(wxSize(tabWidth, newTab->GetSize().GetHeight()));
 
     int tabMargin = 6;
 
@@ -277,7 +296,11 @@ ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPane
     // 高亮新添加的tab
     newTab->SetActive(true);
 
+    // Force layout update
+    m_tabContainer->Layout();
     Layout();
+    Refresh();
+
     return newTab;
 }
 
@@ -407,18 +430,95 @@ void CustomTitleBar::OnNewTerminal(wxCommandEvent& event) {
 void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
     ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
     int tabIndex = -1;
+    int currentActiveIndex = -1;
+
     for (size_t i = 0; i < m_tabs.size(); ++i) {
         if (m_tabs[i] == tab) {
             tabIndex = (int)i;
-            break;
+        }
+        if (m_tabs[i]->IsActive()) {
+            currentActiveIndex = (int)i;
         }
     }
 
     if (tabIndex != -1) {
-        m_notebook->RemovePage(m_notebook->FindPage(m_tabs[tabIndex]->GetContentPanel()));
+        wxWindow* contentPanel = m_tabs[tabIndex]->GetContentPanel();
+        int notebookPage = m_notebook->FindPage(contentPanel);
+
+        // Check if we're closing the currently active tab
+        bool closingActiveTab = (tabIndex == currentActiveIndex);
+
+        // Determine which tab to switch to next if closing the active tab
+        int nextTabIndex = -1;
+        if (closingActiveTab && m_tabs.size() > 1) {
+            // Try to switch to the next tab, or the previous tab if this is the last one
+            if (tabIndex < (int)m_tabs.size() - 1) {
+                nextTabIndex = tabIndex; // Next tab will be at same index after erase
+            } else if (tabIndex > 0) {
+                nextTabIndex = tabIndex - 1; // Previous tab
+            }
+        }
+
+        // Switch to next tab BEFORE removing the current page (only if closing active tab)
+        if (closingActiveTab) {
+            if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
+                wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
+                int nextNotebookPage = m_notebook->FindPage(nextContentPanel);
+                if (nextNotebookPage != wxNOT_FOUND) {
+                    m_notebook->SetSelection(nextNotebookPage);
+                }
+            } else if (m_tabs.size() > 0) {
+                // Only homepage tab remains, switch to it
+                wxWindow* homeContentPanel = m_tabs[0]->GetContentPanel();
+                int homeNotebookPage = m_notebook->FindPage(homeContentPanel);
+                if (homeNotebookPage != wxNOT_FOUND) {
+                    m_notebook->SetSelection(homeNotebookPage);
+                }
+            } else {
+                // No tabs at all, show first page in notebook (should be homepage)
+                if (m_notebook->GetPageCount() > 0) {
+                    m_notebook->SetSelection(0);
+                }
+            }
+        }
+
+        // Remove the page
+        if (notebookPage != wxNOT_FOUND) {
+            m_notebook->RemovePage(notebookPage);
+        }
+
         m_tabs.erase(m_tabs.begin() + tabIndex);
         m_tabContainer->Detach(tab);
         tab->Destroy();
+
+        // Update tab activation states
+        if (closingActiveTab) {
+            if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
+                for (size_t i = 0; i < m_tabs.size(); ++i) {
+                    m_tabs[i]->SetActive(i == (size_t)nextTabIndex);
+                }
+            } else if (m_tabs.size() > 0) {
+                m_tabs[0]->SetActive(true);
+            }
+        } else {
+            // Keep the current active tab active, adjust its index if needed
+            if (currentActiveIndex != -1 && currentActiveIndex < (int)m_tabs.size()) {
+                for (size_t i = 0; i < m_tabs.size(); ++i) {
+                    m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
+                }
+            } else if (m_tabs.size() > 0) {
+                // If the active tab was after the closed tab, its index decreased
+                if (currentActiveIndex > tabIndex) {
+                    currentActiveIndex--;
+                }
+                if (currentActiveIndex >= 0 && currentActiveIndex < (int)m_tabs.size()) {
+                    for (size_t i = 0; i < m_tabs.size(); ++i) {
+                        m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
+                    }
+                }
+            }
+        }
+
         LayoutTabs();
     }
 }

@@ -28,15 +28,16 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         }
     }
     if (dpiScale <= 0.0) dpiScale = 1.0;
-    
-    // Set tab height based on DPI scale (macOS Retina: do NOT scale, wxWidgets handles it)
-    int baseTabHeight = 35;
+
+    // Set tab height to 28px
+    int baseTabHeight = 28;
 #ifdef __APPLE__
     int scaledTabHeight = baseTabHeight;
 #else
     int scaledTabHeight = static_cast<int>(baseTabHeight * dpiScale);
 #endif
-    SetMinSize(wxSize(120, scaledTabHeight));
+    // Set minimum height only, let width be set dynamically
+    SetMinSize(wxSize(-1, scaledTabHeight));
     
     m_label = new wxStaticText(this, wxID_ANY, label, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
     m_label->SetForegroundColour(*wxWHITE);
@@ -61,7 +62,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     m_closeButton->Show(showCloseButton);
 
     wxBoxSizer* h_sizer = new wxBoxSizer(wxHORIZONTAL);
-    h_sizer->Add(m_label, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
+    h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
     if (showCloseButton) {
         h_sizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
     }
@@ -413,6 +414,10 @@ void ConnectInfo::OnLeave(wxMouseEvent& event) {
 }
 
 void ConnectInfo::OnClose(wxCommandEvent& event) {
+    // Stop event propagation to prevent parent from handling the button click
+    event.StopPropagation();
+
+    // Send close event with this tab as the event object
     wxCommandEvent closeEvent(wxEVT_TAB_CLOSE, GetId());
     closeEvent.SetEventObject(this);
     wxPostEvent(GetParent(), closeEvent);

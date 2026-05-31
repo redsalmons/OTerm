@@ -17,9 +17,11 @@ public:
     ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true);
 
     void SetActive(bool active);
+    bool IsActive() const { return m_isActive; }
     wxWindow* GetContentPanel() const;
     DeviceConfig GetDeviceConfig() const;
     TermGLCanvas* GetCanvas() const { return m_termCanvas; }
+    wxString GetLabel() const { return m_label->GetLabel(); }
 
     void Connect();
     TerminalThread* GetTerminalThread() const { return m_terminalThread; }

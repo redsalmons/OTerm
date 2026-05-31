@@ -214,7 +214,10 @@ void AppWindow::CreateTerminalTab() {
 
         TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
         SSH_LOG("TermGLCanvas created");
-        ConnectInfo* newTab = m_titleBar->AddTab(newDevice.name, terminalCanvas, newDevice);
+
+        // Create tab label as "username@address"
+        wxString tabLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
+        ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalCanvas, newDevice);
         SSH_LOG("Tab added to title bar");
 
         // Connect to SSH
