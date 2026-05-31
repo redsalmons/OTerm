@@ -50,8 +50,8 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
 }
 
 bool FontAtlas::GenerateTextureAtlas() {
-    int charCount = 95; 
-    int charSize = 48; // Use 48px to fit all Chinese characters
+    int charCount = 95;
+    int charSize = m_fontSize; // Use configured font size
     
     // Increase texture size to support Unicode characters including Chinese
     // ASCII (32-126) + CJK Unified Ideographs (U+4E00-U+9FFF) subset
@@ -75,19 +75,20 @@ bool FontAtlas::GenerateTextureAtlas() {
     int x = 0;
     int y = 0;
     int rowHeight = charSize;
+    int rowGap = 8; // Increase vertical gap to prevent bleeding for Chinese characters
     
     // Add ASCII characters (32-126)
     for (int i = 32; i <= 126; i++) {
         char32_t charCode = static_cast<char32_t>(i);
         AddCharToAtlas(charCode, dc, x, y, rowHeight);
-        
+
         x += charSize;
         if (x + charSize > m_textureWidth) {
             x = 0;
-            y += rowHeight;
+            y += rowHeight + rowGap;
         }
     }
-    
+
     // Add common Chinese characters (CJK Unified Ideographs)
     // Adding a comprehensive range of frequently used Chinese characters
     // U+4E00 to U+9FFF (CJK Unified Ideographs basic range)
@@ -95,11 +96,11 @@ bool FontAtlas::GenerateTextureAtlas() {
     for (char32_t charCode = 0x4E00; charCode <= 0x9FFF; charCode++) {
         AddCharToAtlas(charCode, dc, x, y, rowHeight);
         chars_added++;
-        
+
         x += charSize;
         if (x + charSize > m_textureWidth) {
             x = 0;
-            y += rowHeight;
+            y += rowHeight + rowGap;
         }
         if (y + rowHeight > m_textureHeight) {
             SSH_LOG("FontAtlas: Texture atlas full, stopped at char: 0x" << std::hex << static_cast<uint32_t>(charCode) << std::dec << " after adding " << chars_added << " Chinese characters");
@@ -187,26 +188,27 @@ void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int 
     wxSize extent = dc.GetTextExtent(text);
     int charWidth = extent.x;
     int charHeight = extent.y;
-    
+
     // Draw character at top of cell with padding
-    // Only apply vertical centering for wide characters (Chinese, etc.)
-    int vertical_offset = 0;
+    // Adjust vertical offset for Chinese characters to align baseline with English
+    int draw_x = x + 2;
+    int draw_y = y + 2;
     if (charCode > 127) {
-        vertical_offset = (rowHeight - charHeight) / 2;
+        // Chinese characters need vertical adjustment to align with English baseline
+        draw_y += 2; // Shift down slightly for Chinese characters
     }
-    dc.DrawText(text, x + 2, y + vertical_offset + 2);
-    
-    // Store metrics with padding to prevent texture bleeding
+    dc.DrawText(text, draw_x, draw_y);
+
+    // Store metrics using actual draw size, no padding cropping
     CharMetrics metrics;
-    float padding = 1.0f / m_textureWidth; // 1 pixel padding in texture coordinates
-    metrics.u = (static_cast<float>(x) + 1.0f) / m_textureWidth; // Add 1 pixel padding
-    metrics.v = (static_cast<float>(y) + 1.0f) / m_textureHeight; // Add 1 pixel padding
-    metrics.w = (static_cast<float>(charWidth) - 2.0f) / m_textureWidth; // Subtract 2 pixels from width
-    metrics.h = (static_cast<float>(charHeight) - 2.0f) / m_textureHeight; // Subtract 2 pixels from height
+    metrics.u = static_cast<float>(x) / m_textureWidth;
+    metrics.v = static_cast<float>(y) / m_textureHeight;
+    metrics.w = static_cast<float>(charWidth) / m_textureWidth;
+    metrics.h = static_cast<float>(charHeight) / m_textureHeight;
     metrics.advance = static_cast<float>(charWidth);
     metrics.bearingX = 0.0f;
     metrics.bearingY = 0.0f;
-    
+
     m_charMetrics[charCode] = metrics;
 }
 
