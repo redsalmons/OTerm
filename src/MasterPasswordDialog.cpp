@@ -6,6 +6,7 @@
 wxBEGIN_EVENT_TABLE(MasterPasswordDialog, wxDialog)
     EVT_BUTTON(wxID_OK, MasterPasswordDialog::OnOK)
     EVT_BUTTON(wxID_CANCEL, MasterPasswordDialog::OnCancel)
+    EVT_TEXT_ENTER(wxID_ANY, MasterPasswordDialog::OnOK)
 wxEND_EVENT_TABLE()
 
 MasterPasswordDialog::MasterPasswordDialog(wxWindow* parent, bool isNewPassword)
@@ -20,20 +21,20 @@ MasterPasswordDialog::MasterPasswordDialog(wxWindow* parent, bool isNewPassword)
         // New password setup
         wxBoxSizer* password1Sizer = new wxBoxSizer(wxHORIZONTAL);
         password1Sizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("enterPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 10);
-        m_passwordCtrl = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
+        m_passwordCtrl = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD | wxTE_PROCESS_ENTER);
         password1Sizer->Add(m_passwordCtrl, 1, wxEXPAND | wxALL, 10);
         mainSizer->Add(password1Sizer, 0, wxEXPAND);
 
         wxBoxSizer* password2Sizer = new wxBoxSizer(wxHORIZONTAL);
         password2Sizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("confirmPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 10);
-        m_confirmPasswordCtrl = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
+        m_confirmPasswordCtrl = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD | wxTE_PROCESS_ENTER);
         password2Sizer->Add(m_confirmPasswordCtrl, 1, wxEXPAND | wxALL, 10);
         mainSizer->Add(password2Sizer, 0, wxEXPAND);
     } else {
         // Existing password login
         wxBoxSizer* passwordSizer = new wxBoxSizer(wxHORIZONTAL);
         passwordSizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("enterPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 10);
-        m_passwordCtrl = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
+        m_passwordCtrl = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD | wxTE_PROCESS_ENTER);
         passwordSizer->Add(m_passwordCtrl, 1, wxEXPAND | wxALL, 10);
         mainSizer->Add(passwordSizer, 0, wxEXPAND);
         m_confirmPasswordCtrl = nullptr;

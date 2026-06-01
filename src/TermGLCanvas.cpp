@@ -410,8 +410,6 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 }
 
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
-    SSH_LOG("TermGLCanvas::OnKeyDown called - KeyCode: " << event.GetKeyCode() << ", ControlDown: " << event.ControlDown());
-    
     // Check for Ctrl+C to copy selection
     if (event.ControlDown() && event.GetKeyCode() == 'C') {
         CopySelectionToClipboard();
@@ -455,7 +453,7 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
             return;
         }
     }
-    
+
     // For regular text input, let CHAR_HOOK handle it
     event.Skip();
 }
@@ -756,52 +754,13 @@ void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
 
 void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
     int keycode = event.GetKeyCode();
-    SSH_LOG("TermGLCanvas::OnProxyKeyDown called, keycode: " << keycode);
 
-    // Preemptive position sync: move input box to current cursor position BEFORE IME responds
-    if (m_imeInputBox && m_imeInputBoxVisible) {
-        int fontSize = m_fontAtlas ? m_fontAtlas->GetFontSize() : 12;
-        int cell_width = fontSize / 2;
-        int cell_height = fontSize;
-        
-        if (cell_width < 6) cell_width = 6;
-        if (cell_height < 12) cell_height = 12;
-        
-        int x = m_cursor_col * cell_width + 7; // Add 7px offset to correct position (5+2)
-        int y = m_cursor_row * cell_height + 5; // Add 5px offset to correct position
-        
-        wxSize size = GetSize();
-        if (x > size.GetWidth() - cell_width) x = size.GetWidth() - cell_width;
-        if (y > size.GetHeight() - cell_height) y = size.GetHeight() - cell_height;
-        
-        // Set input box size and position to match cursor cell exactly
-        m_imeInputBox->SetSize(x, y, cell_width, cell_height);
-        SSH_LOG("Preemptive IME input box position and size sync to: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
-    }
-
-    // Check if IME is active (macOS)
-    bool is_ime_active = false;
-#ifdef __WXMAC__
-    // On macOS, we can check if the input method is active by checking the text input context
-    // This is a simplified check - in production you might need more sophisticated detection
-    is_ime_active = !m_imeInputBox->GetValue().IsEmpty();
-#endif
-
-    if (is_ime_active) {
-        // If IME is active, let it handle the key (for selecting candidates, etc.)
-        SSH_LOG("IME is active, skipping key handling");
-        event.Skip();
-        return;
-    }
-
-    // Handle control keys when IME is not active (pure English state)
+    // Always handle control keys regardless of IME state
     if (keycode == WXK_RETURN || keycode == WXK_BACK || keycode == WXK_DELETE ||
         keycode == WXK_TAB || keycode == WXK_ESCAPE ||
         (keycode >= WXK_LEFT && keycode <= WXK_DOWN) ||
         keycode == WXK_HOME || keycode == WXK_END || keycode == WXK_PAGEUP || keycode == WXK_PAGEDOWN)
     {
-        SSH_LOG("Control key detected, sending to terminal: " << keycode);
-        
         // Convert keycode to terminal escape sequence
         std::string key_seq;
         switch (keycode) {
@@ -847,16 +806,20 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
             default:
                 break;
         }
-        
-        if (!key_seq.empty() && m_imeCallback) {
-            m_imeCallback(key_seq.c_str(), key_seq.length());
-            SSH_LOG("Control key sent to terminal");
+
+        if (!key_seq.empty()) {
+            if (m_imeCallback) {
+                m_imeCallback(key_seq.c_str(), key_seq.length());
+            } else if (key_callback_) {
+                // Fallback to key_callback if imeCallback is not set
+                key_callback_(key_seq.c_str(), key_seq.length());
+            }
         }
-    } else {
-        // Normal A-Z characters, let them pass through to wxTextCtrl
-        SSH_LOG("Normal character, skipping to text input");
-        event.Skip();
+        return;  // Don't skip - we handled it
     }
+
+    // For normal characters, let IME handle them
+    event.Skip();
 }
 
 void TermGLCanvas::OnIMETextLostFocus(wxFocusEvent& event) {
