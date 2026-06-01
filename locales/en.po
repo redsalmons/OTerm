@@ -94,6 +94,15 @@ msgstr "Key"
 msgid "selectKeyFile"
 msgstr "Select Key File"
 
+msgid "failedToReadKeyFile"
+msgstr "Failed to read key file"
+
+msgid "keyContentCannotBeEmpty"
+msgstr "Key content cannot be empty"
+
+msgid "invalidKeyFormat"
+msgstr "Invalid key format. Please ensure you paste a private key (containing -----BEGIN and -----END)"
+
 msgid "devices"
 msgstr "Devices"
 

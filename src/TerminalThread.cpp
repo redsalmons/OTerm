@@ -153,7 +153,8 @@ wxThread::ExitCode TerminalThread::Entry() {
         return (ExitCode)1;
     }
     m_sshManager.connect(m_deviceConfig.address, std::stoi(m_deviceConfig.port),
-                         m_deviceConfig.username, m_deviceConfig.password);
+                         m_deviceConfig.username, m_deviceConfig.password,
+                         m_deviceConfig.auth_method);
     
     // Main loop
     while (!TestDestroy()) {

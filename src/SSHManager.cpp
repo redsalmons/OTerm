@@ -106,16 +106,18 @@ bool SSHManager::initialize(uv_loop_t* loop) {
 }
 
 bool SSHManager::connect(const std::string& host, int port,
-                         const std::string& username, const std::string& password) {
+                         const std::string& username, const std::string& password,
+                         const std::string& auth_method) {
     SSH_LOG("=== Starting SSH connection ===");
     SSH_LOG("  Target: " << host << ":" << port);
     SSH_LOG("  Username: " << username);
-    SSH_LOG("  Password: " << password);
+    SSH_LOG("  Auth method: " << auth_method);
 
     host_ = host;
     port_ = port;
     username_ = username;
     password_ = password;
+    auth_method_ = auth_method;
 
     if (uv_tcp_init(loop_, &tcp_handle_) != 0) {
         SSH_ERR("Failed to initialize TCP handle");
@@ -309,7 +311,34 @@ void SSHManager::handle_ssh_events(int status, int events) {
 
 void SSHManager::perform_authentication() {
     // SSH_LOG("Authenticating as '" << username_ << "'...");
-    int rc = libssh2_userauth_password(ssh_session_, username_.c_str(), password_.c_str());
+    int rc = 0;
+
+    if (auth_method_ == "key") {
+        // Key authentication using memory
+        SSH_LOG("Using key authentication");
+        SSH_LOG("  Private key length: " << password_.length());
+
+        rc = libssh2_userauth_publickey_frommemory(
+            ssh_session_,
+            username_.c_str(), username_.length(),
+            nullptr, 0,  // No public key data (will be derived from private key)
+            password_.c_str(), password_.length(),  // Private key data
+            nullptr  // No passphrase
+        );
+
+        if (rc != 0) {
+            SSH_ERR("libssh2_userauth_publickey_frommemory failed with error: " << rc);
+            SSH_ERR("  This may indicate:");
+            SSH_ERR("  1. Invalid key format");
+            SSH_ERR("  2. Key requires a passphrase");
+            SSH_ERR("  3. Public key needs to be provided separately");
+        }
+    } else {
+        // Password authentication
+        SSH_LOG("Using password authentication");
+        rc = libssh2_userauth_password(ssh_session_, username_.c_str(), password_.c_str());
+    }
+
     if (rc == 0) {
         SSH_LOG("Authentication successful -> " << state_name(SSH_CHANNEL_OPENING));
         ssh_state_ = SSH_CHANNEL_OPENING;

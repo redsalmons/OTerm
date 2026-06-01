@@ -94,6 +94,15 @@ msgstr "密钥"
 msgid "selectKeyFile"
 msgstr "选择密钥文件"
 
+msgid "failedToReadKeyFile"
+msgstr "读取密钥文件失败"
+
+msgid "keyContentCannotBeEmpty"
+msgstr "密钥内容不能为空"
+
+msgid "invalidKeyFormat"
+msgstr "无效的密钥格式，请确保粘贴的是私钥（包含 -----BEGIN 和 -----END）"
+
 msgid "devices"
 msgstr "设备"
 

@@ -50,11 +50,44 @@ void LocalTerminalThread::ResizeVTerm(int rows, int cols) {
 }
 
 void LocalTerminalThread::ScrollVTerm(int lines) {
+    SSH_LOG("LocalTerminalThread::ScrollVTerm called with lines=" << lines);
+    SSH_LOG("  Current scroll offset: " << m_vtermManager.get_scroll_offset());
+
+    // Call VTermManager scroll methods directly (thread-safe as it only reads/modifies internal state)
     if (lines > 0) {
         m_vtermManager.scroll_up(lines);
     } else {
         m_vtermManager.scroll_down(-lines);
     }
+
+    SSH_LOG("  After scroll, new offset: " << m_vtermManager.get_scroll_offset());
+
+    // Manually update back buffer with get_screen_row (supports scrollback history)
+    for (int row = 0; row < m_rows; ++row) {
+        const auto& row_cells = m_vtermManager.get_screen_row(row);
+        for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
+            const auto& cell = row_cells[col];
+            CellInstance& inst = m_back_buffer.cells[row][col];
+            inst.cell_x = (float)col;
+            inst.cell_y = (float)row;
+            inst.uv_u = 0;
+            inst.uv_v = 0;
+            inst.uv_w = 0;
+            inst.uv_h = 0;
+            inst.char_code = cell.char_code;
+            inst.fg_color = cell.fg_color;
+            inst.bg_color = cell.bg_color;
+        }
+    }
+
+    // Update cursor position in back buffer
+    VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
+    m_back_buffer.cursor_row = cursor_pos.row;
+    m_back_buffer.cursor_col = cursor_pos.col;
+
+    SSH_LOG("  Cursor position: " << cursor_pos.row << "," << cursor_pos.col);
+    SSH_LOG("  Sending damage event");
+
     send_damage_event(false);
 }
 

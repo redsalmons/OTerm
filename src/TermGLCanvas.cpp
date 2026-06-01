@@ -477,7 +477,8 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
             }
         }
     }
-    // Don't skip - we handled it
+    // Skip to allow repeat key events (important for holding down keys in vi mode)
+    event.Skip();
 }
 
 void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
@@ -488,17 +489,20 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
     int delta = event.GetWheelRotation();
     int lines = delta / event.GetWheelDelta();
-    
+
     // Normal scrolling
     SSH_LOG("TermGLCanvas::OnMouseWheel: delta=" << delta << ", lines=" << lines);
-    
+    SSH_LOG("  scroll_callback_ is " << (scroll_callback_ ? "set" : "NULL"));
+
     // Call scroll callback if set
     if (scroll_callback_) {
         scroll_callback_(lines);
+    } else {
+        SSH_LOG("  WARNING: scroll_callback_ is NULL, scroll will not work");
     }
-    
+
     Refresh();
-    
+
     event.Skip();
 }
 

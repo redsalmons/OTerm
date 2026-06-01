@@ -1,6 +1,8 @@
 #include "ConnectionDialog.h"
 #include "TranslationHelper.h"
+#include "SSHManager.h"
 #include <wx/filedlg.h>
+#include <wx/file.h>
 
 ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
     : wxDialog(parent, wxID_ANY, title, wxDefaultPosition,
@@ -66,9 +68,9 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
     wxBoxSizer* passwordSizer = new wxBoxSizer(wxHORIZONTAL);
     m_passwordCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
     passwordSizer->Add(m_passwordCtrl, 1, wxEXPAND);
-    m_keyPathCtrl = new wxTextCtrl(formPanel, wxID_ANY, "");
-    m_keyPathCtrl->Hide();
-    passwordSizer->Add(m_keyPathCtrl, 1, wxEXPAND);
+    m_keyTextCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE | wxTE_DONTWRAP);
+    m_keyTextCtrl->Hide();
+    passwordSizer->Add(m_keyTextCtrl, 1, wxEXPAND);
     m_keyBrowseButton = new wxButton(formPanel, wxID_ANY, TranslationHelper::Tr("browse"));
     m_keyBrowseButton->Hide();
     passwordSizer->Add(m_keyBrowseButton, 0, wxLEFT, 5);
@@ -170,7 +172,7 @@ void ConnectionDialog::PopulateForm(const DeviceConfig& device) {
     m_groupCtrl->SetValue(device.group);
     m_authChoice->SetStringSelection(device.auth_method == "password" ? TranslationHelper::Tr("password") : TranslationHelper::Tr("key"));
     m_passwordCtrl->SetValue(device.password);
-    m_keyPathCtrl->SetValue(device.password);
+    m_keyTextCtrl->SetValue(device.password);
     UpdatePasswordFieldVisibility();
 }
 
@@ -207,11 +209,14 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
     m_currentDevice.group = m_groupCtrl->GetValue().ToStdString();
     m_currentDevice.auth_method = m_authChoice->GetStringSelection() == TranslationHelper::Tr("password") ? "password" : "key";
 
-    // Save password or key path based on auth method
+    // Save password or key content based on auth method
     if (m_currentDevice.auth_method == "password") {
         m_currentDevice.password = m_passwordCtrl->GetValue().ToStdString();
     } else {
-        m_currentDevice.password = m_keyPathCtrl->GetValue().ToStdString();
+        wxString keyContent = m_keyTextCtrl->GetValue();
+        // Replace Chinese dashes with standard dashes
+        keyContent.Replace("——", "-----");
+        m_currentDevice.password = keyContent.ToStdString();
     }
 
     // Find and update by group and name, or add as new
@@ -245,6 +250,14 @@ void ConnectionDialog::OnConnect(wxCommandEvent& event) {
         }
     }
 
+    // Validate key content if using key authentication
+    if (m_selectedDevice.auth_method == "key") {
+        if (m_selectedDevice.password.empty()) {
+            wxMessageBox(TranslationHelper::Tr("keyContentCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+            return;
+        }
+    }
+
     EndModal(wxID_OK);
 }
 
@@ -258,18 +271,36 @@ void ConnectionDialog::OnAuthMethodChanged(wxCommandEvent& event) {
 
 void ConnectionDialog::OnKeyBrowse(wxCommandEvent& event) {
     wxFileDialog openFileDialog(this, TranslationHelper::Tr("selectKeyFile"), "",
-                                 "", "Key Files (*.pem;*.key)|*.pem;*.key|All files (*.*)|*.*",
+                                 "", "Key Files (*.pem;*.key;*.ppk)|*.pem;*.key;*.ppk|All files (*.*)|*.*",
                                  wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (openFileDialog.ShowModal() == wxID_CANCEL) {
         return;
     }
-    m_keyPathCtrl->SetValue(openFileDialog.GetPath());
+
+    wxString filePath = openFileDialog.GetPath();
+    wxFile file(filePath, wxFile::read);
+    if (!file.IsOpened()) {
+        wxMessageBox(TranslationHelper::Tr("failedToReadKeyFile"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+        return;
+    }
+
+    // Read file content
+    size_t fileSize = file.Length();
+    char* buffer = new char[fileSize + 1];
+    file.Read(buffer, fileSize);
+    buffer[fileSize] = '\0';
+    file.Close();
+
+    wxString keyContent(buffer, wxConvUTF8);
+    delete[] buffer;
+
+    m_keyTextCtrl->SetValue(keyContent);
 }
 
 void ConnectionDialog::UpdatePasswordFieldVisibility() {
     bool isKeyAuth = m_authChoice->GetStringSelection() == TranslationHelper::Tr("key");
     m_passwordCtrl->Show(!isKeyAuth);
-    m_keyPathCtrl->Show(isKeyAuth);
+    m_keyTextCtrl->Show(isKeyAuth);
     m_keyBrowseButton->Show(isKeyAuth);
     Layout();
 }

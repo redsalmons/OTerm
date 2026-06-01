@@ -43,7 +43,7 @@ private:
     wxTextCtrl* m_groupCtrl;
     wxChoice* m_authChoice;
     wxTextCtrl* m_passwordCtrl;
-    wxTextCtrl* m_keyPathCtrl;
+    wxTextCtrl* m_keyTextCtrl;
     wxButton* m_keyBrowseButton;
     wxButton* m_connectButton;
 

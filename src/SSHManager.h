@@ -70,8 +70,9 @@ public:
     bool initialize(uv_loop_t* loop);
     
     // Connect to SSH server
-    bool connect(const std::string& host, int port, 
-                const std::string& username, const std::string& password);
+    bool connect(const std::string& host, int port,
+                const std::string& username, const std::string& password,
+                const std::string& auth_method = "password");
     
     // Send data to SSH channel
     bool send_data(const char* data, int length);
@@ -135,6 +136,7 @@ private:
     int port_;
     std::string username_;
     std::string password_;
+    std::string auth_method_;
     
     // Data callback
     DataCallback data_callback_;
