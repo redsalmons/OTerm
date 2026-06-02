@@ -111,8 +111,8 @@ void TermGLCanvas::InitializeGL() {
     std::string fontName = GlobalConfig::GetFontName();
     int fontSize = GlobalConfig::GetFontSize();
     
-    // Scale the configured font size for terminal rendering (multiply by 1.5 for better visibility)
-    int terminalFontSize = static_cast<int>(fontSize * 1.5);
+    // Scale the configured font size for terminal rendering (multiply by 2 for better visibility)
+    int terminalFontSize = static_cast<int>(fontSize * 2);
     if (terminalFontSize < 12) terminalFontSize = 12;
     if (terminalFontSize > 72) terminalFontSize = 72;
     
