@@ -14,7 +14,21 @@ void TranslationHelper::Load(const wxString& language) {
     wxStandardPaths& stdPaths = wxStandardPaths::Get();
     wxString exePath = stdPaths.GetExecutablePath();
     wxFileName fn(exePath);
-    wxString localesDir = fn.GetPath() + wxFileName::GetPathSeparator() + "locales";
+    
+    wxString localesDir;
+    
+#ifdef __WXMAC__
+    // On macOS, when running from app bundle, look in Resources directory
+    if (exePath.Contains(".app/Contents/MacOS/")) {
+        // Get the app bundle path
+        wxString appPath = exePath.BeforeLast('/').BeforeLast('/').BeforeLast('/');
+        localesDir = appPath + "/Contents/Resources/locales";
+    } else {
+        localesDir = fn.GetPath() + wxFileName::GetPathSeparator() + "locales";
+    }
+#else
+    localesDir = fn.GetPath() + wxFileName::GetPathSeparator() + "locales";
+#endif
     
     wxString poFile = localesDir + wxFileName::GetPathSeparator() + language + ".po";
     LoadPOFile(poFile);

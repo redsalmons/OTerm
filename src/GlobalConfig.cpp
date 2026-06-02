@@ -20,11 +20,29 @@ std::string GlobalConfig::x7f3a9k2m5p8q1r4 = "";
 std::string GlobalConfig::GetWorkspacePath() {
     if (s_workspacePath.empty()) {
         wxStandardPaths& stdPaths = wxStandardPaths::Get();
+        
+#ifdef __WXMAC__
+        // On macOS, use user data directory for app bundles
+        wxString exePath = stdPaths.GetExecutablePath();
+        if (exePath.Contains(".app/Contents/MacOS/")) {
+            // Running from app bundle, use user data directory
+            wxString userDataDir = stdPaths.GetUserDataDir();
+            s_workspacePath = userDataDir.ToStdString();
+        } else {
+            // Not running from app bundle, use executable directory
+            wxFileName fn(exePath);
+            wxFileName workspaceDir(fn.GetPath(), "");
+            workspaceDir.RemoveLastDir();
+            s_workspacePath = workspaceDir.GetPath().ToStdString();
+        }
+#else
+        // Non-macOS platforms
         wxString exePath = stdPaths.GetExecutablePath();
         wxFileName fn(exePath);
         wxFileName workspaceDir(fn.GetPath(), "");
         workspaceDir.RemoveLastDir();
         s_workspacePath = workspaceDir.GetPath().ToStdString();
+#endif
     }
     return s_workspacePath;
 }

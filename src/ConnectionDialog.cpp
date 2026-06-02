@@ -68,7 +68,7 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
     wxBoxSizer* passwordSizer = new wxBoxSizer(wxHORIZONTAL);
     m_passwordCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
     passwordSizer->Add(m_passwordCtrl, 1, wxEXPAND);
-    m_keyTextCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE | wxTE_DONTWRAP);
+    m_keyTextCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD | wxTE_MULTILINE | wxTE_DONTWRAP);
     m_keyTextCtrl->Hide();
     passwordSizer->Add(m_keyTextCtrl, 1, wxEXPAND);
     m_keyBrowseButton = new wxButton(formPanel, wxID_ANY, TranslationHelper::Tr("browse"));

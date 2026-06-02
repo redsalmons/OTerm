@@ -187,7 +187,7 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen) {
         
         // Set input box size and position to match cursor cell exactly
         m_imeInputBox->SetSize(x, y, cell_width, cell_height);
-        SSH_LOG("IME input box position and size updated to: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
+        // SSH_LOG("IME input box position and size updated to: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
         
         // On macOS, notify input method about position
 #ifdef __WXMAC__
@@ -717,7 +717,7 @@ void TermGLCanvas::ShowIMEInputBox() {
 }
 
 void TermGLCanvas::HideIMEInputBox() {
-    SSH_LOG("TermGLCanvas::HideIMEInputBox called");
+    // SSH_LOG("TermGLCanvas::HideIMEInputBox called");
     if (m_imeInputBox && m_imeInputBoxVisible) {
         m_imeInputBox->Hide();
         m_imeInputBox->Clear();
@@ -730,7 +730,7 @@ void TermGLCanvas::HideIMEInputBox() {
 }
 
 void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
-    SSH_LOG("TermGLCanvas::OnProxyTextReceived called");
+    // SSH_LOG("TermGLCanvas::OnProxyTextReceived called");
     if (m_imeInputBox && m_imeCallback) {
         wxString content = m_imeInputBox->GetValue();
         if (content.IsEmpty()) return;
@@ -833,7 +833,7 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
 }
 
 void TermGLCanvas::OnIMETextLostFocus(wxFocusEvent& event) {
-    SSH_LOG("TermGLCanvas::OnIMETextLostFocus called");
+    // SSH_LOG("TermGLCanvas::OnIMETextLostFocus called");
     // Hide input box when it loses focus
     HideIMEInputBox();
     event.Skip();

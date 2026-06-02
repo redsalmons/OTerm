@@ -87,7 +87,7 @@ void LocalTerminalThread::ScrollVTerm(int lines) {
     m_back_buffer.cursor_col = cursor_pos.col;
 
     SSH_LOG("  Cursor position: " << cursor_pos.row << "," << cursor_pos.col);
-    SSH_LOG("  Sending damage event");
+    // SSH_LOG("  Sending damage event");
 
     send_damage_event(false);
 }

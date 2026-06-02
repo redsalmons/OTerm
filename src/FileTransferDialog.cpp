@@ -582,8 +582,10 @@ void FileTransferDialog::LoadAndDisplayTasks() {
     
     // Get task file path
     wxString workspaceDir = wxString::FromUTF8(GlobalConfig::GetWorkspacePath().c_str());
-    wxString taskFilePath = workspaceDir + wxFileName::GetPathSeparator() + 
-                           wxString::FromUTF8(m_deviceConfig.id.c_str()) + "task.json";
+    wxString deviceId = wxString::FromUTF8(m_deviceConfig.id.c_str());
+    deviceId.Replace("/", "_"); // Replace slashes with underscores
+    wxString deviceDir = workspaceDir + wxFileName::GetPathSeparator() + deviceId;
+    wxString taskFilePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
     
     SSH_LOG("Loading task list from: " << taskFilePath.ToStdString());
     

@@ -339,8 +339,17 @@ void FileTransferThread::SaveTaskList() {
         wxMkdir(workspaceDir);
     }
     
-    wxString filePath = workspaceDir + wxFileName::GetPathSeparator() + 
-                       wxString::FromUTF8(m_deviceConfig.id.c_str()) + "task.json";
+    // Create device-specific subdirectory (sanitize device ID to replace slashes)
+    wxString deviceId = wxString::FromUTF8(m_deviceConfig.id.c_str());
+    deviceId.Replace("/", "_"); // Replace slashes with underscores
+    wxString deviceDir = workspaceDir + wxFileName::GetPathSeparator() + deviceId;
+    if (!wxDirExists(deviceDir)) {
+        SSH_LOG("Creating device directory: " << deviceDir.ToStdString());
+        // Create full path recursively
+        wxFileName::Mkdir(deviceDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    }
+    
+    wxString filePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
     SSH_LOG("Task file path: " << filePath.ToStdString());
     
     FileTransferTaskList list;
@@ -362,10 +371,15 @@ void FileTransferThread::LoadTaskList() {
     wxMutexLocker lock(m_mutex);
     
     wxString workspaceDir = wxString::FromUTF8(GlobalConfig::GetWorkspacePath().c_str());
-    wxString filePath = workspaceDir + wxFileName::GetPathSeparator() + 
-                       wxString::FromUTF8(m_deviceConfig.id.c_str()) + "task.json";
+    wxString deviceId = wxString::FromUTF8(m_deviceConfig.id.c_str());
+    deviceId.Replace("/", "_"); // Replace slashes with underscores
+    wxString deviceDir = workspaceDir + wxFileName::GetPathSeparator() + deviceId;
+    wxString filePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
+    
+    SSH_LOG("Loading task list from: " << filePath.ToStdString());
     
     if (!wxFileExists(filePath)) {
+        SSH_LOG("Task file not found: " << filePath.ToStdString());
         return;
     }
     
@@ -385,7 +399,7 @@ void FileTransferThread::LoadTaskList() {
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "Failed to load task list: " << e.what() << std::endl;
+        SSH_LOG("Failed to load task list: " << e.what());
     }
 }
 

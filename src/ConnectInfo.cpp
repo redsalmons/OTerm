@@ -267,7 +267,7 @@ void ConnectInfo::Connect() {
 }
 
 void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
-    SSH_LOG("OnTerminalDamage called");
+    // SSH_LOG("OnTerminalDamage called");
 
     // Get the appropriate thread based on terminal type
     const ScreenBuffer* buffer = nullptr;
@@ -290,7 +290,7 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
         return;
     }
 
-    SSH_LOG("OnTerminalDamage: buffer rows=" << buffer->rows << ", cols=" << buffer->cols << ", cursor=" << buffer->cursor_row << "," << buffer->cursor_col);
+    // SSH_LOG("OnTerminalDamage: buffer rows=" << buffer->rows << ", cols=" << buffer->cols << ", cursor=" << buffer->cursor_row << "," << buffer->cursor_col);
 
     // Convert entire buffer to CellInstance vector
     std::vector<CellInstance> instances;
@@ -303,7 +303,7 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
         }
     }
 
-    SSH_LOG("OnTerminalDamage: created " << instances.size() << " cell instances");
+    // SSH_LOG("OnTerminalDamage: created " << instances.size() << " cell instances");
 
     m_termCanvas->ClearScreenData();
     m_termCanvas->UpdateScreenData(instances);
@@ -319,7 +319,7 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
     }
     
     m_termCanvas->Refresh();
-    SSH_LOG("OnTerminalDamage: Refresh called");
+    // SSH_LOG("OnTerminalDamage: Refresh called");
 }
 
 void ConnectInfo::OnTerminalExit(wxThreadEvent& event) {

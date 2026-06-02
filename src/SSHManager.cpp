@@ -335,7 +335,7 @@ void SSHManager::perform_authentication() {
         }
     } else {
         // Password authentication
-        SSH_LOG("Using password authentication");
+        // SSH_LOG("Using password authentication");
         rc = libssh2_userauth_password(ssh_session_, username_.c_str(), password_.c_str());
     }
 

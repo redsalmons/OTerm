@@ -330,7 +330,7 @@ void TerminalThread::swap_buffers() {
 }
 
 void TerminalThread::send_damage_event(bool cursor_visible) {
-    SSH_LOG("TerminalThread::send_damage_event called");
+    // SSH_LOG("TerminalThread::send_damage_event called");
     if (m_ui_handler) {
         TerminalDamageEvent* evt = new TerminalDamageEvent(
             m_front_buffer.rows,
@@ -343,9 +343,9 @@ void TerminalThread::send_damage_event(bool cursor_visible) {
             m_damage_rect.end_col,
             cursor_visible
         );
-        SSH_LOG("TerminalThread::send_damage_event - queuing event, rows: " << m_front_buffer.rows << ", cols: " << m_front_buffer.cols);
+        // SSH_LOG("TerminalThread::send_damage_event - queuing event, rows: " << m_front_buffer.rows << ", cols: " << m_front_buffer.cols);
         wxQueueEvent(m_ui_handler, evt);
-        SSH_LOG("TerminalThread::send_damage_event - event queued");
+        // SSH_LOG("TerminalThread::send_damage_event - event queued");
     } else {
         SSH_LOG("TerminalThread::send_damage_event - m_ui_handler is null");
     }
