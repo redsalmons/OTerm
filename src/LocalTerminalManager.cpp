@@ -1,12 +1,20 @@
 #include "LocalTerminalManager.h"
 #include "SSHManager.h"
 #include <cstring>
+#include <iomanip>
+
+#ifdef _WIN32
+#include <windows.h>
+// ConPTY is not available on older Windows versions
+// #include <conpty.h>
+#include <stdbool.h>
+#else
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <signal.h>
-#include <iomanip>
+#endif
 
 #ifdef __APPLE__
 #include <util.h>
@@ -14,10 +22,6 @@
 #elif defined(__linux__)
 #include <pty.h>
 #include <sys/ioctl.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#include <conpty.h>
-#include <stdbool.h>
 #endif
 
 LocalTerminalManager::LocalTerminalManager()

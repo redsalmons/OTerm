@@ -1,7 +1,9 @@
 #ifndef VTERMMANAGER_H
 #define VTERMMANAGER_H
 
+#ifdef HAVE_LIBVTERM
 #include <vterm.h>
+#endif
 #include <vector>
 #include <string>
 #include <functional>

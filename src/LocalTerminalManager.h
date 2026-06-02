@@ -4,6 +4,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+typedef int pid_t;
+#endif
+
 class LocalTerminalManager {
 public:
     LocalTerminalManager();

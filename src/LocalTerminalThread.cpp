@@ -1,7 +1,11 @@
 #include "LocalTerminalThread.h"
 #include "TerminalThread.h"
 #include <cstring>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 LocalTerminalThread::LocalTerminalThread(wxEvtHandler* ui_handler, int rows, int cols, const std::string& shell)
     : wxThread(wxTHREAD_JOINABLE),
@@ -234,7 +238,11 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
         }
 
         // Small sleep to prevent busy-waiting
+#ifdef _WIN32
+        Sleep(10);
+#else
         usleep(10000); // 10ms
+#endif
     }
 
     cleanup();
