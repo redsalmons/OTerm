@@ -103,16 +103,16 @@ void TermGLCanvas::InitializeGL() {
     // Set default texture parameters
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     
     // Create font atlas with configured font and size
     m_fontAtlas = new FontAtlas();
     std::string fontName = GlobalConfig::GetFontName();
     int fontSize = GlobalConfig::GetFontSize();
     
-    // Scale the configured font size for terminal rendering (multiply by 2 for better visibility)
-    int terminalFontSize = fontSize * 2;
+    // Scale the configured font size for terminal rendering (multiply by 1.5 for better visibility)
+    int terminalFontSize = static_cast<int>(fontSize * 1.5);
     if (terminalFontSize < 12) terminalFontSize = 12;
     if (terminalFontSize > 72) terminalFontSize = 72;
     
@@ -410,6 +410,8 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 }
 
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
+    SSH_LOG("OnKeyDown: keycode=" << event.GetKeyCode() << ", key_callback=" << (key_callback_ ? "set" : "NULL"));
+
     // Check for Ctrl+C to copy selection
     if (event.ControlDown() && event.GetKeyCode() == 'C') {
         CopySelectionToClipboard();
@@ -449,6 +451,7 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
         }
 
         if (sequence) {
+            SSH_LOG("  Sending sequence: " << sequence);
             key_callback_(sequence, static_cast<int>(strlen(sequence)));
             return;
         }
@@ -668,7 +671,8 @@ void TermGLCanvas::OnKillFocus(wxFocusEvent& event) {
 
 void TermGLCanvas::ShowIMEInputBox() {
     SSH_LOG("TermGLCanvas::ShowIMEInputBox called - m_cursor_col: " << m_cursor_col << ", m_cursor_row: " << m_cursor_row);
-    
+    SSH_LOG("  m_imeInputBox: " << (m_imeInputBox ? "exists" : "NULL") << ", m_imeInputBoxVisible: " << m_imeInputBoxVisible);
+
     if (!m_imeInputBox) {
         SSH_LOG("m_imeInputBox is null, cannot show IME input box");
         return;
@@ -754,6 +758,7 @@ void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
 
 void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
     int keycode = event.GetKeyCode();
+    SSH_LOG("OnProxyKeyDown: keycode=" << keycode << ", m_imeInputBoxVisible=" << m_imeInputBoxVisible << ", m_imeCallback=" << (m_imeCallback ? "set" : "NULL") << ", key_callback=" << (key_callback_ ? "set" : "NULL"));
 
     // Always handle control keys regardless of IME state
     if (keycode == WXK_RETURN || keycode == WXK_BACK || keycode == WXK_DELETE ||
@@ -808,11 +813,16 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
         }
 
         if (!key_seq.empty()) {
+            SSH_LOG("  key_seq: " << key_seq << ", length: " << key_seq.length());
             if (m_imeCallback) {
                 m_imeCallback(key_seq.c_str(), key_seq.length());
+                SSH_LOG("  Sent via m_imeCallback");
             } else if (key_callback_) {
                 // Fallback to key_callback if imeCallback is not set
                 key_callback_(key_seq.c_str(), key_seq.length());
+                SSH_LOG("  Sent via key_callback");
+            } else {
+                SSH_LOG("  ERROR: No callback available!");
             }
         }
         return;  // Don't skip - we handled it

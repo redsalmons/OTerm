@@ -19,6 +19,7 @@ public:
 
     void SetActive(bool active);
     bool IsActive() const { return m_isActive; }
+    bool IsLocalTerminal() const { return m_isLocalTerminal; }
     wxWindow* GetContentPanel() const;
     DeviceConfig GetDeviceConfig() const;
     TermGLCanvas* GetCanvas() const { return m_termCanvas; }

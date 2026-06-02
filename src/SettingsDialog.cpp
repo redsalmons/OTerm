@@ -1,4 +1,5 @@
 #include "SettingsDialog.h"
+#include "MonospaceFontDialog.h"
 #include "TranslationHelper.h"
 #include "GlobalConfig.h"
 #include "DeviceConfig.h"
@@ -46,11 +47,16 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     // Set current font
     std::string currentFontName = GlobalConfig::GetFontName();
     int currentFontSize = GlobalConfig::GetFontSize();
-    wxFont currentFont(currentFontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false, wxString::FromUTF8(currentFontName.c_str()));
 
-    m_fontPicker = new wxFontPickerCtrl(panel, wxID_ANY, currentFont);
-    fontSizer->Add(m_fontPicker, 1, wxEXPAND | wxALL, 5);
+    m_fontButton = new wxButton(panel, wxID_ANY, "Select Font");
+    fontSizer->Add(m_fontButton, 0, wxALL, 5);
+
+    m_fontDisplayText = new wxStaticText(panel, wxID_ANY, wxString::FromUTF8(currentFontName.c_str()));
+    fontSizer->Add(m_fontDisplayText, 1, wxEXPAND | wxALL, 5);
     basicConfigSizer->Add(fontSizer, 0, wxEXPAND);
+
+    // Bind font button event
+    m_fontButton->Bind(wxEVT_BUTTON, &SettingsDialog::OnFontButtonClicked, this);
 
     // Font size
     wxBoxSizer* fontSizeSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -109,25 +115,36 @@ SettingsDialog::~SettingsDialog() {
 void SettingsDialog::OnOK(wxCommandEvent& event) {
     int selection = m_languageChoice->GetSelection();
     std::string newLang = (selection == 0) ? "zh_CN" : "en";
-    
+
     // Save language to config
     GlobalConfig::SetLanguage(newLang);
-    
+
     // Save font settings
-    wxFont selectedFont = m_fontPicker->GetSelectedFont();
-    GlobalConfig::SetFontName(selectedFont.GetFaceName().ToStdString());
+    GlobalConfig::SetFontName(m_fontDisplayText->GetLabel().ToStdString());
     GlobalConfig::SetFontSize(m_fontSizeSpin->GetValue());
-    
+
     GlobalConfig::SaveSettings();
-    
+
     // Reload translations
     TranslationHelper::Load(wxString::FromUTF8(newLang.c_str()));
-    
+
     EndModal(wxID_OK);
 }
 
 void SettingsDialog::OnCancel(wxCommandEvent& event) {
     EndModal(wxID_CANCEL);
+}
+
+void SettingsDialog::OnFontButtonClicked(wxCommandEvent& event) {
+    std::string currentFontName = GlobalConfig::GetFontName();
+    MonospaceFontDialog fontDialog(this, wxString::FromUTF8(currentFontName.c_str()));
+
+    if (fontDialog.ShowModal() == wxID_OK) {
+        wxString selectedFont = fontDialog.GetSelectedFont();
+        if (!selectedFont.IsEmpty()) {
+            m_fontDisplayText->SetLabel(selectedFont);
+        }
+    }
 }
 
 void SettingsDialog::OnResetMasterPassword(wxCommandEvent& event) {

@@ -34,6 +34,7 @@ void LocalTerminalThread::Start() {
 }
 
 void LocalTerminalThread::QueueInput(const std::string& input) {
+    SSH_LOG("LocalTerminalThread::QueueInput: input length=" << input.length() << ", content=" << std::hex << (int)(unsigned char)input[0] << " " << (int)(unsigned char)input[1] << " " << (int)(unsigned char)input[2] << std::dec);
     {
         std::lock_guard<std::mutex> lock(m_input_mutex);
         m_input_queue.push(input);
@@ -122,6 +123,8 @@ void LocalTerminalThread::process_input_queue() {
         std::string input = m_input_queue.front();
         m_input_queue.pop();
         lock.unlock();
+
+        SSH_LOG("LocalTerminalThread::process_input_queue: writing to terminal, length=" << input.size() << ", content=" << std::hex << (int)(unsigned char)input[0] << " " << (int)(unsigned char)input[1] << " " << (int)(unsigned char)input[2] << std::dec);
 
         // Send input to local terminal
         m_terminalManager.Write(input.c_str(), input.size());

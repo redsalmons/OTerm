@@ -1,10 +1,12 @@
 #include "LocalTerminalManager.h"
+#include "SSHManager.h"
 #include <cstring>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <signal.h>
+#include <iomanip>
 
 #ifdef __APPLE__
 #include <util.h>
@@ -140,6 +142,9 @@ bool LocalTerminalManager::Start(const std::string& shell) {
         dup2(m_slaveFd, STDERR_FILENO);
         close(m_slaveFd);
 
+        // Set TERM environment variable
+        setenv("TERM", "xterm-256color", 1);
+
         // Execute shell
         execl(actualShell.c_str(), actualShell.c_str(), nullptr);
         _exit(1);
@@ -190,11 +195,22 @@ void LocalTerminalManager::Stop() {
 bool LocalTerminalManager::Write(const char* data, size_t len) {
     if (!m_running) return false;
 
+    std::stringstream ss;
+    ss << "LocalTerminalManager::Write: len=" << len << ", content=";
+    for (size_t i = 0; i < len && i < 3; i++) {
+        ss << std::hex << (int)(unsigned char)data[i] << " ";
+    }
+    ss << std::dec;
+    SSH_LOG(ss.str());
+
 #ifdef _WIN32
     DWORD written = 0;
     return WriteFile((HANDLE)m_hPipe, data, len, &written, nullptr) && written == len;
 #elif defined(__APPLE__) || defined(__linux__)
     ssize_t result = write(m_masterFd, data, len);
+    std::stringstream ss2;
+    ss2 << "LocalTerminalManager::Write: write result=" << result;
+    SSH_LOG(ss2.str());
     return result == (ssize_t)len;
 #else
     return false;

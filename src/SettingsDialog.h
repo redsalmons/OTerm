@@ -3,9 +3,10 @@
 
 #include <wx/dialog.h>
 #include <wx/choice.h>
-#include <wx/fontpicker.h>
+#include <wx/button.h>
 #include <wx/spinctrl.h>
 #include <wx/textctrl.h>
+#include <wx/stattext.h>
 
 class SettingsDialog : public wxDialog {
 public:
@@ -14,7 +15,8 @@ public:
 
 private:
     wxChoice* m_languageChoice;
-    wxFontPickerCtrl* m_fontPicker;
+    wxButton* m_fontButton;
+    wxStaticText* m_fontDisplayText;
     wxSpinCtrl* m_fontSizeSpin;
 
     wxTextCtrl* m_masterPassword1;
@@ -26,6 +28,7 @@ private:
     void OnSetMasterPassword(wxCommandEvent& event);
     void OnSaveMasterPassword(wxCommandEvent& event);
     void OnResetMasterPassword(wxCommandEvent& event);
+    void OnFontButtonClicked(wxCommandEvent& event);
 
     wxDECLARE_EVENT_TABLE();
 };

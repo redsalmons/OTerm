@@ -34,7 +34,7 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
         // Use specified font name
         m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false, fontName);
     }
-    
+
     if (!m_font.IsOk()) {
         SSH_LOG("FontAtlas: Failed to create font with name '" << fontName << "' and size " << fontSize);
         // Fallback to default font
@@ -149,8 +149,8 @@ bool FontAtlas::GenerateTextureAtlas() {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_textureWidth, m_textureHeight, 
                  0, GL_RGBA, GL_UNSIGNED_BYTE, rgbaData);

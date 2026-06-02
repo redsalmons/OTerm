@@ -77,18 +77,22 @@ int VTermManager::write_input(const char* data, int length) {
     if (!vt_) {
         return -1;
     }
-    
+
     if (!data || length <= 0) {
         return -1;
     }
-    
+
+    SSH_LOG("VTermManager::write_input: length=" << length << ", content=" << std::hex << (int)(unsigned char)data[0] << " " << (int)(unsigned char)data[1] << " " << (int)(unsigned char)data[2] << std::dec);
+
     int result = vterm_input_write(vt_, data, length);
-    
+
+    SSH_LOG("VTermManager::write_input: vterm_input_write result=" << result);
+
     // Ensure proper data synchronization by flushing damage
     if (vts_) {
         vterm_screen_flush_damage(vts_);
     }
-    
+
     return result;
 }
 
