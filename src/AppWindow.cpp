@@ -236,22 +236,13 @@ AppWindow::~AppWindow() {
 }
 
 void AppWindow::CreateDashboardTab() {
-    // Create local terminal for home tab
-    int initialRows = 25;
-    int initialCols = 80;
-
-    // Create terminal canvas
-    TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
-
-    // Add tab with local terminal (isLocalTerminal = true)
+    // Create a simple empty panel
+    wxPanel* homePanel = new wxPanel(m_notebook);
+    homePanel->SetBackgroundColour(wxColour(10, 10, 10));
+    
+    // Add tab with empty content
     DeviceConfig emptyConfig;
-    ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), terminalCanvas, emptyConfig, false, true);
-
-    // Connect to start the local terminal
-    if (homeTab) {
-        homeTab->Connect();
-        terminalCanvas->ShowIMEInputBox();
-    }
+    ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), homePanel, emptyConfig, false, false);
 }
 
 void AppWindow::CreateTerminalTab() {

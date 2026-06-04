@@ -10,6 +10,10 @@ struct CharMetrics {
     float advance;   // Advance to next character
     float bearingX;  // X bearing
     float bearingY;  // Y bearing
+    float actual_height; // Actual character height (for rendering)
+    int last_used;   // Timestamp for LRU cache
+    int tex_x, tex_y; // Texture coordinates for eviction
+    int tex_w, tex_h; // Texture dimensions for eviction
 };
 
 class FontAtlas {
@@ -20,7 +24,7 @@ public:
     bool Initialize(const wxString& fontPath, int fontSize);
     bool InitializeSystemFont(int fontSize, const wxString& fontName = "");
     
-    CharMetrics GetCharMetrics(char32_t charCode) const;
+    CharMetrics GetCharMetrics(char32_t charCode);
     unsigned int GetTextureID() const;
     int GetTextureWidth() const;
     int GetTextureHeight() const;
@@ -28,7 +32,10 @@ public:
     
 private:
     bool GenerateTextureAtlas();
-    void AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int rowHeight);
+    bool AddCharToAtlas(char32_t charCode);
+    bool FindFreeSpace(int charWidth, int charHeight, int& outX, int& outY);
+    void EvictLRU();
+    void UpdateTexture(int x, int y, int width, int height, unsigned char* data);
     
     unsigned int m_textureID;
     int m_textureWidth;
@@ -37,6 +44,8 @@ private:
     wxFont m_font;
     
     std::unordered_map<char32_t, CharMetrics> m_charMetrics;
+    std::vector<std::pair<int, int>> m_freeSpaces; // Available spaces in atlas
+    int m_currentTime; // Global timestamp for LRU
 };
 
 #endif // FONT_ATLAS_H

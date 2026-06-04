@@ -47,7 +47,12 @@ MonospaceFontDialog::MonospaceFontDialog(wxWindow* parent, const wxString& curre
         "DejaVu Sans Mono",
         "Inconsolata",
         "Hack",
-        "Roboto Mono"
+        "Roboto Mono",
+        // Chinese fonts for Windows
+        "Microsoft YaHei UI",
+        "SimHei",
+        "SimSun",
+        "Noto Sans CJK SC"
     };
 
     // Test each font and add only those that exist

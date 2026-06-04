@@ -29,8 +29,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_selection_end_row(0), m_selection_end_col(0),
       m_fontSize(0),
       m_imeInputBox(nullptr),
-      m_imeInputBoxVisible(false)
-{
+      m_imeInputBoxVisible(false) {
     // Calculate DPI scale
     if (GetHandle()) {
         m_dpiScale = GetDPIScaleFactor();
@@ -99,12 +98,6 @@ void TermGLCanvas::InitializeGL() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
-    
-    // Set default texture parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     
     // Create font atlas with configured font and size
     m_fontAtlas = new FontAtlas();
@@ -257,9 +250,9 @@ void TermGLCanvas::Render() {
         uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
         float render_width = cell_width * cell_width_multiplier;
 
-        uint8_t bg_r = (cell.bg_color >> 24) & 0xFF;
-        uint8_t bg_g = (cell.bg_color >> 16) & 0xFF;
-        uint8_t bg_b = (cell.bg_color >> 8) & 0xFF;
+        uint8_t bg_r = cell.bg_color & 0xFF;
+        uint8_t bg_g = (cell.bg_color >> 8) & 0xFF;
+        uint8_t bg_b = (cell.bg_color >> 16) & 0xFF;
 
         glColor3f(bg_r / 255.0f, bg_g / 255.0f, bg_b / 255.0f);
         glBegin(GL_QUADS);
@@ -334,9 +327,9 @@ void TermGLCanvas::Render() {
             float test_v2 = metrics.v + metrics.h;
 
             // 使用真实的前景色
-            uint8_t fg_r = (cell.fg_color >> 24) & 0xFF;
-            uint8_t fg_g = (cell.fg_color >> 16) & 0xFF;
-            uint8_t fg_b = (cell.fg_color >> 8) & 0xFF;
+            uint8_t fg_r = cell.fg_color & 0xFF;
+            uint8_t fg_g = (cell.fg_color >> 8) & 0xFF;
+            uint8_t fg_b = (cell.fg_color >> 16) & 0xFF;
             glColor3f(fg_r / 255.0f, fg_g / 255.0f, fg_b / 255.0f);
 
             glBegin(GL_QUADS);

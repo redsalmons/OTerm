@@ -419,7 +419,8 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             if (vt_bg.rgb.red == def_bg.rgb.red && 
                 vt_bg.rgb.green == def_bg.rgb.green && 
                 vt_bg.rgb.blue == def_bg.rgb.blue) {
-                bg_color = 0x00000000; // Default background = fully transparent
+                // Default background = dark gray (matches terminal background)
+                bg_color = (0xFF << 24) | (0x0A << 16) | (0x0A << 8) | 0x0A;
             } else {
                 bg_color = (0xFF << 24) | 
                            ((uint32_t)vt_bg.rgb.blue << 16) | 

@@ -15,7 +15,8 @@ FontAtlas::FontAtlas()
     : m_textureID(0)
     , m_textureWidth(0)
     , m_textureHeight(0)
-    , m_fontSize(0) {
+    , m_fontSize(0)
+    , m_currentTime(0) {
 }
 
 FontAtlas::~FontAtlas() {
@@ -25,14 +26,19 @@ FontAtlas::~FontAtlas() {
 }
 
 bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
+    SSHManager::init_log_file();
+    SSH_LOG("FontAtlas::InitializeSystemFont called with fontSize=" << fontSize << ", fontName='" << fontName << "'");
+    
     m_fontSize = fontSize;
     
     if (fontName.IsEmpty()) {
-        // Use default modern font if no font name specified
+        // Use default font
         m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+        SSH_LOG("FontAtlas: Using default modern font");
     } else {
-        // Use specified font name
+        // Use specified font from config
         m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false, fontName);
+        SSH_LOG("FontAtlas: Using specified font from config: " << fontName);
     }
 
     if (!m_font.IsOk()) {
@@ -50,121 +56,91 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
 }
 
 bool FontAtlas::GenerateTextureAtlas() {
-    int charCount = 95;
-    int charSize = m_fontSize; // Use configured font size
+    int charSize = m_fontSize;
     
-    // Increase texture size to support Unicode characters including Chinese
-    // ASCII (32-126) + CJK Unified Ideographs (U+4E00-U+9FFF) subset
-    m_textureWidth = 8192;
-    m_textureHeight = 8192; // Larger texture for Unicode support
+    m_textureWidth = 1024;
+    m_textureHeight = 1024;
     
-    SSH_LOG("FontAtlas: Generating texture atlas: " << m_textureWidth << "x" << m_textureHeight);
+    SSH_LOG("FontAtlas: Creating empty texture atlas for dynamic loading: " << m_textureWidth << "x" << m_textureHeight);
     
-    // 【修改核心】：强行使用 24 位纯 RGB 位图，避开不可控的 Alpha 通道透明度污染
-    wxBitmap bitmap(m_textureWidth, m_textureHeight, 24);
-    wxMemoryDC dc(bitmap);
-    
-    // 绝对不透明的纯黑底
-    dc.SetBackground(wxBrush(wxColour(0, 0, 0)));
-    dc.Clear();
-    
-    // 绝对不透明的纯白字
-    dc.SetFont(m_font);
-    dc.SetTextForeground(wxColour(255, 255, 255));
-    
-    int x = 0;
-    int y = 0;
-    int rowHeight = charSize;
-    int rowGap = 8; // Increase vertical gap to prevent bleeding for Chinese characters
-    
-    // Add ASCII characters (32-126)
-    for (int i = 32; i <= 126; i++) {
-        char32_t charCode = static_cast<char32_t>(i);
-        AddCharToAtlas(charCode, dc, x, y, rowHeight);
-
-        x += charSize;
-        if (x + charSize > m_textureWidth) {
-            x = 0;
-            y += rowHeight + rowGap;
-        }
-    }
-
-    // Add common Chinese characters (CJK Unified Ideographs)
-    // Adding a comprehensive range of frequently used Chinese characters
-    // U+4E00 to U+9FFF (CJK Unified Ideographs basic range)
-    int chars_added = 0;
-    for (char32_t charCode = 0x4E00; charCode <= 0x9FFF; charCode++) {
-        AddCharToAtlas(charCode, dc, x, y, rowHeight);
-        chars_added++;
-
-        x += charSize;
-        if (x + charSize > m_textureWidth) {
-            x = 0;
-            y += rowHeight + rowGap;
-        }
-        if (y + rowHeight > m_textureHeight) {
-            SSH_LOG("FontAtlas: Texture atlas full, stopped at char: 0x" << std::hex << static_cast<uint32_t>(charCode) << std::dec << " after adding " << chars_added << " Chinese characters");
-            break;
-        }
-    }
-    SSH_LOG("FontAtlas: Added " << chars_added << " Chinese characters to texture atlas");
-    
-    // 【关键修复】：在转成 wxImage 之前，必须解绑 wxBitmap
-    dc.SelectObject(wxNullBitmap);
-    
-    wxImage image = bitmap.ConvertToImage();
-    if (!image.IsOk()) return false;
-    
-    unsigned char* rgbData = image.GetData();
-    int pixelCount = m_textureWidth * m_textureHeight;
-    
-    // 构建标准的 RGBA 纹理
-    unsigned char* rgbaData = new unsigned char[pixelCount * 4];
-    int validPixels = 0;
-    
-    for (int i = 0; i < pixelCount; i++) {
-        unsigned char r = rgbData[i * 3 + 0];
-        unsigned char g = rgbData[i * 3 + 1];
-        unsigned char b = rgbData[i * 3 + 2];
-        
-        // 亮度即为字形
-        unsigned char luminance = (r + g + b) / 3;
-        if (luminance < 15) luminance = 0; // 过滤噪声底色
-        
-        // 字本身是纯白的，由 Alpha 通道负责裁剪出字形
-        rgbaData[i * 4 + 0] = 255; 
-        rgbaData[i * 4 + 1] = 255; 
-        rgbaData[i * 4 + 2] = 255; 
-        rgbaData[i * 4 + 3] = luminance; 
-        
-        if (luminance > 20) validPixels++;
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        SSH_LOG("FontAtlas: OpenGL error before texture creation: " << err);
     }
     
-    SSH_LOG("FontAtlas: Valid text pixels extracted: " << validPixels);
-    
-    // 创建 OpenGL 纹理
     glGenTextures(1, &m_textureID);
+    if (m_textureID == 0) {
+        SSH_LOG("FontAtlas: Failed to generate texture ID");
+        return false;
+    }
+    SSH_LOG("FontAtlas: Generated texture ID: " << m_textureID);
+    
     glBindTexture(GL_TEXTURE_2D, m_textureID);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        SSH_LOG("FontAtlas: OpenGL error after glBindTexture: " << err);
+    }
     
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        SSH_LOG("FontAtlas: OpenGL error after glPixelStorei: " << err);
+    }
+    
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        SSH_LOG("FontAtlas: OpenGL error after glTexParameteri: " << err);
+    }
     
+    // Create empty texture with GL_RGBA format
+    int totalPixels = m_textureWidth * m_textureHeight * 4;
+    unsigned char* emptyData = new unsigned char[totalPixels];
+    memset(emptyData, 0, totalPixels);
+    
+    SSH_LOG("FontAtlas: Calling glTexImage2D with width=" << m_textureWidth << " height=" << m_textureHeight);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_textureWidth, m_textureHeight, 
-                 0, GL_RGBA, GL_UNSIGNED_BYTE, rgbaData);
+                 0, GL_RGBA, GL_UNSIGNED_BYTE, emptyData);
     
-    delete[] rgbaData;
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        SSH_LOG("FontAtlas: OpenGL error creating empty texture: " << err);
+        delete[] emptyData;
+        return false;
+    }
+    
+    delete[] emptyData;
+    SSH_LOG("FontAtlas: Empty texture atlas created successfully, ID=" << m_textureID);
+    
+    // Initialize free space tracking
+    m_freeSpaces.clear();
+    m_freeSpaces.push_back(std::make_pair(0, 0));
+    
+    // Pre-load ASCII characters
+    for (int i = 32; i <= 126; i++) {
+        AddCharToAtlas(static_cast<char32_t>(i));
+    }
+    
+    SSH_LOG("FontAtlas: Pre-loaded ASCII characters");
     return true;
 }
 
-void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int rowHeight) {
+bool FontAtlas::AddCharToAtlas(char32_t charCode) {
+    // Check if character already exists
+    auto it = m_charMetrics.find(charCode);
+    if (it != m_charMetrics.end()) {
+        it->second.last_used = m_currentTime++;
+        return true;
+    }
+    
+    // Convert charCode to wxString
     wxString text;
     if (charCode < 128) {
         text = wxString::Format("%c", static_cast<char>(charCode));
     } else {
-        // Convert UTF-32 to UTF-8 for wxWidgets
         char utf8_buf[5] = {0};
         if (charCode <= 0x7F) {
             utf8_buf[0] = static_cast<char>(charCode);
@@ -184,22 +160,65 @@ void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int 
         text = wxString::FromUTF8(utf8_buf);
     }
     
-    // Get character metrics
-    wxSize extent = dc.GetTextExtent(text);
+    // Create bitmap for this character
+    int charSize = m_fontSize;
+    int charHeight = charSize;
+    
+    // Get actual character width from font using temporary DC
+    wxBitmap tempBitmap(1, 1, 24);
+    wxMemoryDC tempDC(tempBitmap);
+    tempDC.SetFont(m_font);
+    wxSize extent = tempDC.GetTextExtent(text);
     int charWidth = extent.x;
-    int charHeight = extent.y;
-
-    // Draw character at top of cell with padding
-    // Adjust vertical offset for Chinese characters to align baseline with English
-    int draw_x = x + 2;
-    int draw_y = y + 2;
-    if (charCode > 127) {
-        // Chinese characters need vertical adjustment to align with English baseline
-        draw_y += 2; // Shift down slightly for Chinese characters
+    if (charWidth == 0) charWidth = charSize; // Fallback if extent is 0
+    tempDC.SelectObject(wxNullBitmap);
+    
+    wxBitmap bitmap(charWidth, charHeight, 24);
+    wxMemoryDC dc(bitmap);
+    
+    dc.SetBackground(wxBrush(wxColour(0, 0, 0)));
+    dc.Clear();
+    dc.SetFont(m_font);
+    dc.SetTextForeground(wxColour(255, 255, 255));
+    
+    // Draw character with vertical offset to avoid baseline clipping
+    dc.DrawText(text, 0, -8);
+    dc.SelectObject(wxNullBitmap);
+    
+    // Convert to image and then to GL_RGBA
+    wxImage image = bitmap.ConvertToImage();
+    if (!image.IsOk()) return false;
+    
+    unsigned char* rgbData = image.GetData();
+    unsigned char* rgbaData = new unsigned char[charWidth * charHeight * 4];
+    for (int i = 0; i < charWidth * charHeight; i++) {
+        unsigned char r = rgbData[i * 3 + 0];
+        unsigned char g = rgbData[i * 3 + 1];
+        unsigned char b = rgbData[i * 3 + 2];
+        unsigned char luminance = (r + g + b) / 3;
+        if (luminance < 15) luminance = 0;
+        rgbaData[i * 4 + 0] = luminance;
+        rgbaData[i * 4 + 1] = luminance;
+        rgbaData[i * 4 + 2] = luminance;
+        rgbaData[i * 4 + 3] = luminance;
     }
-    dc.DrawText(text, draw_x, draw_y);
-
-    // Store metrics using actual draw size, no padding cropping
+    
+    // Find free space in atlas
+    int x, y;
+    if (!FindFreeSpace(charWidth, charHeight, x, y)) {
+        // No space available, evict LRU
+        EvictLRU();
+        if (!FindFreeSpace(charWidth, charHeight, x, y)) {
+            SSH_LOG("FontAtlas: Failed to find space for character 0x" << std::hex << static_cast<uint32_t>(charCode) << std::dec);
+            delete[] rgbaData;
+            return false;
+        }
+    }
+    
+    // Update texture with full height
+    UpdateTexture(x, y, charWidth, charHeight, rgbaData);
+    
+    // Store metrics
     CharMetrics metrics;
     metrics.u = static_cast<float>(x) / m_textureWidth;
     metrics.v = static_cast<float>(y) / m_textureHeight;
@@ -208,14 +227,91 @@ void FontAtlas::AddCharToAtlas(char32_t charCode, wxDC& dc, int& x, int& y, int 
     metrics.advance = static_cast<float>(charWidth);
     metrics.bearingX = 0.0f;
     metrics.bearingY = 0.0f;
-
+    metrics.actual_height = static_cast<float>(charHeight);
+    metrics.last_used = m_currentTime++;
+    metrics.tex_x = x;
+    metrics.tex_y = y;
+    metrics.tex_w = charWidth;
+    metrics.tex_h = charHeight;
+    
     m_charMetrics[charCode] = metrics;
+    
+    delete[] rgbaData;
+    return true;
 }
 
-CharMetrics FontAtlas::GetCharMetrics(char32_t charCode) const {
+bool FontAtlas::FindFreeSpace(int charWidth, int charHeight, int& outX, int& outY) {
+    if (m_freeSpaces.empty()) {
+        return false;
+    }
+    
+    auto& pos = m_freeSpaces.back();
+    outX = pos.first;
+    outY = pos.second;
+    
+    pos.first += charWidth + 2;
+    if (pos.first + charWidth > m_textureWidth) {
+        pos.first = 0;
+        pos.second += charHeight + 2;
+        if (pos.second + charHeight > m_textureHeight) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+void FontAtlas::EvictLRU() {
+    char32_t oldestChar = 0;
+    int oldestTime = m_currentTime;
+    
+    for (const auto& [charCode, metrics] : m_charMetrics) {
+        if (metrics.last_used < oldestTime) {
+            oldestTime = metrics.last_used;
+            oldestChar = charCode;
+        }
+    }
+    
+    if (oldestChar != 0) {
+        SSH_LOG("FontAtlas: Evicting LRU character 0x" << std::hex << static_cast<uint32_t>(oldestChar) << std::dec);
+        const auto& metrics = m_charMetrics[oldestChar];
+        
+        int totalPixels = metrics.tex_w * metrics.tex_h * 4;
+        unsigned char* clearData = new unsigned char[totalPixels];
+        memset(clearData, 0, totalPixels);
+        UpdateTexture(metrics.tex_x, metrics.tex_y, metrics.tex_w, metrics.tex_h, clearData);
+        delete[] clearData;
+        
+        m_freeSpaces.push_back(std::make_pair(metrics.tex_x, metrics.tex_y));
+        
+        m_charMetrics.erase(oldestChar);
+    }
+}
+
+void FontAtlas::UpdateTexture(int x, int y, int width, int height, unsigned char* data) {
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        SSH_LOG("FontAtlas: OpenGL error updating texture: " << err);
+    }
+}
+
+CharMetrics FontAtlas::GetCharMetrics(char32_t charCode) {
     auto it = m_charMetrics.find(charCode);
     if (it != m_charMetrics.end()) {
+        it->second.last_used = m_currentTime++;
         return it->second;
+    }
+    
+    // Character not found, try to add it dynamically
+    if (AddCharToAtlas(charCode)) {
+        it = m_charMetrics.find(charCode);
+        if (it != m_charMetrics.end()) {
+            return it->second;
+        }
     }
     
     // Return default metrics for unknown characters
@@ -227,11 +323,17 @@ CharMetrics FontAtlas::GetCharMetrics(char32_t charCode) const {
     defaultMetrics.advance = static_cast<float>(m_fontSize);
     defaultMetrics.bearingX = 0.0f;
     defaultMetrics.bearingY = static_cast<float>(m_fontSize);
+    defaultMetrics.actual_height = static_cast<float>(m_fontSize);
+    defaultMetrics.last_used = 0;
+    defaultMetrics.tex_x = 0;
+    defaultMetrics.tex_y = 0;
+    defaultMetrics.tex_w = 0;
+    defaultMetrics.tex_h = 0;
     
     return defaultMetrics;
 }
 
-GLuint FontAtlas::GetTextureID() const {
+unsigned int FontAtlas::GetTextureID() const {
     return m_textureID;
 }
 
