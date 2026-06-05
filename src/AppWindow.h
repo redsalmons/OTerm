@@ -29,9 +29,10 @@ private:
     void OnNewTab(wxCommandEvent& event);
     void OnIdle(wxIdleEvent& event);
     void OnSize(wxSizeEvent& event);
+    void OnDeviceOpenRequest(wxCommandEvent& event);
     
     void CreateDashboardTab();
-    void CreateTerminalTab();
+    void CreateTerminalTab(const DeviceConfig& device);
     //std::vector<std::shared_ptr<TerminalTab>> terminal_tabs_;
     
     wxDECLARE_EVENT_TABLE();

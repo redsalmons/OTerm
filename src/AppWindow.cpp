@@ -8,6 +8,7 @@
 #include "ConnectionDialog.h"
 #include "DeviceConfig.h"
 #include "TermGLCanvas.h"
+#include "DeviceListPanel.h"
 #include "SSHManager.h"
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include "ConnectInfo.h"
 
 #if defined(__WXMSW__)
 #include <wx/msw/private.h>
@@ -192,6 +194,7 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_MENU(wxID_NEW, AppWindow::OnNewTab)
     EVT_IDLE(AppWindow::OnIdle)
     EVT_SIZE(AppWindow::OnSize)
+    EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_OPEN_REQUEST, AppWindow::OnDeviceOpenRequest)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
@@ -236,40 +239,39 @@ AppWindow::~AppWindow() {
 }
 
 void AppWindow::CreateDashboardTab() {
-    // Create a simple empty panel
-    wxPanel* homePanel = new wxPanel(m_notebook);
-    homePanel->SetBackgroundColour(wxColour(10, 10, 10));
+    // Create device list panel
+    DeviceListPanel* deviceListPanel = new DeviceListPanel(m_notebook);
     
-    // Add tab with empty content
+    // Bind device open event
+    deviceListPanel->Bind(wxEVT_DEVICE_OPEN_REQUEST, &AppWindow::OnDeviceOpenRequest, this);
+    
+    // Add tab with device list
     DeviceConfig emptyConfig;
-    ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), homePanel, emptyConfig, false, false);
+    ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), deviceListPanel, emptyConfig, false, false);
 }
 
-void AppWindow::CreateTerminalTab() {
+void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
     SSH_LOG("AppWindow::CreateTerminalTab called");
-    ConnectionDialog dialog(this, TranslationHelper::Tr("deviceList"));
-    if (dialog.ShowModal() == wxID_OK) {
-        DeviceConfig newDevice = dialog.GetSelectedDevice();
-        SSH_LOG("Device selected: " << newDevice.name);
+    DeviceConfig newDevice = device;
+    SSH_LOG("Device selected: " << newDevice.name);
 
-        TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
-        SSH_LOG("TermGLCanvas created");
+    TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
+    SSH_LOG("TermGLCanvas created");
 
-        // Create tab label as "username@address"
-        wxString tabLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
-        ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalCanvas, newDevice);
-        SSH_LOG("Tab added to title bar");
+    // Create tab label as "username@address"
+    wxString tabLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
+    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalCanvas, newDevice);
+    SSH_LOG("Tab added to title bar");
 
-        // Connect to SSH
-        if (newTab) {
-            SSH_LOG("Calling Connect() on tab");
-            newTab->Connect();
-            SSH_LOG("Connect() returned");
-            
-            // Show IME input box by triggering tab selection
-            terminalCanvas->ShowIMEInputBox();
-            SSH_LOG("IME input box shown for new tab");
-        }
+    // Connect to SSH
+    if (newTab) {
+        SSH_LOG("Calling Connect() on tab");
+        newTab->Connect();
+        SSH_LOG("Connect() returned");
+        
+        // Show IME input box by triggering tab selection
+        terminalCanvas->ShowIMEInputBox();
+        SSH_LOG("IME input box shown for new tab");
     }
 }
 
@@ -278,7 +280,26 @@ void AppWindow::OnQuit(wxCommandEvent& WXUNUSED(event)) {
 }
 
 void AppWindow::OnNewTab(wxCommandEvent& WXUNUSED(event)) {
-    CreateTerminalTab();
+    SSH_LOG("AppWindow::OnNewTab called");
+    ConnectionDialog dialog(this, TranslationHelper::Tr("deviceList"));
+    if (dialog.ShowModal() == wxID_OK) {
+        DeviceConfig newDevice = dialog.GetSelectedDevice();
+        SSH_LOG("Device selected: " << newDevice.name);
+        CreateTerminalTab(newDevice);
+    }
+}
+
+void AppWindow::OnDeviceOpenRequest(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnDeviceOpenRequest called");
+    DeviceListPanel* panel = dynamic_cast<DeviceListPanel*>(event.GetEventObject());
+    if (panel) {
+        int deviceIndex = event.GetInt();
+        std::vector<DeviceConfig> devices = DeviceConfig::LoadFromFile();
+        if (deviceIndex >= 0 && deviceIndex < (int)devices.size()) {
+            SSH_LOG("Opening device at index: " << deviceIndex << ", name: " << devices[deviceIndex].name);
+            CreateTerminalTab(devices[deviceIndex]);
+        }
+    }
 }
 
 void AppWindow::OnIdle(wxIdleEvent& event)
