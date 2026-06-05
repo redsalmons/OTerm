@@ -29,6 +29,7 @@ public:
     int GetTextureWidth() const;
     int GetTextureHeight() const;
     int GetFontSize() const;
+    int GetCharHeight() const; // Get actual character rendering height
     
 private:
     bool GenerateTextureAtlas();
@@ -41,6 +42,7 @@ private:
     int m_textureWidth;
     int m_textureHeight;
     int m_fontSize;
+    int m_charHeight; // Actual character rendering height
     wxFont m_font;
     
     std::unordered_map<char32_t, CharMetrics> m_charMetrics;

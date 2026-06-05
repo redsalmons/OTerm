@@ -75,6 +75,7 @@ public:
     
     // Font size for cell size calculation
     int m_fontSize;
+    int m_charHeight; // Actual character rendering height from FontAtlas
 
     // Local IME input box
     wxTextCtrl* m_imeInputBox;

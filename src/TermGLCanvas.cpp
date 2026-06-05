@@ -28,6 +28,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_selecting(false), m_selection_start_row(0), m_selection_start_col(0),
       m_selection_end_row(0), m_selection_end_col(0),
       m_fontSize(0),
+      m_charHeight(0),
       m_imeInputBox(nullptr),
       m_imeInputBoxVisible(false) {
     // Calculate DPI scale
@@ -116,8 +117,15 @@ void TermGLCanvas::InitializeGL() {
         return;
     }
     
+    // Get actual character rendering height from font atlas
+    m_charHeight = m_fontAtlas->GetCharHeight();
+    if (m_charHeight == 0) {
+        m_charHeight = terminalFontSize; // Fallback to font size
+    }
+    
     SSH_LOG("Font atlas initialized: texture ID=" << m_fontAtlas->GetTextureID() 
-            << ", size=" << m_fontAtlas->GetTextureWidth() << "x" << m_fontAtlas->GetTextureHeight());
+            << ", size=" << m_fontAtlas->GetTextureWidth() << "x" << m_fontAtlas->GetTextureHeight()
+            << ", charHeight=" << m_charHeight);
     
     // DEBUG: Create a simple 2x2 test texture (red, green, blue, yellow)
     GLuint testTex;
@@ -229,7 +237,7 @@ void TermGLCanvas::Render() {
     
     // Cell size based on font size
     float cell_width = static_cast<float>(m_fontSize) / 2.0f;
-    float cell_height = static_cast<float>(m_fontSize);
+    float cell_height = static_cast<float>(m_charHeight);
     
     // Ensure minimum cell size
     if (cell_width < 6.0f) cell_width = 6.0f;
@@ -387,7 +395,7 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
 void TermGLCanvas::OnSize(wxSizeEvent& event) {
     // Update cached cell height when size changes
-    m_cached_cell_height = std::max(12, m_fontSize);
+    m_cached_cell_height = std::max(12, m_charHeight);
     
     // Update OpenGL viewport with 8px left/right, 4px top/bottom margin
     if (m_glInitialized && m_glContext) {
@@ -514,7 +522,7 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
     const float margin_x = 8.0f;
     const float margin_y = 4.0f;
     float cell_width = static_cast<float>(m_fontSize) / 2.0f;
-    float cell_height = static_cast<float>(m_fontSize);
+    float cell_height = static_cast<float>(m_charHeight);
     if (cell_width < 6.0f) cell_width = 6.0f;
     if (cell_height < 12.0f) cell_height = 12.0f;
     
@@ -553,7 +561,7 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
         const float margin_x = 8.0f;
         const float margin_y = 4.0f;
         float cell_width = static_cast<float>(m_fontSize) / 2.0f;
-        float cell_height = static_cast<float>(m_fontSize);
+        float cell_height = static_cast<float>(m_charHeight);
         if (cell_width < 6.0f) cell_width = 6.0f;
         if (cell_height < 12.0f) cell_height = 12.0f;
         

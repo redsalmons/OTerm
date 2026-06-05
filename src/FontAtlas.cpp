@@ -16,6 +16,7 @@ FontAtlas::FontAtlas()
     , m_textureWidth(0)
     , m_textureHeight(0)
     , m_fontSize(0)
+    , m_charHeight(0)
     , m_currentTime(0) {
 }
 
@@ -51,7 +52,10 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
         }
     }
     
-    SSH_LOG("FontAtlas: Font created successfully, name='" << m_font.GetFaceName() << "', size=" << fontSize);
+    // Use font size as character height (for consistent cell sizing)
+    m_charHeight = fontSize;
+    
+    SSH_LOG("FontAtlas: Font created successfully, name='" << m_font.GetFaceName() << "', size=" << fontSize << ", charHeight=" << m_charHeight);
     return GenerateTextureAtlas();
 }
 
@@ -162,7 +166,7 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     
     // Create bitmap for this character
     int charSize = m_fontSize;
-    int charHeight = charSize;
+    int charHeight = charSize; // Use fixed height for consistent cell sizing
     
     // Get actual character width from font using temporary DC
     wxBitmap tempBitmap(1, 1, 24);
@@ -181,8 +185,9 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     dc.SetFont(m_font);
     dc.SetTextForeground(wxColour(255, 255, 255));
     
-    // Draw character with vertical offset to avoid baseline clipping
-    dc.DrawText(text, 0, -8);
+    // Draw character centered vertically in the cell
+    // No offset needed since we use fixed cell height
+    dc.DrawText(text, 0, 0);
     dc.SelectObject(wxNullBitmap);
     
     // Convert to image and then to GL_RGBA
@@ -347,4 +352,8 @@ int FontAtlas::GetTextureHeight() const {
 
 int FontAtlas::GetFontSize() const {
     return m_fontSize;
+}
+
+int FontAtlas::GetCharHeight() const {
+    return m_charHeight;
 }
