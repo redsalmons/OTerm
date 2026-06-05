@@ -15,7 +15,7 @@ wxDEFINE_EVENT(wxEVT_TAB_SELECTED, wxCommandEvent);
 ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal)
     : wxPanel(parent, wxID_ANY), m_contentPanel(contentPanel), m_deviceConfig(deviceConfig),
       m_isActive(false), m_isHovered(false), m_isLocalTerminal(isLocalTerminal), m_terminalThread(nullptr), m_localTerminalThread(nullptr), m_termCanvas(nullptr),
-      m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr) {
+      m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr), m_prevRows(0), m_prevCols(0) {
     // Calculate DPI scale
     double dpiScale = 1.0;
     if (GetHandle()) {
@@ -314,9 +314,10 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
     m_termCanvas->ClearScreenData();
     m_termCanvas->UpdateScreenData(instances);
 
-    // Get alternate screen state from appropriate thread
+    // Get alternate screen state and scroll offset from appropriate thread
     bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
-    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, inAltScreen);
+    int scrollOffset = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->GetScrollOffset() : 0) : (m_terminalThread ? m_terminalThread->GetScrollOffset() : 0);
+    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, inAltScreen, scrollOffset);
     
     // Set cursor visibility based on event
     TerminalDamageEvent* damageEvent = dynamic_cast<TerminalDamageEvent*>(&event);
@@ -496,30 +497,32 @@ void ConnectInfo::OnSize(wxSizeEvent& event) {
         if (terminalFontSize < 8) terminalFontSize = 8;
         if (terminalFontSize > 72) terminalFontSize = 72;
 
-        // Calculate cell size based on font size
-        int cellWidth = terminalFontSize / 2;
-        int cellHeight = terminalFontSize;
+        // Calculate cell size based on font size (use actual dimensions if TermGLCanvas has loaded them)
+        int cellWidth = (m_termCanvas->m_cellWidth > 0) ? m_termCanvas->m_cellWidth : (terminalFontSize / 2);
+        int cellHeight = (m_termCanvas->m_cellHeight > 0) ? m_termCanvas->m_cellHeight : terminalFontSize;
 
         // Ensure minimum cell size
         if (cellWidth < 6) cellWidth = 6;
         if (cellHeight < 12) cellHeight = 12;
 
-        int availableHeight = size.GetHeight();
+        // Account for margins (8px left/right, 4px top/bottom, DPI-scaled)
+        int margin_x = static_cast<int>(8 * dpiScale);
+        int margin_y = static_cast<int>(4 * dpiScale);
+
+        int availableHeight = size.GetHeight() - margin_y * 2;
+        int availableWidth = size.GetWidth() - margin_x * 2;
         if (availableHeight < 100) availableHeight = 100;
+        if (availableWidth < 100) availableWidth = 100;
 
         int rows = availableHeight / cellHeight;
-        int cols = size.GetWidth() / cellWidth;
+        int cols = availableWidth / cellWidth;
         
         // Ensure minimum size
         if (rows < 10) rows = 10;
         if (cols < 40) cols = 40;
-        
-        // Track previous vterm size to avoid unnecessary resizes
-        static int prevRows = 0;
-        static int prevCols = 0;
 
         // Only resize if vterm size actually changed
-        if (rows != prevRows || cols != prevCols) {
+        if (rows != m_prevRows || cols != m_prevCols) {
             SSH_LOG("ConnectInfo::OnSize - TermGLCanvas size: " << size.GetWidth() << "x" << size.GetHeight()
                     << ", Calculated vterm: " << rows << "x" << cols);
 
@@ -530,9 +533,19 @@ void ConnectInfo::OnSize(wxSizeEvent& event) {
                 m_terminalThread->ResizeVTerm(rows, cols);
             }
 
-            prevRows = rows;
-            prevCols = cols;
+            m_prevRows = rows;
+            m_prevCols = cols;
         }
     }
     event.Skip();
+}
+
+ConnectInfo::~ConnectInfo() {
+    // Set shutdown flag before cleanup to prevent crash
+    if (m_terminalThread) {
+        m_terminalThread->SetShuttingDown();
+    }
+    if (m_localTerminalThread) {
+        m_localTerminalThread->SetShuttingDown();
+    }
 }

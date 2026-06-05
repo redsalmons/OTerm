@@ -15,6 +15,7 @@ LocalTerminalThread::LocalTerminalThread(wxEvtHandler* ui_handler, int rows, int
       m_rows(rows),
       m_cols(cols),
       m_resize_pending(false),
+      m_shutting_down(false),
       m_has_damage(false) {
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
@@ -86,14 +87,17 @@ void LocalTerminalThread::ScrollVTerm(int lines) {
     }
 
     // Update cursor position in back buffer
-    VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
-    m_back_buffer.cursor_row = cursor_pos.row;
-    m_back_buffer.cursor_col = cursor_pos.col;
+    if (m_vtermManager.get_scroll_offset() == 0) {
+        VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
+        m_back_buffer.cursor_row = cursor_pos.row;
+        m_back_buffer.cursor_col = cursor_pos.col;
+    }
 
-    SSH_LOG("  Cursor position: " << cursor_pos.row << "," << cursor_pos.col);
+    SSH_LOG("  Cursor position: " << m_back_buffer.cursor_row << "," << m_back_buffer.cursor_col);
     // SSH_LOG("  Sending damage event");
 
-    send_damage_event(false);
+    bool cursor_visible = (m_vtermManager.get_scroll_offset() == 0);
+    send_damage_event(cursor_visible);
 }
 
 void LocalTerminalThread::ResetScrollToBottom() {
@@ -196,9 +200,12 @@ void LocalTerminalThread::process_resize() {
 wxThread::ExitCode LocalTerminalThread::Entry() {
     // Start local terminal
     if (!m_terminalManager.Start(m_shell)) {
-        if (m_ui_handler) {
-            wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
-            m_ui_handler->AddPendingEvent(exitEvent);
+        {
+            std::lock_guard<std::mutex> lock(m_shutdown_mutex);
+            if (m_ui_handler && !m_shutting_down) {
+                wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
+                m_ui_handler->AddPendingEvent(exitEvent);
+            }
         }
         return (ExitCode)1;
     }

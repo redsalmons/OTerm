@@ -144,6 +144,7 @@ private:
     
     // Screen mode tracking
     bool in_alternate_screen_;
+    bool entering_alternate_screen_;  // Flag to block history during alternate screen entry
     bool initializing_;  // Flag to prevent event processing during initialization
     
     // Callbacks

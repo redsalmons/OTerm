@@ -34,7 +34,12 @@ public:
     // Reset scroll to bottom (thread-safe, called from UI thread)
     void ResetScrollToBottom();
     void ClearUIHandler();
+    void SetShuttingDown() { 
+        std::lock_guard<std::mutex> lock(m_shutdown_mutex);
+        m_shutting_down = true; 
+    }
     bool IsInAlternateScreen() const { return m_vtermManager.is_in_alternate_screen(); }
+    int GetScrollOffset() const { return m_vtermManager.get_scroll_offset(); }
     
 protected:
     virtual ExitCode Entry() override;
@@ -60,6 +65,10 @@ private:
     std::pair<int, int> m_resize_request;
     bool m_resize_pending;
     std::mutex m_resize_mutex;
+    
+    // Shutdown flag (thread-safe)
+    bool m_shutting_down;
+    std::mutex m_shutdown_mutex;
     
     // UI thread communication
     wxEvtHandler* m_ui_handler;

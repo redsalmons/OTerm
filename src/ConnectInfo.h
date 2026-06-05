@@ -30,6 +30,8 @@ public:
     LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
 
     void UpdateVTermSize(int rows, int cols);
+    
+    ~ConnectInfo();
 
 private:
     void OnPaint(wxPaintEvent& event);
@@ -58,4 +60,6 @@ private:
     std::string m_currentInput; // Record current keyboard input
     FileTransferDialog* m_fileTransferDialog; // File transfer dialog
     FileTransferThread* m_fileTransferThread; // File transfer thread
+    int m_prevRows;
+    int m_prevCols;
 };

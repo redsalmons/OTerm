@@ -135,6 +135,13 @@ void TermGLCanvas::InitializeGL() {
     // Initialize font metrics (cell width/height calculations)
     InitializeFontMetrics();
     
+    // Post a size event to parent ConnectInfo to force recalculating VTerm rows/cols with actual cell dimensions
+    wxWindow* parent = GetParent();
+    if (parent) {
+        wxSizeEvent sizeEvent(parent->GetSize(), parent->GetId());
+        wxPostEvent(parent, sizeEvent);
+    }
+    
     // DEBUG: Create a simple 2x2 test texture (red, green, blue, yellow)
     GLuint testTex;
     glGenTextures(1, &testTex);
@@ -188,7 +195,7 @@ void TermGLCanvas::ClearScreenData() {
     m_screen_cells.clear();
 }
 
-void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen) {
+void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int vterm_scroll_offset) {
     m_cursor_row = row;
     m_cursor_col = col;
     
@@ -229,10 +236,19 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen) {
         m_scroll_offset = 0;
         return;
     }
+
+    // If we are scrolled up in the terminal history, we don't apply the cursor scroll offset
+    // because the screen content is already scrolled up!
+    if (vterm_scroll_offset > 0) {
+        m_scroll_offset = 0;
+        return;
+    }
     
-    // Calculate scroll offset to keep cursor visible
+    // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
     wxSize size = GetSize();
-    int visible_rows = size.GetHeight() / m_cached_cell_height;
+    int margin_y = static_cast<int>(4 * m_dpiScale);
+    int availableHeight = size.GetHeight() - margin_y * 2;
+    int visible_rows = availableHeight / m_cached_cell_height;
     
     // Calculate scroll offset to keep cursor at bottom
     if (m_cursor_row >= visible_rows) {
@@ -424,7 +440,11 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
 void TermGLCanvas::OnSize(wxSizeEvent& event) {
     // Update cached cell height when size changes
-    m_cached_cell_height = std::max(12, m_charHeight);
+    if (m_cellHeight > 0) {
+        m_cached_cell_height = m_cellHeight;
+    } else {
+        m_cached_cell_height = std::max(12, m_charHeight);
+    }
     
     // Update OpenGL viewport with 8px left/right, 4px top/bottom margin
     if (m_glInitialized && m_glContext) {

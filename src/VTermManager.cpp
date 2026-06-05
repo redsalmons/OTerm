@@ -12,7 +12,7 @@
 VTermManager::VTermManager()
     : vt_(nullptr), vts_(nullptr), rows_(10), cols_(80), has_new_output_(false), 
       current_scroll_offset_(0), scrollback_triggered_(false), total_damage_rows_(0), last_saved_row_(-1),
-      in_alternate_screen_(false), initializing_(true) {
+      in_alternate_screen_(false), entering_alternate_screen_(false), initializing_(true) {
     // Initialize scroll history as empty - using smaller size for easier scroll testing
     last_cursor_pos_ = { .row = 0, .col = 0 };
 }
@@ -80,6 +80,23 @@ int VTermManager::write_input(const char* data, int length) {
 
     if (!data || length <= 0) {
         return -1;
+    }
+
+    // Check for alternate screen escape sequences
+    if (length >= 8) {
+        // ESC [ ? 1 0 4 9 h - enter alternate screen
+        if (data[0] == 0x1b && data[1] == '[' && data[2] == '?' && 
+            data[3] == '1' && data[4] == '0' && data[5] == '4' && 
+            data[6] == '9' && data[7] == 'h') {
+            SSH_LOG("VTermManager::write_input: DETECTED ALTERNATE SCREEN ENTER (ESC [ ? 1049 h)");
+            entering_alternate_screen_ = true;
+        }
+        // ESC [ ? 1 0 4 9 l - exit alternate screen
+        if (data[0] == 0x1b && data[1] == '[' && data[2] == '?' && 
+            data[3] == '1' && data[4] == '0' && data[5] == '4' && 
+            data[6] == '9' && data[7] == 'l') {
+            SSH_LOG("VTermManager::write_input: DETECTED ALTERNATE SCREEN EXIT (ESC [ ? 1049 l)");
+        }
     }
 
     SSH_LOG("VTermManager::write_input: length=" << length << ", content=" << std::hex << (int)(unsigned char)data[0] << " " << (int)(unsigned char)data[1] << " " << (int)(unsigned char)data[2] << std::dec);
@@ -263,6 +280,8 @@ int VTermManager::vterm_settermprop_callback(VTermProp prop, VTermValue *val, vo
                 if (val->boolean) {
                     // VIM started
                     SSH_LOG("vterm_settermprop_callback: VIM started (entered alternate screen)");
+                    // Clear the entering flag since we're now confirmed to be in alternate screen
+                    manager->entering_alternate_screen_ = false;
                 } else {
                     // VIM exited
                     SSH_LOG("vterm_settermprop_callback: VIM exited (exited alternate screen)");
@@ -329,10 +348,13 @@ int VTermManager::vterm_sb_pushline_callback(int cols, const VTermScreenCell *ce
         return 0;
     }
     
-    // Check if we're in alternate screen mode - if so, don't add to history
-    if (manager->in_alternate_screen_) {
+    // Check if we're in alternate screen mode or entering it - if so, don't add to history
+    if (manager->in_alternate_screen_ || manager->entering_alternate_screen_) {
+        SSH_LOG("vterm_sb_pushline_callback: skipped (in alternate screen mode or entering)");
         return 1; // Return success but don't add to history
     }
+    
+    SSH_LOG("vterm_sb_pushline_callback: adding line to history, in_alternate_screen_=" << manager->in_alternate_screen_ << ", cols=" << cols);
     
     // Add to history with error handling
     try {
@@ -532,10 +554,10 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
     for (int col = 0; col < cols; col++) {
         TerminalCell terminal_cell;
         
-        if (cells[col].chars[0] != 0 && cells[col].chars[0] != 0xffffffff) {
+        if (cells[col].chars[0] != 0) {
             terminal_cell.char_code = cells[col].chars[0];
         } else {
-            terminal_cell.char_code = 0; // Continuation cell, don't render
+            terminal_cell.char_code = ' ';
         }
         terminal_cell.width = cells[col].width;
         
@@ -687,14 +709,18 @@ void VTermManager::mark_output_consumed() {
 }
 
 void VTermManager::scroll_up(int lines) {
-    int max_offset = scroll_history_.size(); // Maximum scroll offset is the history size
-
-    int old_offset = current_scroll_offset_;
-    current_scroll_offset_ += lines;
-    if (current_scroll_offset_ > max_offset) {
-        current_scroll_offset_ = max_offset;
+    int total_lines = scroll_history_.size() + rows_;
+    int max_offset = total_lines - rows_; // Maximum scroll offset (showing oldest content)
+    
+    // Safety check - if total_lines is less than or equal to rows_, we cannot scroll up
+    if (max_offset <= 0) {
+        current_scroll_offset_ = 0;
+        return;
     }
-
+    
+    int old_offset = current_scroll_offset_;
+    current_scroll_offset_ = (std::min)(current_scroll_offset_ + lines, max_offset);
+    
     SSH_LOG("scroll_up: lines=" << lines << ", old_offset=" << old_offset << ", new_offset=" << current_scroll_offset_ << ", max_offset=" << max_offset << ", history_size=" << scroll_history_.size());
 }
 
@@ -707,7 +733,7 @@ void VTermManager::scroll_down(int lines) {
 
 void VTermManager::scroll_to_top() {
     int total_lines = scroll_history_.size() + rows_;
-    current_scroll_offset_ = total_lines - rows_;
+    current_scroll_offset_ = (std::max)(0, total_lines - rows_);
 }
 
 void VTermManager::scroll_to_bottom() {

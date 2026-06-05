@@ -16,7 +16,7 @@ public:
     ~TermGLCanvas();
 
     void UpdateScreenData(const std::vector<CellInstance>& instances);
-    void SetCursorPosition(int row, int col, bool in_alt_screen = false);
+    void SetCursorPosition(int row, int col, bool in_alt_screen = false, int vterm_scroll_offset = 0);
     void SetCursorVisible(bool visible) { m_cursor_visible = visible; }
     void ClearScreenData();
     float GetDPIScale() const { return m_dpiScale; }

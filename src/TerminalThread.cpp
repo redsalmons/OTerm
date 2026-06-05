@@ -12,6 +12,7 @@ TerminalThread::TerminalThread(wxEvtHandler* ui_handler, int rows, int cols, con
       m_rows(rows),
       m_cols(cols),
       m_has_damage(false),
+      m_shutting_down(false),
       m_resize_pending(false) {
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
@@ -353,8 +354,12 @@ void TerminalThread::send_damage_event(bool cursor_visible) {
 
 void TerminalThread::cleanup() {
     // Notify UI thread that thread is exiting (before cleanup)
-    if (m_ui_handler) {
-        wxQueueEvent(m_ui_handler, new wxThreadEvent(wxEVT_TERMINAL_EXIT));
+    // Only send event if UI handler is still valid and not shutting down
+    {
+        std::lock_guard<std::mutex> lock(m_shutdown_mutex);
+        if (m_ui_handler && !m_shutting_down) {
+            wxQueueEvent(m_ui_handler, new wxThreadEvent(wxEVT_TERMINAL_EXIT));
+        }
     }
     
     // Cleanup SSH Manager
