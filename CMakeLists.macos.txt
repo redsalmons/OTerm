@@ -57,6 +57,7 @@ add_executable(OceanTerm
     src/MasterPasswordDialog.cpp
     src/LocalTerminalManager.cpp
     src/LocalTerminalThread.cpp
+    src/MonospaceFontDialog.cpp
 )
 
 target_include_directories(OceanTerm PRIVATE
