@@ -687,12 +687,14 @@ void VTermManager::mark_output_consumed() {
 }
 
 void VTermManager::scroll_up(int lines) {
-    int total_lines = scroll_history_.size() + rows_;
-    int max_offset = total_lines - rows_; // Maximum scroll offset (showing oldest content)
-    
+    int max_offset = scroll_history_.size(); // Maximum scroll offset is the history size
+
     int old_offset = current_scroll_offset_;
-    current_scroll_offset_ = (std::min)(current_scroll_offset_ + lines, max_offset);
-    
+    current_scroll_offset_ += lines;
+    if (current_scroll_offset_ > max_offset) {
+        current_scroll_offset_ = max_offset;
+    }
+
     SSH_LOG("scroll_up: lines=" << lines << ", old_offset=" << old_offset << ", new_offset=" << current_scroll_offset_ << ", max_offset=" << max_offset << ", history_size=" << scroll_history_.size());
 }
 

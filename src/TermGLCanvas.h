@@ -19,6 +19,7 @@ public:
     void SetCursorPosition(int row, int col, bool in_alt_screen = false);
     void SetCursorVisible(bool visible) { m_cursor_visible = visible; }
     void ClearScreenData();
+    float GetDPIScale() const { return m_dpiScale; }
 
     typedef std::function<void(const char* data, int length)> KeyCallback;
     void SetKeyCallback(KeyCallback callback) { key_callback_ = callback; }
@@ -43,6 +44,7 @@ private:
     void OnSetFocus(wxFocusEvent& event);
     void OnKillFocus(wxFocusEvent& event);
     void InitializeGL();
+    void InitializeFontMetrics();
     void Render();
     void CopySelectionToClipboard();
     
@@ -76,6 +78,8 @@ public:
     // Font size for cell size calculation
     int m_fontSize;
     int m_charHeight; // Actual character rendering height from FontAtlas
+    int m_cellWidth;  // Cached cell width (calculated from font size)
+    int m_cellHeight; // Cached cell height (calculated from char height)
 
     // Local IME input box
     wxTextCtrl* m_imeInputBox;

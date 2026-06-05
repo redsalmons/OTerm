@@ -29,6 +29,8 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_selection_end_row(0), m_selection_end_col(0),
       m_fontSize(0),
       m_charHeight(0),
+      m_cellWidth(0),
+      m_cellHeight(0),
       m_imeInputBox(nullptr),
       m_imeInputBoxVisible(false) {
     // Calculate DPI scale
@@ -104,12 +106,15 @@ void TermGLCanvas::InitializeGL() {
     m_fontAtlas = new FontAtlas();
     std::string fontName = GlobalConfig::GetFontName();
     int fontSize = GlobalConfig::GetFontSize();
-    
-    // Scale the configured font size for terminal rendering (multiply by 2 for better visibility)
-    int terminalFontSize = static_cast<int>(fontSize * 2);
-    if (terminalFontSize < 12) terminalFontSize = 12;
+
+    // Apply x2 scaling if DPI scaling is detected (high DPI screen)
+    int terminalFontSize = fontSize;
+    if (m_dpiScale > 1.0f) {
+        terminalFontSize = static_cast<int>(fontSize * 2);
+    }
+    if (terminalFontSize < 8) terminalFontSize = 8;
     if (terminalFontSize > 72) terminalFontSize = 72;
-    
+
     m_fontSize = terminalFontSize;
     
     if (!m_fontAtlas->InitializeSystemFont(terminalFontSize, wxString::FromUTF8(fontName.c_str()))) {
@@ -123,9 +128,12 @@ void TermGLCanvas::InitializeGL() {
         m_charHeight = terminalFontSize; // Fallback to font size
     }
     
-    SSH_LOG("Font atlas initialized: texture ID=" << m_fontAtlas->GetTextureID() 
+    SSH_LOG("Font atlas initialized: texture ID=" << m_fontAtlas->GetTextureID()
             << ", size=" << m_fontAtlas->GetTextureWidth() << "x" << m_fontAtlas->GetTextureHeight()
             << ", charHeight=" << m_charHeight);
+    
+    // Initialize font metrics (cell width/height calculations)
+    InitializeFontMetrics();
     
     // DEBUG: Create a simple 2x2 test texture (red, green, blue, yellow)
     GLuint testTex;
@@ -149,6 +157,22 @@ void TermGLCanvas::InitializeGL() {
     SSH_LOG("OpenGL initialized successfully");
 }
 
+void TermGLCanvas::InitializeFontMetrics() {
+    // Calculate cell width and height from font metrics
+    m_cellWidth = m_fontSize / 2;
+    m_cellHeight = m_charHeight;
+
+    // Ensure minimum cell size
+    if (m_cellWidth < 6) m_cellWidth = 6;
+    // Remove minimum height check to use actual font height
+    // if (m_cellHeight < 12) m_cellHeight = 12;
+
+    // Update cached cell height for scroll calculations
+    m_cached_cell_height = m_cellHeight;
+
+    SSH_LOG("Font metrics initialized: cellWidth=" << m_cellWidth << ", cellHeight=" << m_cellHeight);
+}
+
 void TermGLCanvas::UpdateScreenData(const std::vector<CellInstance>& instances) {
     // Accumulate cell updates
     for (const auto& cell : instances) {
@@ -170,25 +194,27 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen) {
     
     // Update IME input box position and size if visible
     if (m_imeInputBox && m_imeInputBoxVisible) {
-        // Calculate position and size at cursor
-        int fontSize = m_fontAtlas ? m_fontAtlas->GetFontSize() : 12;
-        int cell_width = fontSize / 2;
-        int cell_height = fontSize;
-        
-        if (cell_width < 6) cell_width = 6;
-        if (cell_height < 12) cell_height = 12;
-        
-        int x = col * cell_width + 7; // Add 7px offset to correct position (5+2)
-        int y = row * cell_height + 5; // Add 5px offset to correct position
-        
+        // Use same margins as cursor rendering (8px left/right, 4px top/bottom) with DPI scaling
+        int margin_x = static_cast<int>(8 * m_dpiScale);
+        int margin_y = static_cast<int>(4 * m_dpiScale);
+
+        // Apply scroll offset only to vertical position (y-axis)
+        int x = col * m_cellWidth + margin_x;
+        int y = (row - m_scroll_offset) * m_cellHeight + margin_y;
+
+        // Use cursor height (85% of cell height) to match cursor size
+        int cursor_height = static_cast<int>(m_cellHeight * 0.85f);
+        int cursor_y_offset = (m_cellHeight - cursor_height) / 2;
+        y += cursor_y_offset;
+
         // Bounds check
         wxSize size = GetSize();
-        if (x > size.GetWidth() - cell_width) x = size.GetWidth() - cell_width;
-        if (y > size.GetHeight() - cell_height) y = size.GetHeight() - cell_height;
-        
-        // Set input box size and position to match cursor cell exactly
-        m_imeInputBox->SetSize(x, y, cell_width, cell_height);
-        // SSH_LOG("IME input box position and size updated to: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
+        if (x > size.GetWidth() - m_cellWidth) x = size.GetWidth() - m_cellWidth;
+        if (y > size.GetHeight() - cursor_height) y = size.GetHeight() - cursor_height;
+
+        // Set input box size and position to match cursor exactly
+        m_imeInputBox->SetSize(x, y, m_cellWidth, cursor_height);
+        // SSH_LOG("IME input box position and size updated to: " << x << ", " << y << " with size: " << m_cellWidth << "x" << m_cellHeight);
         
         // On macOS, notify input method about position
 #ifdef __WXMAC__
@@ -231,17 +257,13 @@ void TermGLCanvas::Render() {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     
-    // Margin offset: 8px left/right, 4px top/bottom (not DPI-scaled for rendering)
-    const float margin_x = 8.0f;
-    const float margin_y = 4.0f;
-    
-    // Cell size based on font size
-    float cell_width = static_cast<float>(m_fontSize) / 2.0f;
-    float cell_height = static_cast<float>(m_charHeight);
-    
-    // Ensure minimum cell size
-    if (cell_width < 6.0f) cell_width = 6.0f;
-    if (cell_height < 12.0f) cell_height = 12.0f;
+    // Margin offset: 8px left/right, 4px top/bottom (DPI-scaled for high DPI screens)
+    const float margin_x = 8.0f * m_dpiScale;
+    const float margin_y = 4.0f * m_dpiScale;
+
+    // Use cached cell width/height
+    float cell_width = static_cast<float>(m_cellWidth);
+    float cell_height = static_cast<float>(m_cellHeight);
     
     // 1. 绘制背景色 (不带纹理)
     glDisable(GL_TEXTURE_2D);
@@ -252,7 +274,7 @@ void TermGLCanvas::Render() {
         if (cell.char_code == 0) continue;
 
         float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
-        float y = static_cast<int>(cell.cell_y) * cell_height + margin_y;
+        float y = (static_cast<int>(cell.cell_y) - m_scroll_offset) * cell_height + margin_y;
 
         // Use cell width for wide characters
         uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
@@ -313,7 +335,7 @@ void TermGLCanvas::Render() {
             if (cell.char_code < 32) continue;
 
             float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
-            float y = static_cast<int>(cell.cell_y) * cell_height + margin_y;
+            float y = (static_cast<int>(cell.cell_y) - m_scroll_offset) * cell_height + margin_y;
 
             // Use cell width for wide characters (Chinese characters use 2 cells)
             uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
@@ -356,15 +378,22 @@ void TermGLCanvas::Render() {
     // 3. 绘制光标
     if (m_cursor_visible) {
         float cursor_x = m_cursor_col * cell_width + margin_x;
-        float cursor_y = m_cursor_row * cell_height + margin_y;
+        float cursor_y = (m_cursor_row - m_scroll_offset) * cell_height + margin_y;
+
+        // Adjust cursor height to match actual character height (85% of cell height)
+        // This makes cursor align better with text
+        float cursor_height = cell_height * 0.85f;
+        float cursor_y_offset = (cell_height - cursor_height) / 2.0f;
+        cursor_y += cursor_y_offset;
+
         glColor4f(1.0f, 1.0f, 1.0f, 0.5f);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBegin(GL_QUADS);
             glVertex2f(cursor_x, cursor_y);
             glVertex2f(cursor_x + cell_width, cursor_y);
-            glVertex2f(cursor_x + cell_width, cursor_y + cell_height);
-            glVertex2f(cursor_x, cursor_y + cell_height);
+            glVertex2f(cursor_x + cell_width, cursor_y + cursor_height);
+            glVertex2f(cursor_x, cursor_y + cursor_height);
         glEnd();
         glDisable(GL_BLEND);
     }
@@ -519,13 +548,11 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
     ShowIMEInputBox();
     
     wxPoint pos = event.GetPosition();
-    const float margin_x = 8.0f;
-    const float margin_y = 4.0f;
-    float cell_width = static_cast<float>(m_fontSize) / 2.0f;
-    float cell_height = static_cast<float>(m_charHeight);
-    if (cell_width < 6.0f) cell_width = 6.0f;
-    if (cell_height < 12.0f) cell_height = 12.0f;
-    
+    const float margin_x = 8.0f * m_dpiScale;
+    const float margin_y = 4.0f * m_dpiScale;
+    float cell_width = static_cast<float>(m_cellWidth);
+    float cell_height = static_cast<float>(m_cellHeight);
+
     // Convert pixel position to cell coordinates
     int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
     int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
@@ -558,13 +585,11 @@ void TermGLCanvas::OnMouseLeftUp(wxMouseEvent& event) {
 void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
     if (m_selecting && event.LeftIsDown()) {
         wxPoint pos = event.GetPosition();
-        const float margin_x = 8.0f;
-        const float margin_y = 4.0f;
-        float cell_width = static_cast<float>(m_fontSize) / 2.0f;
-        float cell_height = static_cast<float>(m_charHeight);
-        if (cell_width < 6.0f) cell_width = 6.0f;
-        if (cell_height < 12.0f) cell_height = 12.0f;
-        
+        const float margin_x = 8.0f * m_dpiScale;
+        const float margin_y = 4.0f * m_dpiScale;
+        float cell_width = static_cast<float>(m_cellWidth);
+        float cell_height = static_cast<float>(m_cellHeight);
+
         // Convert pixel position to cell coordinates
         int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
         int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
@@ -692,29 +717,31 @@ void TermGLCanvas::ShowIMEInputBox() {
     };
     SSH_LOG("IME callback set");
 
-    // Calculate position and size at cursor
-    int fontSize = m_fontAtlas ? m_fontAtlas->GetFontSize() : 12;
-    int cell_width = fontSize / 2;
-    int cell_height = fontSize;
-    
-    if (cell_width < 6) cell_width = 6;
-    if (cell_height < 12) cell_height = 12;
-    
-    int x = m_cursor_col * cell_width + 7; // Add 7px offset to correct position (5+2)
-    int y = m_cursor_row * cell_height + 5; // Add 5px offset to correct position
-    
+    // Use same margins as cursor rendering (8px left/right, 4px top/bottom) with DPI scaling
+    int margin_x = static_cast<int>(8 * m_dpiScale);
+    int margin_y = static_cast<int>(4 * m_dpiScale);
+
+    // Apply scroll offset only to vertical position (y-axis)
+    int x = m_cursor_col * m_cellWidth + margin_x;
+    int y = (m_cursor_row - m_scroll_offset) * m_cellHeight + margin_y;
+
+    // Use cursor height (85% of cell height) to match cursor size
+    int cursor_height = static_cast<int>(m_cellHeight * 0.85f);
+    int cursor_y_offset = (m_cellHeight - cursor_height) / 2;
+    y += cursor_y_offset;
+
     // Ensure it stays within canvas bounds
     wxSize canvasSize = GetSize();
-    if (x > canvasSize.GetWidth() - cell_width) x = canvasSize.GetWidth() - cell_width;
-    if (y > canvasSize.GetHeight() - cell_height) y = canvasSize.GetHeight() - cell_height;
-    
-    // Set input box size and position to match cursor cell exactly
-    m_imeInputBox->SetSize(x, y, cell_width, cell_height);
+    if (x > canvasSize.GetWidth() - m_cellWidth) x = canvasSize.GetWidth() - m_cellWidth;
+    if (y > canvasSize.GetHeight() - cursor_height) y = canvasSize.GetHeight() - cursor_height;
+
+    // Set input box size and position to match cursor exactly
+    m_imeInputBox->SetSize(x, y, m_cellWidth, cursor_height);
     m_imeInputBox->Show();
     m_imeInputBox->SetFocus();
     m_imeInputBoxVisible = true;
-    
-    SSH_LOG("IME input box shown at position: " << x << ", " << y << " with size: " << cell_width << "x" << cell_height);
+
+    SSH_LOG("IME input box shown at position: " << x << ", " << y << " with size: " << m_cellWidth << "x" << m_cellHeight);
 }
 
 void TermGLCanvas::HideIMEInputBox() {
@@ -798,9 +825,23 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
                 key_seq = "\x1b[C";
                 break;
             case WXK_HOME:
+                if (event.ControlDown()) {
+                    // Ctrl+Home: Scroll to top of scrollback
+                    if (scroll_callback_) {
+                        scroll_callback_(10000); // Large number to scroll to top
+                    }
+                    return;
+                }
                 key_seq = "\x1b[H";
                 break;
             case WXK_END:
+                if (event.ControlDown()) {
+                    // Ctrl+End: Scroll to bottom
+                    if (scroll_callback_) {
+                        scroll_callback_(-10000); // Large negative number to scroll to bottom
+                    }
+                    return;
+                }
                 key_seq = "\x1b[F";
                 break;
             case WXK_PAGEUP:

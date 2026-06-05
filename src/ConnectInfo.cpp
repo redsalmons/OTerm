@@ -106,9 +106,15 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         int fontSize = GlobalConfig::GetFontSize();
         if (fontSize == 0) fontSize = 12; // Default if not configured
 
-        // Scale for terminal rendering (same as in TermGLCanvas)
-        int terminalFontSize = fontSize * 2;
-        if (terminalFontSize < 12) terminalFontSize = 12;
+        // Get DPI scale from canvas
+        float dpiScale = m_termCanvas->GetDPIScale();
+
+        // Apply x2 scaling only if DPI scaling is detected (same as in TermGLCanvas)
+        int terminalFontSize = fontSize;
+        if (dpiScale > 1.0f) {
+            terminalFontSize = static_cast<int>(fontSize * 2);
+        }
+        if (terminalFontSize < 8) terminalFontSize = 8;
         if (terminalFontSize > 72) terminalFontSize = 72;
 
         // Calculate cell size based on font size
@@ -479,9 +485,15 @@ void ConnectInfo::OnSize(wxSizeEvent& event) {
         int fontSize = GlobalConfig::GetFontSize();
         if (fontSize == 0) fontSize = 12; // Default if not configured
 
-        // Scale for terminal rendering (same as in TermGLCanvas)
-        int terminalFontSize = fontSize * 2;
-        if (terminalFontSize < 12) terminalFontSize = 12;
+        // Get DPI scale from canvas
+        float dpiScale = m_termCanvas->GetDPIScale();
+
+        // Apply x2 scaling only if DPI scaling is detected (same as in TermGLCanvas)
+        int terminalFontSize = fontSize;
+        if (dpiScale > 1.0f) {
+            terminalFontSize = static_cast<int>(fontSize * 2);
+        }
+        if (terminalFontSize < 8) terminalFontSize = 8;
         if (terminalFontSize > 72) terminalFontSize = 72;
 
         // Calculate cell size based on font size

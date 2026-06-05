@@ -29,9 +29,9 @@ FontAtlas::~FontAtlas() {
 bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
     SSHManager::init_log_file();
     SSH_LOG("FontAtlas::InitializeSystemFont called with fontSize=" << fontSize << ", fontName='" << fontName << "'");
-    
+
     m_fontSize = fontSize;
-    
+
     if (fontName.IsEmpty()) {
         // Use default font
         m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
@@ -51,10 +51,27 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
             return false;
         }
     }
-    
-    // Use font size as character height (for consistent cell sizing)
-    m_charHeight = fontSize;
-    
+
+    // Calculate actual character height including descenders
+    // Use a temporary DC to get font metrics
+    wxBitmap tempBitmap(1, 1, 24);
+    wxMemoryDC tempDC(tempBitmap);
+    tempDC.SetFont(m_font);
+
+    // Get text extent for a single character with descender (like 'g')
+    wxString testChar = "g";
+    wxSize extent = tempDC.GetTextExtent(testChar);
+
+    // Use the actual character height including descenders
+    m_charHeight = extent.y;
+
+    tempDC.SelectObject(wxNullBitmap);
+
+    // Ensure minimum height
+    if (m_charHeight < fontSize) {
+        m_charHeight = fontSize;
+    }
+
     SSH_LOG("FontAtlas: Font created successfully, name='" << m_font.GetFaceName() << "', size=" << fontSize << ", charHeight=" << m_charHeight);
     return GenerateTextureAtlas();
 }
@@ -166,7 +183,7 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     
     // Create bitmap for this character
     int charSize = m_fontSize;
-    int charHeight = charSize; // Use fixed height for consistent cell sizing
+    int charHeight = m_charHeight; // Use actual character height including descenders
     
     // Get actual character width from font using temporary DC
     wxBitmap tempBitmap(1, 1, 24);
@@ -184,10 +201,14 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     dc.Clear();
     dc.SetFont(m_font);
     dc.SetTextForeground(wxColour(255, 255, 255));
-    
-    // Draw character centered vertically in the cell
-    // No offset needed since we use fixed cell height
-    dc.DrawText(text, 0, 0);
+
+    // Calculate vertical offset to center character in cell
+    wxSize charExtent = dc.GetTextExtent(text);
+    int yOffset = (charHeight - charExtent.y) / 2;
+    if (yOffset < 0) yOffset = 0;
+
+    // Draw character centered vertically to fill cell better
+    dc.DrawText(text, 0, yOffset);
     dc.SelectObject(wxNullBitmap);
     
     // Convert to image and then to GL_RGBA
