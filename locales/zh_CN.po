@@ -228,3 +228,40 @@ msgstr "密码错误，剩余尝试次数：%d"
 
 msgid "tooManyFailedAttempts"
 msgstr "密码错误次数过多，程序将退出"
+
+# Device List Panel
+msgid "searchHint"
+msgstr "搜索关键字（支持名称、ID、序列号等模糊查询）"
+
+msgid "index"
+msgstr "序号"
+
+msgid "deviceName"
+msgstr "设备名"
+
+msgid "category"
+msgstr "分类"
+
+msgid "address"
+msgstr "地址"
+
+msgid "ip"
+msgstr "IP"
+
+msgid "authType"
+msgstr "认证类型"
+
+msgid "operation"
+msgstr "操作"
+
+msgid "open"
+msgstr "打开"
+
+msgid "passwordAuth"
+msgstr "密码认证"
+
+msgid "keyAuth"
+msgstr "密钥认证"
+
+msgid "noAuth"
+msgstr "免密认证"

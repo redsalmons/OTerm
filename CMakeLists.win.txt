@@ -44,6 +44,7 @@ add_executable(OceanTerm WIN32
     src/LocalTerminalManager.cpp
     src/LocalTerminalThread.cpp
     src/MonospaceFontDialog.cpp
+    src/DeviceListPanel.cpp
 )
 
 # Add include directories
