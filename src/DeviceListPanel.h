@@ -9,7 +9,7 @@ wxDECLARE_EVENT(wxEVT_DEVICE_OPEN_REQUEST, wxCommandEvent);
 
 class DeviceRowPanel : public wxPanel {
 public:
-    DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId);
+    DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, float dpiScale = 1.0f);
     const std::string& GetDeviceId() const { return m_deviceId; }
 
 private:
@@ -40,6 +40,7 @@ private:
     wxPanel* m_contentPanel;
     std::vector<DeviceConfig> m_devices;
     std::vector<DeviceRowPanel*> m_rowPanels;
+    float m_dpiScale;
 
     enum {
         ID_SEARCH_CTRL = wxID_HIGHEST + 1,

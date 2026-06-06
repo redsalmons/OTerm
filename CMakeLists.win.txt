@@ -67,7 +67,7 @@ target_link_libraries(OceanTerm PRIVATE
     nlohmann_json::nlohmann_json
     $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
     libssh2::libssh2
-    ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/build/lib/Release/vterm.lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/build/Release/vterm.lib
     ws2_32
     crypt32
     wx::core
