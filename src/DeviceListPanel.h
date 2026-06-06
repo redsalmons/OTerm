@@ -6,10 +6,11 @@
 #include "DeviceConfig.h"
 
 wxDECLARE_EVENT(wxEVT_DEVICE_OPEN_REQUEST, wxCommandEvent);
+wxDECLARE_EVENT(wxEVT_DEVICE_DELETE_REQUEST, wxCommandEvent);
 
 class DeviceRowPanel : public wxPanel {
 public:
-    DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, float dpiScale = 1.0f);
+    DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, float dpiScale);
     const std::string& GetDeviceId() const { return m_deviceId; }
 
 private:
@@ -28,9 +29,10 @@ public:
 private:
     void OnSearch(wxCommandEvent& event);
     void OnAddDevice(wxCommandEvent& event);
-    void OnDeviceDeleteRequest(wxCommandEvent& event);
     void OnSearchFocus(wxFocusEvent& event);
     void OnSearchKillFocus(wxFocusEvent& event);
+    void OnDeviceOpenRequest(wxCommandEvent& event);
+    void OnDeviceDeleteRequest(wxCommandEvent& event);
     void LoadDevices();
     void RefreshDeviceList(const std::string& filter = "");
 
