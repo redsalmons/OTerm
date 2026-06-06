@@ -11,8 +11,9 @@ wxEND_EVENT_TABLE()
 
 MasterPasswordDialog::MasterPasswordDialog(wxWindow* parent, bool isNewPassword)
     : wxDialog(parent, wxID_ANY, isNewPassword ? TranslationHelper::Tr("setupMasterPassword") : TranslationHelper::Tr("enterMasterPassword"),
-                wxDefaultPosition, wxSize(400, isNewPassword ? 200 : 150)),
-      m_isNewPassword(isNewPassword) {
+                wxDefaultPosition, wxDefaultSize),
+      m_isNewPassword(isNewPassword),
+      m_passwordVerifier(nullptr) {
 
     wxPanel* panel = new wxPanel(this);
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
@@ -46,6 +47,12 @@ MasterPasswordDialog::MasterPasswordDialog(wxWindow* parent, bool isNewPassword)
     buttonSizer->Add(new wxButton(panel, wxID_CANCEL, TranslationHelper::Tr("cancel")), 0, wxALL, 5);
     mainSizer->Add(buttonSizer, 0, wxALIGN_RIGHT | wxALL, 10);
 
+    // Error label (hidden by default, below buttons)
+    m_errorLabel = new wxStaticText(panel, wxID_ANY, "");
+    m_errorLabel->SetForegroundColour(wxColour(255, 0, 0));
+    m_errorLabel->Hide();
+    mainSizer->Add(m_errorLabel, 0, wxALL, 10);
+
     panel->SetSizer(mainSizer);
     wxBoxSizer* dialogSizer = new wxBoxSizer(wxVERTICAL);
     dialogSizer->Add(panel, 1, wxEXPAND);
@@ -64,19 +71,47 @@ wxString MasterPasswordDialog::GetPassword() const {
     return m_passwordCtrl->GetValue();
 }
 
+void MasterPasswordDialog::SetError(const wxString& error) {
+    if (error.IsEmpty()) {
+        m_errorLabel->Hide();
+    } else {
+        m_errorLabel->SetLabel(error);
+        m_errorLabel->Show();
+    }
+    Layout();
+    Fit();
+}
+
+void MasterPasswordDialog::SetPasswordVerifier(std::function<bool(const wxString&, wxString&, bool&)> verifier) {
+    m_passwordVerifier = verifier;
+}
+
 void MasterPasswordDialog::OnOK(wxCommandEvent& event) {
     wxString password = m_passwordCtrl->GetValue();
 
     if (password.IsEmpty()) {
-        wxMessageBox(TranslationHelper::Tr("passwordCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+        SetError(TranslationHelper::Tr("passwordCannotBeEmpty"));
         return;
     }
 
     if (m_isNewPassword) {
         wxString confirmPassword = m_confirmPasswordCtrl->GetValue();
         if (password != confirmPassword) {
-            wxMessageBox(TranslationHelper::Tr("passwordsDoNotMatch"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+            SetError(TranslationHelper::Tr("passwordsDoNotMatch"));
             return;
+        }
+    }
+
+    // Use password verifier if set
+    if (m_passwordVerifier) {
+        wxString errorMsg;
+        bool shouldClose = false;
+        if (!m_passwordVerifier(password, errorMsg, shouldClose)) {
+            SetError(errorMsg);
+            if (shouldClose) {
+                EndModal(wxID_CANCEL);
+            }
+            return;  // Don't close the dialog, just show error
         }
     }
 

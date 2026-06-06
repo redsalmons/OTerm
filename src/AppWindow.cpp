@@ -102,28 +102,33 @@ bool MyApp::OnInit() {
 
             while (attempts < maxAttempts) {
                 MasterPasswordDialog loginDialog(nullptr, false);
-                if (loginDialog.ShowModal() != wxID_OK) {
-                    // User cancelled, exit application
+                loginDialog.SetPasswordVerifier([&](const wxString& password, wxString& errorMsg, bool& shouldClose) {
+                    if (GlobalConfig::VerifyMasterPassword(password.ToStdString())) {
+                        return true;
+                    } else {
+                        attempts++;
+                        int newRemaining = maxAttempts - attempts;
+                        if (newRemaining > 0) {
+                            errorMsg = wxString::Format(TranslationHelper::Tr("incorrectPasswordAttempts"), newRemaining);
+                            shouldClose = false;
+                        } else {
+                            errorMsg = TranslationHelper::Tr("tooManyFailedAttempts");
+                            shouldClose = true;
+                        }
+                        return false;
+                    }
+                });
+
+                int result = loginDialog.ShowModal();
+                if (result == wxID_CANCEL) {
+                    // User cancelled or max attempts reached, exit application
                     return false;
                 }
 
                 wxString password = loginDialog.GetPassword();
-                if (GlobalConfig::VerifyMasterPassword(password.ToStdString())) {
-                    // Password correct, save to memory and continue
-                    GlobalConfig::SetActiveMasterPassword(password.ToStdString());
-                    break;
-                } else {
-                    attempts++;
-                    int remainingAttempts = maxAttempts - attempts;
-                    if (remainingAttempts > 0) {
-                        wxMessageBox(wxString::Format(TranslationHelper::Tr("incorrectPasswordAttempts"), remainingAttempts),
-                                    TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
-                    } else {
-                        wxMessageBox(TranslationHelper::Tr("tooManyFailedAttempts"),
-                                    TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
-                        return false;
-                    }
-                }
+                // Password correct, save to memory and continue
+                GlobalConfig::SetActiveMasterPassword(password.ToStdString());
+                break;
             }
         }
 

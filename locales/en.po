@@ -266,6 +266,9 @@ msgstr "Key"
 msgid "noAuth"
 msgstr "No Auth"
 
+msgid "incorrectPassword"
+msgstr "Incorrect password"
+
 msgid "addDevice"
 msgstr "Add Device"
 

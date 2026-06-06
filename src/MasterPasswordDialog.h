@@ -3,6 +3,8 @@
 
 #include <wx/dialog.h>
 #include <wx/textctrl.h>
+#include <wx/stattext.h>
+#include <functional>
 
 class MasterPasswordDialog : public wxDialog {
 public:
@@ -10,11 +12,15 @@ public:
     virtual ~MasterPasswordDialog();
 
     wxString GetPassword() const;
+    void SetError(const wxString& error);
+    void SetPasswordVerifier(std::function<bool(const wxString&, wxString&, bool&)> verifier);
 
 private:
     wxTextCtrl* m_passwordCtrl;
     wxTextCtrl* m_confirmPasswordCtrl;
+    wxStaticText* m_errorLabel;
     bool m_isNewPassword;
+    std::function<bool(const wxString&, wxString&, bool&)> m_passwordVerifier;
 
     void OnOK(wxCommandEvent& event);
     void OnCancel(wxCommandEvent& event);

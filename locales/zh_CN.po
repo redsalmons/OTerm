@@ -266,6 +266,9 @@ msgstr "密钥认证"
 msgid "noAuth"
 msgstr "免密认证"
 
+msgid "incorrectPassword"
+msgstr "密码错误"
+
 msgid "addDevice"
 msgstr "添加设备"
 
