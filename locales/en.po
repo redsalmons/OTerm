@@ -62,7 +62,7 @@ msgid "hostAddress"
 msgstr "Host Address:"
 
 msgid "port"
-msgstr "Port:"
+msgstr "Port"
 
 msgid "deviceGroup"
 msgstr "Device Group:"
@@ -211,9 +211,6 @@ msgstr "Master password reset successfully"
 msgid "error"
 msgstr "Error"
 
-msgid "success"
-msgstr "Success"
-
 msgid "setupMasterPassword"
 msgstr "Setup Master Password"
 
@@ -228,3 +225,52 @@ msgstr "Incorrect password. Remaining attempts: %d"
 
 msgid "tooManyFailedAttempts"
 msgstr "Too many failed attempts. Application will exit."
+
+# Device List Panel
+msgid "searchHint"
+msgstr "Search"
+
+msgid "index"
+msgstr "No."
+
+msgid "deviceNameHeader"
+msgstr "Device Name"
+
+msgid "category"
+msgstr "Category"
+
+msgid "address"
+msgstr "Address"
+
+msgid "ip"
+msgstr "IP"
+
+msgid "authType"
+msgstr "Auth Type"
+
+msgid "operation"
+msgstr "Operation"
+
+msgid "open"
+msgstr "Open"
+
+msgid "delete"
+msgstr "Delete"
+
+msgid "passwordAuth"
+msgstr "Password"
+
+msgid "keyAuth"
+msgstr "Key"
+
+msgid "noAuth"
+msgstr "No Auth"
+
+msgid "addDevice"
+msgstr "Add Device"
+
+msgid "delete"
+msgstr "Delete"
+
+msgid "add"
+msgstr "Open"

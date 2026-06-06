@@ -1,5 +1,6 @@
 #include "DeviceConfig.h"
 #include "GlobalConfig.h"
+#include "SSHManager.h"
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <wx/stdpaths.h>

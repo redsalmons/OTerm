@@ -146,6 +146,7 @@ private:
     bool in_alternate_screen_;
     bool entering_alternate_screen_;  // Flag to block history during alternate screen entry
     bool initializing_;  // Flag to prevent event processing during initialization
+    std::string escape_buffer_;  // Buffer for handling fragmented escape sequences
     
     // Callbacks
     DamageCallback damage_callback_;

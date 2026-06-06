@@ -59,6 +59,7 @@ add_executable(OceanTerm
     src/LocalTerminalThread.cpp
     src/MonospaceFontDialog.cpp
     src/DeviceListPanel.cpp
+    src/AddDeviceDialog.cpp
 )
 
 target_include_directories(OceanTerm PRIVATE

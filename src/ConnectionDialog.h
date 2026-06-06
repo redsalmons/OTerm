@@ -17,7 +17,7 @@ private:
 
 class ConnectionDialog : public wxDialog {
 public:
-    ConnectionDialog(wxWindow* parent, const wxString& title);
+    ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect = false);
 
     DeviceConfig GetSelectedDevice() const { return m_selectedDevice; }
 

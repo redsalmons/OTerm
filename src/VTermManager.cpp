@@ -48,6 +48,9 @@ bool VTermManager::initialize(int rows, int cols) {
     // CRITICAL: Enable alternate screen support - required for vim detection
     vterm_screen_enable_altscreen(vts_, 1);
 
+    // Reset the screen to clean state FIRST
+    vterm_screen_reset(vts_, 1);
+
     // Set up screen callbacks including settermprop for vim detection
     static VTermScreenCallbacks screen_callbacks = {
         .damage = vterm_damage_callback,  // Essential for rendering
@@ -61,11 +64,8 @@ bool VTermManager::initialize(int rows, int cols) {
         .sb_clear = nullptr
     };
 
-    // Register screen callbacks
+    // Register screen callbacks AFTER reset
     vterm_screen_set_callbacks(vts_, &screen_callbacks, this);
-
-    // Reset the screen to clean state
-    vterm_screen_reset(vts_, 1);
 
     // Initialization complete - enable event processing
     initializing_ = false;
@@ -82,21 +82,52 @@ int VTermManager::write_input(const char* data, int length) {
         return -1;
     }
 
-    // Check for alternate screen escape sequences
-    if (length >= 8) {
-        // ESC [ ? 1 0 4 9 h - enter alternate screen
-        if (data[0] == 0x1b && data[1] == '[' && data[2] == '?' && 
-            data[3] == '1' && data[4] == '0' && data[5] == '4' && 
-            data[6] == '9' && data[7] == 'h') {
-            SSH_LOG("VTermManager::write_input: DETECTED ALTERNATE SCREEN ENTER (ESC [ ? 1049 h)");
-            entering_alternate_screen_ = true;
+    // Append new data to escape buffer for sequence detection
+    escape_buffer_.append(data, length);
+    
+    // Check for alternate screen escape sequences in the buffer
+    const char* buf = escape_buffer_.c_str();
+    size_t buf_len = escape_buffer_.length();
+    
+    // ESC [ ? 1 0 4 9 h - enter alternate screen
+    const char* enter_seq = "\x1b[?1049h";
+    size_t enter_seq_len = 8;
+    
+    // ESC [ ? 1 0 4 9 l - exit alternate screen  
+    const char* exit_seq = "\x1b[?1049l";
+    size_t exit_seq_len = 8;
+    
+    // Check for enter sequence
+    if (buf_len >= enter_seq_len) {
+        for (size_t i = 0; i <= buf_len - enter_seq_len; i++) {
+            if (memcmp(buf + i, enter_seq, enter_seq_len) == 0) {
+                SSH_LOG("VTermManager::write_input: DETECTED ALTERNATE SCREEN ENTER (ESC [ ? 1049 h)");
+                entering_alternate_screen_ = true;
+                in_alternate_screen_ = true;
+                // Remove the sequence from buffer
+                escape_buffer_.erase(i, enter_seq_len);
+                break;
+            }
         }
-        // ESC [ ? 1 0 4 9 l - exit alternate screen
-        if (data[0] == 0x1b && data[1] == '[' && data[2] == '?' && 
-            data[3] == '1' && data[4] == '0' && data[5] == '4' && 
-            data[6] == '9' && data[7] == 'l') {
-            SSH_LOG("VTermManager::write_input: DETECTED ALTERNATE SCREEN EXIT (ESC [ ? 1049 l)");
+    }
+    
+    // Check for exit sequence
+    if (buf_len >= exit_seq_len) {
+        for (size_t i = 0; i <= buf_len - exit_seq_len; i++) {
+            if (memcmp(buf + i, exit_seq, exit_seq_len) == 0) {
+                SSH_LOG("VTermManager::write_input: DETECTED ALTERNATE SCREEN EXIT (ESC [ ? 1049 l)");
+                in_alternate_screen_ = false;
+                entering_alternate_screen_ = false;  // Reset entering flag as well
+                // Remove the sequence from buffer
+                escape_buffer_.erase(i, exit_seq_len);
+                break;
+            }
         }
+    }
+    
+    // Keep buffer size reasonable (keep last 100 chars)
+    if (escape_buffer_.length() > 100) {
+        escape_buffer_ = escape_buffer_.substr(escape_buffer_.length() - 100);
     }
 
     SSH_LOG("VTermManager::write_input: length=" << length << ", content=" << std::hex << (int)(unsigned char)data[0] << " " << (int)(unsigned char)data[1] << " " << (int)(unsigned char)data[2] << std::dec);
@@ -264,7 +295,7 @@ int VTermManager::vterm_settermprop_callback(VTermProp prop, VTermValue *val, vo
     
     switch (prop) {
         case VTERM_PROP_ALTSCREEN:  // ALTSCREEN - Critical for vim detection
-            SSH_LOG("vterm_settermprop_callback: ALTSCREEN prop changed, value=" << val->boolean << ", initializing=" << manager->initializing_);
+            SSH_LOG("vterm_settermprop_callback: ALTSCREEN prop changed, value=" << val->boolean << ", initializing=" << manager->initializing_ << ", current in_alternate_screen_=" << manager->in_alternate_screen_);
             // Skip processing during initialization
             if (manager->initializing_) {
                 SSH_LOG("vterm_settermprop_callback: skipped due to initialization");
@@ -275,18 +306,19 @@ int VTermManager::vterm_settermprop_callback(VTermProp prop, VTermValue *val, vo
             if (manager->in_alternate_screen_ != val->boolean) {
                 // Update screen mode tracking
                 manager->in_alternate_screen_ = val->boolean;
-                SSH_LOG("vterm_settermprop_callback: in_alternate_screen_ updated to " << manager->in_alternate_screen_);
+                SSH_LOG("vterm_settermprop_callback: in_alternate_screen_ updated to " << manager->in_alternate_screen_ << " (was " << !val->boolean << ")");
                 
                 if (val->boolean) {
-                    // VIM started
-                    SSH_LOG("vterm_settermprop_callback: VIM started (entered alternate screen)");
+                    // Entered alternate screen (top, vim, etc.)
+                    SSH_LOG("vterm_settermprop_callback: Entered alternate screen mode - will skip history logging");
                     // Clear the entering flag since we're now confirmed to be in alternate screen
                     manager->entering_alternate_screen_ = false;
                 } else {
-                    // VIM exited
-                    SSH_LOG("vterm_settermprop_callback: VIM exited (exited alternate screen)");
+                    // Exited alternate screen
+                    SSH_LOG("vterm_settermprop_callback: Exited alternate screen mode - will resume history logging");
+                    manager->entering_alternate_screen_ = false;  // Reset entering flag
                     
-                    // When exiting from vim (AltScreen -> Primary), reset scroll offset
+                    // When exiting from alternate screen, reset scroll offset
                     manager->current_scroll_offset_ = 0;
                     
                     // Force a full screen damage to ensure proper redraw
@@ -350,7 +382,7 @@ int VTermManager::vterm_sb_pushline_callback(int cols, const VTermScreenCell *ce
     
     // Check if we're in alternate screen mode or entering it - if so, don't add to history
     if (manager->in_alternate_screen_ || manager->entering_alternate_screen_) {
-        SSH_LOG("vterm_sb_pushline_callback: skipped (in alternate screen mode or entering)");
+        SSH_LOG("vterm_sb_pushline_callback: skipped (in_alternate_screen_=" << manager->in_alternate_screen_ << ", entering_alternate_screen_=" << manager->entering_alternate_screen_ << ")");
         return 1; // Return success but don't add to history
     }
     

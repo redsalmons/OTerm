@@ -12,6 +12,7 @@ struct DeviceConfig {
     std::string group;
     std::string auth_method = "password";
     std::string password;
+    std::string key;
 
     static std::vector<DeviceConfig> LoadFromFile();
     static void SaveToFile(const std::vector<DeviceConfig>& devices);

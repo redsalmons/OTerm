@@ -291,14 +291,20 @@ void AppWindow::OnNewTab(wxCommandEvent& WXUNUSED(event)) {
 
 void AppWindow::OnDeviceOpenRequest(wxCommandEvent& event) {
     SSH_LOG("AppWindow::OnDeviceOpenRequest called");
-    DeviceListPanel* panel = dynamic_cast<DeviceListPanel*>(event.GetEventObject());
-    if (panel) {
-        int deviceIndex = event.GetInt();
-        std::vector<DeviceConfig> devices = DeviceConfig::LoadFromFile();
-        if (deviceIndex >= 0 && deviceIndex < (int)devices.size()) {
-            SSH_LOG("Opening device at index: " << deviceIndex << ", name: " << devices[deviceIndex].name);
-            CreateTerminalTab(devices[deviceIndex]);
-        }
+    wxString deviceId = event.GetString();
+    std::string deviceIdStr = deviceId.ToStdString();
+
+    std::vector<DeviceConfig> devices = DeviceConfig::LoadFromFile();
+    auto it = std::find_if(devices.begin(), devices.end(),
+        [&deviceIdStr](const DeviceConfig& device) {
+            return device.id == deviceIdStr;
+        });
+
+    if (it != devices.end()) {
+        SSH_LOG("Opening device with id: " << deviceIdStr << ", name: " << it->name);
+        CreateTerminalTab(*it);
+    } else {
+        SSH_LOG("Device not found with id: " << deviceIdStr);
     }
 }
 

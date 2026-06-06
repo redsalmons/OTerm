@@ -4,7 +4,7 @@
 #include <wx/filedlg.h>
 #include <wx/file.h>
 
-ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
+ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect)
     : wxDialog(parent, wxID_ANY, title, wxDefaultPosition,
 #ifdef __APPLE__
                wxSize(425, 425)
@@ -85,6 +85,9 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title)
     buttonSizer->Add(new wxButton(formPanel, wxID_SAVE, TranslationHelper::Tr("save")), 0, wxALL, 5);
     m_connectButton = new wxButton(formPanel, wxID_OK, TranslationHelper::Tr("connect"));
     m_connectButton->Enable(false);
+    if (disableConnect) {
+        m_connectButton->Hide();
+    }
     buttonSizer->Add(m_connectButton, 0, wxALL, 5);
     buttonSizer->Add(new wxButton(formPanel, wxID_CANCEL, TranslationHelper::Tr("cancel")), 0, wxALL, 5);
     formSizer->Add(buttonSizer, 0, wxALIGN_RIGHT | wxALL, 10);
@@ -236,6 +239,9 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
 
     SaveConfig();
     RebuildTree();
+
+    // Close dialog with save result
+    EndModal(wxID_SAVE);
 }
 
 void ConnectionDialog::OnConnect(wxCommandEvent& event) {
