@@ -19,6 +19,7 @@ private:
     wxTextCtrl* m_passwordCtrl;
     wxTextCtrl* m_confirmPasswordCtrl;
     wxStaticText* m_errorLabel;
+    wxTextCtrl* m_warningText;
     bool m_isNewPassword;
     std::function<bool(const wxString&, wxString&, bool&)> m_passwordVerifier;
 

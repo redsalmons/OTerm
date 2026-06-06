@@ -269,6 +269,9 @@ msgstr "No Auth"
 msgid "incorrectPassword"
 msgstr "Incorrect password"
 
+msgid "masterPasswordWarning"
+msgstr "The master password is used to encrypt locally stored data. If lost, local data will be inaccessible. OT does not provide any recovery tools. Please keep it safe."
+
 msgid "addDevice"
 msgstr "Add Device"
 

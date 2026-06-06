@@ -41,6 +41,18 @@ MasterPasswordDialog::MasterPasswordDialog(wxWindow* parent, bool isNewPassword)
         m_confirmPasswordCtrl = nullptr;
     }
 
+    // Warning text for new password setup
+    if (isNewPassword) {
+        m_warningText = new wxTextCtrl(panel, wxID_ANY, TranslationHelper::Tr("masterPasswordWarning"),
+                                     wxDefaultPosition, wxSize(-1, 120),
+                                     wxTE_MULTILINE | wxTE_READONLY | wxTE_NO_VSCROLL | wxBORDER_NONE);
+        m_warningText->SetBackgroundColour(panel->GetBackgroundColour());
+        m_warningText->SetForegroundColour(wxColour(255, 0, 0));
+        mainSizer->Add(m_warningText, 0, wxEXPAND | wxALL, 10);
+    } else {
+        m_warningText = nullptr;
+    }
+
     // Buttons
     wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
     buttonSizer->Add(new wxButton(panel, wxID_OK, TranslationHelper::Tr("ok")), 0, wxALL, 5);

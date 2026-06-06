@@ -269,6 +269,9 @@ msgstr "免密认证"
 msgid "incorrectPassword"
 msgstr "密码错误"
 
+msgid "masterPasswordWarning"
+msgstr "主密码会用来加密本地存储的数据，如果丢失后，会导致本地的数据无法访问，OT没有提供任何工具来恢复，请务必小心保管。"
+
 msgid "addDevice"
 msgstr "添加设备"
 
