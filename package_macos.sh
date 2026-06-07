@@ -188,12 +188,15 @@ codesign --force --sign - "${MACOS_DIR}/${APP_NAME}" 2>/dev/null || true
 echo "Re-signing app bundle..."
 codesign --force --deep --sign - "${APP_BUNDLE}" 2>/dev/null || true
 
+# Create DMG for distribution
+echo "Creating DMG for distribution..."
+DMG_NAME="OceanTerm-macos-$(uname -m)-v1.0.0.dmg"
+hdiutil create -volname "OceanTerm" -srcfolder "${APP_BUNDLE}" -ov -format UDZO "${BUILD_DIR}/${DMG_NAME}"
+
 echo ""
 echo "=== Packaging Complete ==="
 echo "App bundle created at: ${APP_BUNDLE}"
+echo "DMG created at: ${BUILD_DIR}/${DMG_NAME}"
 echo ""
 echo "To run the app:"
 echo "  open ${APP_BUNDLE}"
-echo ""
-echo "To create a DMG for distribution:"
-echo "  hdiutil create -volname \"OceanTerm\" -srcfolder \"${APP_BUNDLE}\" -ov -format UDZO \"${BUILD_DIR}/OceanTerm.dmg\""
