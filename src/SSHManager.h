@@ -52,6 +52,8 @@ public:
         SSH_DISCONNECTED,
         SSH_CONNECTING,
         SSH_HANDSHAKING,
+        SSH_PROMPTING_USERNAME,
+        SSH_PROMPTING_PASSWORD,
         SSH_AUTHENTICATING,
         SSH_CHANNEL_OPENING,
         SSH_PTY_REQUESTING,
@@ -92,6 +94,10 @@ public:
     // Set status callback for connection status messages
     void set_status_callback(DataCallback callback) { status_callback_ = callback; }
 
+    // Provide username/password from interactive terminal input
+    void provide_username(const std::string& username);
+    void provide_password(const std::string& password);
+
     // Initialize log file
     static void init_log_file();
     
@@ -106,6 +112,8 @@ private:
     void handle_ssh_events(int status, int events);
     void process_ssh_data();
     void continue_ssh_connection();
+    void start_login_prompt();
+    void start_password_prompt();
     void perform_authentication();
     void open_ssh_channel();
     void request_pty();
@@ -137,6 +145,7 @@ private:
     std::string username_;
     std::string password_;
     std::string auth_method_;
+    int auth_retry_count_;
     
     // Data callback
     DataCallback data_callback_;

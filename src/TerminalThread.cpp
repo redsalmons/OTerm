@@ -265,6 +265,11 @@ void TerminalThread::setup_callbacks() {
         m_vtermManager.write_input(data, length);
     });
     
+    // SSH status callback -> feed to VTerm (login prompts, auth messages)
+    m_sshManager.set_status_callback([this](const char* data, int length) {
+        m_vtermManager.write_input(data, length);
+    });
+
     // SSH resize callback -> send terminal size to SSH
     m_sshManager.set_resize_callback([this](int rows, int cols) {
         if (rows == -1 && cols == -1) {
@@ -317,10 +322,44 @@ void TerminalThread::process_input_queue() {
         std::string input = m_input_queue.front();
         m_input_queue.pop();
         lock.unlock();
-        
-        // Send to SSH
-        m_sshManager.send_data(input.c_str(), input.length());
-        
+
+        SSHManager::SSHState state = m_sshManager.get_state();
+
+        if (state == SSHManager::SSH_PROMPTING_USERNAME) {
+            for (char c : input) {
+                if (c == '\r' || c == '\n') {
+                    m_vtermManager.write_input("\r\n", 2);
+                    m_sshManager.provide_username(m_pending_input);
+                    m_pending_input.clear();
+                } else if (c == '\x7f' || c == '\x08') {
+                    if (!m_pending_input.empty()) {
+                        m_pending_input.pop_back();
+                        const char* bs = "\x08 \x08";
+                        m_vtermManager.write_input(bs, 3);
+                    }
+                } else {
+                    m_pending_input += c;
+                    m_vtermManager.write_input(&c, 1);
+                }
+            }
+        } else if (state == SSHManager::SSH_PROMPTING_PASSWORD) {
+            for (char c : input) {
+                if (c == '\r' || c == '\n') {
+                    m_vtermManager.write_input("\r\n", 2);
+                    m_sshManager.provide_password(m_pending_input);
+                    m_pending_input.clear();
+                } else if (c == '\x7f' || c == '\x08') {
+                    if (!m_pending_input.empty()) {
+                        m_pending_input.pop_back();
+                    }
+                } else {
+                    m_pending_input += c;
+                }
+            }
+        } else {
+            m_sshManager.send_data(input.c_str(), input.length());
+        }
+
         lock.lock();
     }
 }

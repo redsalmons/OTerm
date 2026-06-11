@@ -24,14 +24,16 @@ bool ssh_log_initialized = false;
 
 static const char* state_name(SSHManager::SSHState s) {
     switch (s) {
-        case SSHManager::SSH_DISCONNECTED:    return "DISCONNECTED";
-        case SSHManager::SSH_CONNECTING:      return "CONNECTING";
-        case SSHManager::SSH_HANDSHAKING:     return "HANDSHAKING";
-        case SSHManager::SSH_AUTHENTICATING:  return "AUTHENTICATING";
-        case SSHManager::SSH_CHANNEL_OPENING: return "CHANNEL_OPENING";
-        case SSHManager::SSH_PTY_REQUESTING:  return "PTY_REQUESTING";
-        case SSHManager::SSH_SHELL_REQUESTING:return "SHELL_REQUESTING";
-        case SSHManager::SSH_READY:           return "READY";
+        case SSHManager::SSH_DISCONNECTED:       return "DISCONNECTED";
+        case SSHManager::SSH_CONNECTING:         return "CONNECTING";
+        case SSHManager::SSH_HANDSHAKING:        return "HANDSHAKING";
+        case SSHManager::SSH_PROMPTING_USERNAME: return "PROMPTING_USERNAME";
+        case SSHManager::SSH_PROMPTING_PASSWORD: return "PROMPTING_PASSWORD";
+        case SSHManager::SSH_AUTHENTICATING:     return "AUTHENTICATING";
+        case SSHManager::SSH_CHANNEL_OPENING:    return "CHANNEL_OPENING";
+        case SSHManager::SSH_PTY_REQUESTING:     return "PTY_REQUESTING";
+        case SSHManager::SSH_SHELL_REQUESTING:   return "SHELL_REQUESTING";
+        case SSHManager::SSH_READY:              return "READY";
         default: return "UNKNOWN";
     }
 }
@@ -71,7 +73,8 @@ void SSHManager::init_log_file() {
 
 SSHManager::SSHManager()
     : loop_(nullptr), ssh_session_(nullptr), ssh_channel_(nullptr),
-      ssh_state_(SSH_DISCONNECTED), poll_handle_(nullptr), poll_active_(false) {
+      ssh_state_(SSH_DISCONNECTED), poll_handle_(nullptr), poll_active_(false),
+      auth_retry_count_(0) {
     init_log_file();
     SSH_LOG("SSHManager created");
 }
@@ -184,9 +187,9 @@ void SSHManager::continue_ssh_connection() {
         return;
     }
     
-    SSH_LOG("Handshake completed immediately -> " << state_name(SSH_AUTHENTICATING));
-    ssh_state_ = SSH_AUTHENTICATING;
-    perform_authentication();
+    SSH_LOG("Handshake completed immediately -> " << state_name(SSH_PROMPTING_USERNAME));
+    ssh_state_ = SSH_PROMPTING_USERNAME;
+    start_login_prompt();
 }
 
 bool SSHManager::send_data(const char* data, int length) {
@@ -263,9 +266,9 @@ void SSHManager::handle_ssh_events(int status, int events) {
         case SSH_HANDSHAKING: {
             int rc = libssh2_session_handshake(ssh_session_, (int)sockfd);
             if (rc == 0) {
-                SSH_LOG("Handshake completed -> " << state_name(SSH_AUTHENTICATING));
-                ssh_state_ = SSH_AUTHENTICATING;
-                perform_authentication();
+                SSH_LOG("Handshake completed -> " << state_name(SSH_PROMPTING_USERNAME));
+                ssh_state_ = SSH_PROMPTING_USERNAME;
+                start_login_prompt();
             } else if (rc == LIBSSH2_ERROR_EAGAIN) {
                 return;
             } else {
@@ -309,6 +312,50 @@ void SSHManager::handle_ssh_events(int status, int events) {
     }
 }
 
+void SSHManager::start_login_prompt() {
+    if (status_callback_) {
+        if (username_.empty()) {
+            SSH_LOG("Username not configured, prompting user");
+            const char* prompt = "login: ";
+            status_callback_(prompt, (int)strlen(prompt));
+        } else {
+            SSH_LOG("Username configured: " << username_ << ", auto-filling");
+            std::string line = "login: " + username_ + "\r\n";
+            status_callback_(line.c_str(), (int)line.size());
+            ssh_state_ = SSH_PROMPTING_PASSWORD;
+            start_password_prompt();
+            return;
+        }
+    }
+    ssh_state_ = SSH_PROMPTING_USERNAME;
+}
+
+void SSHManager::start_password_prompt() {
+    if (password_.empty()) {
+        SSH_LOG("Password not configured, prompting user");
+        const char* prompt = "password: ";
+        if (status_callback_) status_callback_(prompt, (int)strlen(prompt));
+    } else {
+        SSH_LOG("Password configured, proceeding to authentication");
+        ssh_state_ = SSH_AUTHENTICATING;
+        perform_authentication();
+    }
+}
+
+void SSHManager::provide_username(const std::string& username) {
+    username_ = username;
+    SSH_LOG("Username provided: " << username_);
+    ssh_state_ = SSH_PROMPTING_PASSWORD;
+    start_password_prompt();
+}
+
+void SSHManager::provide_password(const std::string& password) {
+    password_ = password;
+    SSH_LOG("Password provided, proceeding to authentication (attempt " << auth_retry_count_ + 1 << ")");
+    ssh_state_ = SSH_AUTHENTICATING;
+    perform_authentication();
+}
+
 void SSHManager::perform_authentication() {
     // SSH_LOG("Authenticating as '" << username_ << "'...");
     int rc = 0;
@@ -340,6 +387,7 @@ void SSHManager::perform_authentication() {
     }
 
     if (rc == 0) {
+        auth_retry_count_ = 0;
         SSH_LOG("Authentication successful -> " << state_name(SSH_CHANNEL_OPENING));
         ssh_state_ = SSH_CHANNEL_OPENING;
         open_ssh_channel();
@@ -348,9 +396,23 @@ void SSHManager::perform_authentication() {
         start_polling();
         return;
     } else {
-        SSH_ERR("Authentication failed: " << rc);
-        ssh_state_ = SSH_DISCONNECTED;
-        stop_polling();
+        auth_retry_count_++;
+        SSH_ERR("Authentication failed: " << rc << " (attempt " << auth_retry_count_ << ")");
+        if (auth_retry_count_ >= 3) {
+            SSH_ERR("Max authentication attempts reached, disconnecting");
+            if (status_callback_) {
+                const char* msg = "\r\nAuthentication failed (3/3). Connection closed.\r\n";
+                status_callback_(msg, (int)strlen(msg));
+            }
+            ssh_state_ = SSH_DISCONNECTED;
+            stop_polling();
+        } else {
+            password_.clear();
+            std::string msg = "\r\nAuthentication failed (" + std::to_string(auth_retry_count_)
+                              + "/3). Please try again.\r\npassword: ";
+            if (status_callback_) status_callback_(msg.c_str(), (int)msg.size());
+            ssh_state_ = SSH_PROMPTING_PASSWORD;
+        }
     }
 }
 

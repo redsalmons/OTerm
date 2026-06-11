@@ -131,4 +131,7 @@ private:
     // State
     bool m_has_damage;
     VTermRect m_damage_rect;
+
+    // Pending input buffer for interactive login prompts
+    std::string m_pending_input;
 };
