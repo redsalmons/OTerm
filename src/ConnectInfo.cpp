@@ -63,8 +63,13 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     m_closeButton->Show(showCloseButton);
 
     wxBoxSizer* h_sizer = new wxBoxSizer(wxHORIZONTAL);
-    h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
-    if (showCloseButton) {
+    if (!showCloseButton) {
+        // Homepage tab: add left/right stretch spacers to center label horizontally
+        h_sizer->AddStretchSpacer(1);
+        h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL);
+        h_sizer->AddStretchSpacer(1);
+    } else {
+        h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
         h_sizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
     }
 

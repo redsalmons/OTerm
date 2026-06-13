@@ -5,6 +5,7 @@
     "nlohmann-json",
     "libuv",
     "libssh2",
+    "openssl",
     "wxwidgets"
   ]
 }

@@ -165,14 +165,17 @@ void TermGLCanvas::InitializeGL() {
 }
 
 void TermGLCanvas::InitializeFontMetrics() {
-    // Calculate cell width and height from font metrics
-    m_cellWidth = m_fontSize / 2;
-    m_cellHeight = m_charHeight;
+    // Use actual character width from font atlas instead of fixed fontSize/2
+    CharMetrics wMetrics = m_fontAtlas->GetCharMetrics('W');
+    m_cellWidth = static_cast<int>(wMetrics.advance);
 
-    // Ensure minimum cell size
+    // Fallback if atlas metrics not yet available
+    if (m_cellWidth <= 0) {
+        m_cellWidth = m_fontSize / 2;
+    }
     if (m_cellWidth < 6) m_cellWidth = 6;
-    // Remove minimum height check to use actual font height
-    // if (m_cellHeight < 12) m_cellHeight = 12;
+
+    m_cellHeight = m_charHeight;
 
     // Update cached cell height for scroll calculations
     m_cached_cell_height = m_cellHeight;
@@ -296,6 +299,12 @@ void TermGLCanvas::Render() {
         uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
         float render_width = cell_width * cell_width_multiplier;
 
+        // Tab character: widen by 6px (3px on each side)
+        if (cell.char_code == '\t') {
+            x -= 3.0f;
+            render_width += 6.0f;
+        }
+
         uint8_t bg_r = cell.bg_color & 0xFF;
         uint8_t bg_g = (cell.bg_color >> 8) & 0xFF;
         uint8_t bg_b = (cell.bg_color >> 16) & 0xFF;
@@ -348,7 +357,8 @@ void TermGLCanvas::Render() {
         for (const auto& [key, cell] : m_screen_cells) {
             // Skip continuation cells (char_code = 0 for wide character continuation)
             if (cell.char_code == 0) continue;
-            if (cell.char_code < 32) continue;
+            // Skip control chars except tab
+            if (cell.char_code < 32 && cell.char_code != '\t') continue;
 
             float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
             float y = (static_cast<int>(cell.cell_y) - m_scroll_offset) * cell_height + margin_y;
@@ -357,7 +367,15 @@ void TermGLCanvas::Render() {
             uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
             float render_width = cell_width * cell_width_multiplier;
 
-            CharMetrics metrics = m_fontAtlas->GetCharMetrics(cell.char_code);
+            // Tab character: widen by 6px (3px on each side)
+            if (cell.char_code == '\t') {
+                x -= 3.0f;
+                render_width += 6.0f;
+            }
+
+            // Use space glyph for tab since tab (0x09) is not in font atlas
+            char32_t render_char = (cell.char_code == '\t') ? ' ' : cell.char_code;
+            CharMetrics metrics = m_fontAtlas->GetCharMetrics(render_char);
             if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) {
                 // Log missing characters (especially Chinese)
                 if (cell.char_code > 127) {
@@ -378,11 +396,14 @@ void TermGLCanvas::Render() {
             uint8_t fg_b = (cell.fg_color >> 16) & 0xFF;
             glColor3f(fg_r / 255.0f, fg_g / 255.0f, fg_b / 255.0f);
 
+            // Apply bearingX offset so left padding in atlas maps to correct screen position.
+            // For tab, use 0 so the space glyph fills the widened tab area evenly (centered).
+            float x_offset = (cell.char_code == '\t') ? 0.0f : metrics.bearingX;
             glBegin(GL_QUADS);
-                glTexCoord2f(test_u1, test_v1); glVertex2f(x, y);
+                glTexCoord2f(test_u1, test_v1); glVertex2f(x + x_offset, y);
                 glTexCoord2f(test_u2, test_v1); glVertex2f(x + render_width, y);
                 glTexCoord2f(test_u2, test_v2); glVertex2f(x + render_width, y + cell_height);
-                glTexCoord2f(test_u1, test_v2); glVertex2f(x, y + cell_height);
+                glTexCoord2f(test_u1, test_v2); glVertex2f(x + x_offset, y + cell_height);
             glEnd();
         }
         
@@ -560,12 +581,15 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
 void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
     SSH_LOG("TermGLCanvas::OnMouseLeftDown called");
     
-    // Set focus to enable IME input
+#ifdef _WIN32
+    // On Windows, avoid SetFocus race with IME kill-focus handler.
+    // wxWidgets will set focus to this canvas automatically; OnSetFocus
+    // will then show the IME input box.
+#else
+    // On other platforms, keep original behavior
     SetFocus();
-    
-    // Show IME input box on any click
-    SSH_LOG("Calling ShowIMEInputBox from mouse click");
     ShowIMEInputBox();
+#endif
     
     wxPoint pos = event.GetPosition();
     const float margin_x = 8.0f * m_dpiScale;
@@ -703,8 +727,11 @@ void TermGLCanvas::CopySelectionToClipboard() {
 }
 
 void TermGLCanvas::OnSetFocus(wxFocusEvent& event) {
-    // Canvas gained focus
     SSH_LOG("TermGLCanvas gained focus");
+#ifdef _WIN32
+    // Windows: show IME when canvas gains focus
+    ShowIMEInputBox();
+#endif
     event.Skip();
 }
 
@@ -896,7 +923,16 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
 
 void TermGLCanvas::OnIMETextLostFocus(wxFocusEvent& event) {
     // SSH_LOG("TermGLCanvas::OnIMETextLostFocus called");
-    // Hide input box when it loses focus
+#ifdef _WIN32
+    // Windows: only hide IME if focus went to a window outside this canvas.
+    // If focus returned to TermGLCanvas (e.g. mouse click), OnSetFocus
+    // will re-show the IME, so don't hide it here to avoid flicker.
+    wxWindow* focusWindow = wxWindow::FindFocus();
+    if (focusWindow == this) {
+        event.Skip();
+        return;
+    }
+#endif
     HideIMEInputBox();
     event.Skip();
 }

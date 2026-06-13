@@ -5,13 +5,7 @@
 #include <wx/file.h>
 
 ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect)
-    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition,
-#ifdef __APPLE__
-               wxSize(425, 425)
-#else
-               wxSize(850, 850)
-#endif
-    ) {
+    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxSize(425, 425)) {
 
     wxBoxSizer* mainSizer = new wxBoxSizer(wxHORIZONTAL);
 
@@ -96,11 +90,6 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     mainSizer->Add(formPanel, 2, wxEXPAND | wxALL, 5);
 
     SetSizerAndFit(mainSizer);
-#ifdef __APPLE__
-    SetSize(wxSize(425, 425));
-#else
-    SetSize(wxSize(850, 850));
-#endif
     Centre();
 
     LoadConfig();

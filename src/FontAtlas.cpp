@@ -5,6 +5,7 @@
 #include <GL/gl.h>
 #endif
 #include <wx/dcmemory.h>
+#include <wx/dcgraph.h>
 #include "SSHManager.h"
 
 #ifndef GL_CLAMP_TO_EDGE
@@ -194,30 +195,44 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     if (charWidth == 0) charWidth = charSize; // Fallback if extent is 0
     tempDC.SelectObject(wxNullBitmap);
     
-    wxBitmap bitmap(charWidth, charHeight, 24);
-    wxMemoryDC dc(bitmap);
+    // Add left padding to prevent clipping of negative left bearing on Windows GDI
+#ifdef _WIN32
+    const int leftPadding = 2;
+#else
+    const int leftPadding = 0;
+#endif
+    int bitmapWidth = charWidth + leftPadding;
     
-    dc.SetBackground(wxBrush(wxColour(0, 0, 0)));
-    dc.Clear();
-    dc.SetFont(m_font);
-    dc.SetTextForeground(wxColour(255, 255, 255));
+    wxBitmap bitmap(bitmapWidth, charHeight, 32);
+    wxMemoryDC memDC(bitmap);
+    
+    memDC.SetBackground(wxBrush(wxColour(0, 0, 0)));
+    memDC.Clear();
 
-    // Calculate vertical offset to center character in cell
-    wxSize charExtent = dc.GetTextExtent(text);
-    int yOffset = (charHeight - charExtent.y) / 2;
-    if (yOffset < 0) yOffset = 0;
+    // Use wxGCDC for anti-aliased text rendering (GDI+ on Windows, Quartz on macOS, Cairo on Linux)
+    {
+        wxGCDC dc(memDC);
+        dc.SetFont(m_font);
+        dc.SetTextForeground(wxColour(255, 255, 255));
 
-    // Draw character centered vertically to fill cell better
-    dc.DrawText(text, 0, yOffset);
-    dc.SelectObject(wxNullBitmap);
+        // Calculate vertical offset to center character in cell
+        wxSize charExtent = dc.GetTextExtent(text);
+        int yOffset = (charHeight - charExtent.y) / 2;
+        if (yOffset < 0) yOffset = 0;
+
+        // Draw character with left padding to preserve left bearing
+        dc.DrawText(text, leftPadding, yOffset);
+        // wxGCDC destructor flushes drawing to underlying wxMemoryDC
+    }
+    memDC.SelectObject(wxNullBitmap);
     
     // Convert to image and then to GL_RGBA
     wxImage image = bitmap.ConvertToImage();
     if (!image.IsOk()) return false;
     
     unsigned char* rgbData = image.GetData();
-    unsigned char* rgbaData = new unsigned char[charWidth * charHeight * 4];
-    for (int i = 0; i < charWidth * charHeight; i++) {
+    unsigned char* rgbaData = new unsigned char[bitmapWidth * charHeight * 4];
+    for (int i = 0; i < bitmapWidth * charHeight; i++) {
         unsigned char r = rgbData[i * 3 + 0];
         unsigned char g = rgbData[i * 3 + 1];
         unsigned char b = rgbData[i * 3 + 2];
@@ -229,35 +244,35 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
         rgbaData[i * 4 + 3] = luminance;
     }
     
-    // Find free space in atlas
+    // Find free space in atlas (use bitmapWidth which includes padding)
     int x, y;
-    if (!FindFreeSpace(charWidth, charHeight, x, y)) {
+    if (!FindFreeSpace(bitmapWidth, charHeight, x, y)) {
         // No space available, evict LRU
         EvictLRU();
-        if (!FindFreeSpace(charWidth, charHeight, x, y)) {
+        if (!FindFreeSpace(bitmapWidth, charHeight, x, y)) {
             SSH_LOG("FontAtlas: Failed to find space for character 0x" << std::hex << static_cast<uint32_t>(charCode) << std::dec);
             delete[] rgbaData;
             return false;
         }
     }
     
-    // Update texture with full height
-    UpdateTexture(x, y, charWidth, charHeight, rgbaData);
+    // Update texture with full height (use bitmapWidth which includes padding)
+    UpdateTexture(x, y, bitmapWidth, charHeight, rgbaData);
     
     // Store metrics
     CharMetrics metrics;
     metrics.u = static_cast<float>(x) / m_textureWidth;
     metrics.v = static_cast<float>(y) / m_textureHeight;
-    metrics.w = static_cast<float>(charWidth) / m_textureWidth;
+    metrics.w = static_cast<float>(bitmapWidth) / m_textureWidth;
     metrics.h = static_cast<float>(charHeight) / m_textureHeight;
     metrics.advance = static_cast<float>(charWidth);
-    metrics.bearingX = 0.0f;
+    metrics.bearingX = -static_cast<float>(leftPadding);
     metrics.bearingY = 0.0f;
     metrics.actual_height = static_cast<float>(charHeight);
     metrics.last_used = m_currentTime++;
     metrics.tex_x = x;
     metrics.tex_y = y;
-    metrics.tex_w = charWidth;
+    metrics.tex_w = bitmapWidth;
     metrics.tex_h = charHeight;
     
     m_charMetrics[charCode] = metrics;
