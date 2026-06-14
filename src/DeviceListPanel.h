@@ -31,8 +31,6 @@ private:
     void OnAddDevice(wxCommandEvent& event);
     void OnSearchFocus(wxFocusEvent& event);
     void OnSearchKillFocus(wxFocusEvent& event);
-    void OnDeviceOpenRequest(wxCommandEvent& event);
-    void OnDeviceDeleteRequest(wxCommandEvent& event);
     void LoadDevices();
     void RefreshDeviceList(const std::string& filter = "");
 

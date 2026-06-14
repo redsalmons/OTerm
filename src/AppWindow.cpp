@@ -200,6 +200,7 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_IDLE(AppWindow::OnIdle)
     EVT_SIZE(AppWindow::OnSize)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_OPEN_REQUEST, AppWindow::OnDeviceOpenRequest)
+    EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_DELETE_REQUEST, AppWindow::OnDeviceDeleteRequest)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
@@ -246,10 +247,7 @@ AppWindow::~AppWindow() {
 void AppWindow::CreateDashboardTab() {
     // Create device list panel
     DeviceListPanel* deviceListPanel = new DeviceListPanel(m_notebook);
-    
-    // Bind device open event
-    deviceListPanel->Bind(wxEVT_DEVICE_OPEN_REQUEST, &AppWindow::OnDeviceOpenRequest, this);
-    
+
     // Add tab with device list
     DeviceConfig emptyConfig;
     ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), deviceListPanel, emptyConfig, false, false);
@@ -308,6 +306,35 @@ void AppWindow::OnDeviceOpenRequest(wxCommandEvent& event) {
     if (it != devices.end()) {
         SSH_LOG("Opening device with id: " << deviceIdStr << ", name: " << it->name);
         CreateTerminalTab(*it);
+    } else {
+        SSH_LOG("Device not found with id: " << deviceIdStr);
+    }
+}
+
+void AppWindow::OnDeviceDeleteRequest(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnDeviceDeleteRequest called");
+    wxString deviceId = event.GetString();
+    std::string deviceIdStr = deviceId.ToStdString();
+
+    std::vector<DeviceConfig> devices = DeviceConfig::LoadFromFile();
+    auto it = std::find_if(devices.begin(), devices.end(),
+        [&deviceIdStr](const DeviceConfig& device) {
+            return device.id == deviceIdStr;
+        });
+
+    if (it != devices.end()) {
+        SSH_LOG("Deleting device with id: " << deviceIdStr << ", name: " << it->name);
+        devices.erase(it);
+        DeviceConfig::SaveToFile(devices);
+        // Refresh device list by finding the DeviceListPanel
+        for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+            wxWindow* page = m_notebook->GetPage(i);
+            DeviceListPanel* deviceListPanel = dynamic_cast<DeviceListPanel*>(page);
+            if (deviceListPanel) {
+                deviceListPanel->DeleteDeviceById(deviceIdStr);
+                break;
+            }
+        }
     } else {
         SSH_LOG("Device not found with id: " << deviceIdStr);
     }

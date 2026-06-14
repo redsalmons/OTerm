@@ -92,16 +92,22 @@ void DeviceRowPanel::OnOpenButton(wxCommandEvent& event) {
     wxCommandEvent openEvent(wxEVT_DEVICE_OPEN_REQUEST);
     openEvent.SetString(wxString::FromUTF8(m_deviceId.c_str()));
     openEvent.SetEventObject(this);
-    // Send to wxScrolledWindow (grandparent)
-    GetParent()->GetParent()->GetEventHandler()->ProcessEvent(openEvent);
+    // Send to top-level window (AppWindow)
+    wxWindow* topWindow = wxTheApp->GetTopWindow();
+    if (topWindow) {
+        wxPostEvent(topWindow, openEvent);
+    }
 }
 
 void DeviceRowPanel::OnDeleteButton(wxCommandEvent& event) {
     wxCommandEvent deleteEvent(wxEVT_DEVICE_DELETE_REQUEST);
     deleteEvent.SetString(wxString::FromUTF8(m_deviceId.c_str()));
     deleteEvent.SetEventObject(this);
-    // Send to wxScrolledWindow (grandparent)
-    GetParent()->GetParent()->GetEventHandler()->ProcessEvent(deleteEvent);
+    // Send to top-level window (AppWindow)
+    wxWindow* topWindow = wxTheApp->GetTopWindow();
+    if (topWindow) {
+        wxPostEvent(topWindow, deleteEvent);
+    }
 }
 
 DeviceListPanel::DeviceListPanel(wxWindow* parent)
@@ -195,9 +201,6 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     m_searchCtrl->Bind(wxEVT_SET_FOCUS, &DeviceListPanel::OnSearchFocus, this);
     m_searchCtrl->Bind(wxEVT_KILL_FOCUS, &DeviceListPanel::OnSearchKillFocus, this);
     m_addButton->Bind(wxEVT_BUTTON, &DeviceListPanel::OnAddDevice, this);
-    // Bind device events to scrolledWindow
-    m_scrolledWindow->Bind(wxEVT_DEVICE_OPEN_REQUEST, &DeviceListPanel::OnDeviceOpenRequest, this);
-    m_scrolledWindow->Bind(wxEVT_DEVICE_DELETE_REQUEST, &DeviceListPanel::OnDeviceDeleteRequest, this);
 
     // Load devices
     LoadDevices();
@@ -340,23 +343,6 @@ void DeviceListPanel::OnAddDevice(wxCommandEvent& event) {
     // Reload devices from file after dialog closes to get the latest state
     LoadDevices();
     RefreshDeviceList();
-}
-
-void DeviceListPanel::OnDeviceOpenRequest(wxCommandEvent& event) {
-    wxString deviceId = event.GetString();
-    std::string deviceIdStr = deviceId.ToStdString();
-
-    // Forward to AppWindow
-    wxCommandEvent openEvent(wxEVT_DEVICE_OPEN_REQUEST);
-    openEvent.SetString(deviceId);
-    openEvent.SetEventObject(this);
-    GetEventHandler()->ProcessEvent(openEvent);
-}
-
-void DeviceListPanel::OnDeviceDeleteRequest(wxCommandEvent& event) {
-    wxString deviceId = event.GetString();
-    std::string deviceIdStr = deviceId.ToStdString();
-    DeleteDeviceById(deviceIdStr);
 }
 
 void DeviceListPanel::DeleteDeviceById(const std::string& deviceId) {

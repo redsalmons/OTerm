@@ -130,8 +130,17 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         if (cellWidth < 6) cellWidth = 6;
         if (cellHeight < 12) cellHeight = 12;
 
-        initialRows = canvasSize.GetHeight() / cellHeight;
-        initialCols = canvasSize.GetWidth() / cellWidth;
+        // Account for margins (8px left/right, 4px top/bottom, DPI-scaled)
+        int margin_x = static_cast<int>(8 * dpiScale);
+        int margin_y = static_cast<int>(4 * dpiScale);
+
+        int availableHeight = canvasSize.GetHeight() - margin_y * 2;
+        int availableWidth = canvasSize.GetWidth() - margin_x * 2;
+        if (availableHeight < 100) availableHeight = 100;
+        if (availableWidth < 100) availableWidth = 100;
+
+        initialRows = availableHeight / cellHeight;
+        initialCols = availableWidth / cellWidth;
         if (initialRows < 10) initialRows = 10;
         if (initialCols < 40) initialCols = 40;
         SSH_LOG("ConnectInfo: Canvas size: " << canvasSize.GetWidth() << "x" << canvasSize.GetHeight()
