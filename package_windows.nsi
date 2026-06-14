@@ -66,6 +66,7 @@ Section "Main Application" SecMain
     File "K:\vcpkg\installed\arm64-windows\bin\libwebp.dll"
     File "K:\vcpkg\installed\arm64-windows\bin\libwebpdecoder.dll"
     File "K:\vcpkg\installed\arm64-windows\bin\libwebpdemux.dll"
+    File "K:\vcpkg\installed\arm64-windows\bin\libsharpyuv.dll"
     
     ; Icon file
     File "src\OceanTerm.ico"
