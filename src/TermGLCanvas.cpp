@@ -810,30 +810,23 @@ void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
         wxString content = m_imeInputBox->GetValue();
         if (content.IsEmpty()) return;
 
-        SSH_LOG("Proxy text received: '" << content << "'");
-        
         // Extract the finalized UTF-8 string from IME
         wxCharBuffer buffer = content.ToUTF8();
         std::string utf8_str(buffer.data(), buffer.length());
         
         // Send clean data to terminal
         m_imeCallback(utf8_str.c_str(), utf8_str.length());
-        SSH_LOG("IME text sent via callback, length: " << utf8_str.length());
-        
+
         // Trigger refresh to update rendering
         Refresh(false);
-        
+
         // Clear proxy input box using ChangeValue to prevent triggering wxEVT_TEXT again
         m_imeInputBox->ChangeValue("");
-        SSH_LOG("Proxy input box cleared");
-    } else {
-        SSH_LOG("IME input box or callback is null");
     }
 }
 
 void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
     int keycode = event.GetKeyCode();
-    SSH_LOG("OnProxyKeyDown: keycode=" << keycode << ", m_imeInputBoxVisible=" << m_imeInputBoxVisible << ", m_imeCallback=" << (m_imeCallback ? "set" : "NULL") << ", key_callback=" << (key_callback_ ? "set" : "NULL"));
 
     // Always handle control keys regardless of IME state
     if (keycode == WXK_RETURN || keycode == WXK_BACK || keycode == WXK_DELETE ||
