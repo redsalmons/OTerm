@@ -4,6 +4,7 @@
 #include "TermGLCanvas.h"
 #include "TranslationHelper.h"
 #include "SettingsDialog.h"
+#include "GlobalConfig.h"
 #include <wx/simplebook.h>
 #include <wx/display.h>
 #include <algorithm>
@@ -558,23 +559,49 @@ void CustomTitleBar::NotifyAllTabsResize() {
     for (auto tab : m_tabs) {
         TerminalThread* thread = tab->GetTerminalThread();
         if (thread) {
-            wxWindow* contentPanel = tab->GetContentPanel();
-            if (contentPanel) {
+            TermGLCanvas* canvas = tab->GetCanvas();
+            if (canvas) {
                 // 临时切换到这个tab以获取正确的size
-                int pageIndex = m_notebook->FindPage(contentPanel);
+                int pageIndex = m_notebook->FindPage(canvas);
                 if (pageIndex != wxNOT_FOUND) {
                     m_notebook->SetSelection(pageIndex);
                     m_notebook->Layout();
                     
-                    wxSize size = contentPanel->GetSize();
-                    int cellWidth = 12;
-                    int cellHeight = 24;
-                    int availableHeight = size.GetHeight();
+                    wxSize size = canvas->GetSize();
+                    
+                    // Get configured font size
+                    int fontSize = GlobalConfig::GetFontSize();
+                    if (fontSize == 0) fontSize = 12;
+
+                    float dpiScale = canvas->GetDPIScale();
+                    int terminalFontSize = fontSize;
+                    if (dpiScale > 1.0f) {
+                        terminalFontSize = static_cast<int>(fontSize * 2);
+                    }
+                    if (terminalFontSize < 8) terminalFontSize = 8;
+                    if (terminalFontSize > 72) terminalFontSize = 72;
+
+                    // Calculate cell size based on actual canvas metrics or fallback
+                    int cellWidth = (canvas->m_cellWidth > 0) ? canvas->m_cellWidth : (terminalFontSize / 2);
+                    int cellHeight = (canvas->m_cellHeight > 0) ? canvas->m_cellHeight : terminalFontSize;
+
+                    if (cellWidth < 6) cellWidth = 6;
+                    if (cellHeight < 12) cellHeight = 12;
+
+                    // Account for margins (8px left/right, 4px top/bottom, DPI-scaled)
+                    int margin_x = static_cast<int>(8 * dpiScale);
+                    int margin_y = static_cast<int>(4 * dpiScale);
+
+                    int availableHeight = size.GetHeight() - margin_y * 2;
+                    int availableWidth = size.GetWidth() - margin_x * 2;
                     if (availableHeight < 100) availableHeight = 100;
+                    if (availableWidth < 100) availableWidth = 100;
+
                     int rows = availableHeight / cellHeight;
-                    int cols = size.GetWidth() / cellWidth;
+                    int cols = availableWidth / cellWidth;
                     if (rows < 10) rows = 10;
                     if (cols < 40) cols = 40;
+                    
                     thread->ResizeVTerm(rows, cols);
                 }
             }

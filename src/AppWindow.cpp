@@ -373,6 +373,23 @@ bool AppWindow::MSWHandleMessage(WXLRESULT* result, WXUINT message, WXWPARAM wPa
         *result = 0;
         return true;
     }
+    else if (message == WM_GETMINMAXINFO) {
+        MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+        HMONITOR hMonitor = ::MonitorFromWindow(GetHWND(), MONITOR_DEFAULTTONEAREST);
+        if (hMonitor) {
+            MONITORINFO mi = { sizeof(MONITORINFO) };
+            if (::GetMonitorInfo(hMonitor, &mi)) {
+                // Set the maximized size and position to the work area (rcWork)
+                // This automatically excludes the taskbar!
+                mmi->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
+                mmi->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
+                mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left;
+                mmi->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top;
+            }
+        }
+        *result = 0;
+        return true;
+    }
     return wxFrame::MSWHandleMessage(result, message, wParam, lParam);
 }
 #endif

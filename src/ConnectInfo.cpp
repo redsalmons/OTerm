@@ -101,6 +101,9 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     }
     SSH_LOG("ConnectInfo: TermGLCanvas cast successful");
 
+    // Bind canvas resize to update terminal size (essential for window height/width changes)
+    m_termCanvas->Bind(wxEVT_SIZE, &ConnectInfo::OnSize, this);
+
     // Calculate initial vterm size based on TermGLCanvas size and configured font
     int initialRows = 30;
     int initialCols = 80;

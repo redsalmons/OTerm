@@ -365,6 +365,11 @@ void TerminalThread::process_input_queue() {
 }
 
 void TerminalThread::swap_buffers() {
+    // Update cursor position to the final, settled position from VTerm before swapping
+    VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
+    m_back_buffer.cursor_row = cursor_pos.row;
+    m_back_buffer.cursor_col = cursor_pos.col;
+
     // Swap front and back buffers
     std::swap(m_front_buffer, m_back_buffer);
 }

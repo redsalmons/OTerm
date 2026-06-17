@@ -207,7 +207,27 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     m_cursor_row = row;
     m_cursor_col = col;
 
-    // Calculate cursor rect (same logic used for both rendering and IME positioning)
+    // 1. Calculate and update scroll offset first, as it affects coordinate calculation
+    if (in_alt_screen) {
+        m_scroll_offset = 0;
+    } else if (vterm_scroll_offset > 0) {
+        m_scroll_offset = 0;
+    } else {
+        // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
+        wxSize size = GetSize();
+        int scroll_margin_y = static_cast<int>(4 * m_dpiScale);
+        int availableHeight = size.GetHeight() - scroll_margin_y * 2;
+        int visible_rows = availableHeight / m_cached_cell_height;
+        
+        // Calculate scroll offset to keep cursor at bottom
+        if (m_cursor_row >= visible_rows) {
+            m_scroll_offset = m_cursor_row - visible_rows + 1;
+        } else {
+            m_scroll_offset = 0;
+        }
+    }
+
+    // 2. Now calculate cursor rect with the correct updated m_scroll_offset
     float margin_x = 8.0f * m_dpiScale;
     float margin_y = 4.0f * m_dpiScale;
     float cell_width = static_cast<float>(m_cellWidth);
@@ -223,7 +243,7 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     m_cursorRect = wxRect(static_cast<int>(cursor_x), static_cast<int>(cursor_y),
                           static_cast<int>(cell_width), static_cast<int>(cursor_height));
 
-    // Update IME input box position and size if visible
+    // 3. Update IME input box position and size if visible
     if (m_imeInputBox && m_imeInputBoxVisible) {
         // Bounds check (same logic as ShowIMEInputBox)
         wxSize size = GetSize();
@@ -238,7 +258,6 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
 
         // Set input box size and position to match cursor exactly
         m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
-        // SSH_LOG("IME input box position and size updated to: " << imeRect.x << ", " << imeRect.y << " with size: " << imeRect.width << "x" << imeRect.height);
 
         // On macOS, notify input method about position
 #ifdef __WXMAC__
@@ -246,32 +265,6 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
         // This is a simplified approach - for production you might need more sophisticated handling
         // The SetSize call above should help with basic alignment
 #endif
-    }
-    
-    // In alternate screen (vi mode), don't calculate scroll offset
-    if (in_alt_screen) {
-        m_scroll_offset = 0;
-        return;
-    }
-
-    // If we are scrolled up in the terminal history, we don't apply the cursor scroll offset
-    // because the screen content is already scrolled up!
-    if (vterm_scroll_offset > 0) {
-        m_scroll_offset = 0;
-        return;
-    }
-    
-    // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
-    wxSize size = GetSize();
-    int scroll_margin_y = static_cast<int>(4 * m_dpiScale);
-    int availableHeight = size.GetHeight() - scroll_margin_y * 2;
-    int visible_rows = availableHeight / m_cached_cell_height;
-    
-    // Calculate scroll offset to keep cursor at bottom
-    if (m_cursor_row >= visible_rows) {
-        m_scroll_offset = m_cursor_row - visible_rows + 1;
-    } else {
-        m_scroll_offset = 0;
     }
 }
 

@@ -279,13 +279,6 @@ int VTermManager::vterm_damage_callback(VTermRect rect, void *user) {
 
 int VTermManager::vterm_movecursor_callback(VTermPos pos, VTermPos oldpos, int visible, void *user) {
     VTermManager* manager = static_cast<VTermManager*>(user);
-    
-    // In alternate screen mode (vi), if cursor moves to the last row, it's likely
-    // a temporary move to the status line. Don't update the cached position.
-    if (manager->in_alternate_screen_ && pos.row == manager->rows_ - 1) {
-        return 1;
-    }
-    
     manager->last_cursor_pos_ = pos;
     return 1;
 }
@@ -788,11 +781,6 @@ VTermPos VTermManager::get_cursor_pos() const {
         VTermState* state = vterm_obtain_state(vt_);
         if (state) {
             vterm_state_get_cursorpos(state, &pos);
-            // In alternate screen mode (vi), if cursor is on the last row,
-            // it's likely a temporary move to the status line. Use cached position.
-            if (in_alternate_screen_ && pos.row == rows_ - 1) {
-                return last_cursor_pos_;
-            }
             return pos;
         }
     }
