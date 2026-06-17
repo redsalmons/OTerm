@@ -31,6 +31,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_charHeight(0),
       m_cellWidth(0),
       m_cellHeight(0),
+      m_cursorRect(0, 0, 0, 0),
       m_imeInputBox(nullptr),
       m_imeInputBoxVisible(false) {
     // Calculate DPI scale
@@ -60,17 +61,21 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
     Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnKillFocus, this);
 
     // Create invisible proxy input box (12x18 pixels)
+    // wxTE_RICH2 uses Rich Edit 2.0 which has better borderless support on Windows
     m_imeInputBox = new wxTextCtrl(this, wxID_ANY, wxEmptyString,
                                    wxDefaultPosition, wxSize(12, 18),
-                                   wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS);
+                                   wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
     // Set background to blue to match cursor color
     wxColour cursor_color = wxColour(0, 120, 215); // Blue cursor color
     m_imeInputBox->SetBackgroundColour(cursor_color);
     m_imeInputBox->SetForegroundColour(cursor_color); // Text color same as background
     m_imeInputBox->Hide(); // Keep it hidden by default
     
+    // Remove internal margins so the control edge matches the cursor exactly
+    m_imeInputBox->SetMargins(0);
+    
     // Additional styling to hide border completely
-    m_imeInputBox->SetWindowStyleFlag(wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS);
+    m_imeInputBox->SetWindowStyleFlag(wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
     
     // Bind IME input box events
     m_imeInputBox->Bind(wxEVT_TEXT, &TermGLCanvas::OnProxyTextReceived, this);
@@ -201,31 +206,40 @@ void TermGLCanvas::ClearScreenData() {
 void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int vterm_scroll_offset) {
     m_cursor_row = row;
     m_cursor_col = col;
-    
+
+    // Calculate cursor rect (same logic used for both rendering and IME positioning)
+    float margin_x = 8.0f * m_dpiScale;
+    float margin_y = 4.0f * m_dpiScale;
+    float cell_width = static_cast<float>(m_cellWidth);
+    float cell_height = static_cast<float>(m_cellHeight);
+
+    float cursor_x = col * cell_width + margin_x;
+    float cursor_y = (row - m_scroll_offset) * cell_height + margin_y;
+    float cursor_height = cell_height * 0.85f;
+    float cursor_y_offset = (cell_height - cursor_height) / 2.0f;
+    cursor_y += cursor_y_offset;
+
+    // Save to member for Render() to use
+    m_cursorRect = wxRect(static_cast<int>(cursor_x), static_cast<int>(cursor_y),
+                          static_cast<int>(cell_width), static_cast<int>(cursor_height));
+
     // Update IME input box position and size if visible
     if (m_imeInputBox && m_imeInputBoxVisible) {
-        // Use same margins as cursor rendering (8px left/right, 4px top/bottom) with DPI scaling
-        int margin_x = static_cast<int>(8 * m_dpiScale);
-        int margin_y = static_cast<int>(4 * m_dpiScale);
-
-        // Apply scroll offset only to vertical position (y-axis)
-        int x = col * m_cellWidth + margin_x;
-        int y = (row - m_scroll_offset) * m_cellHeight + margin_y;
-
-        // Use cursor height (85% of cell height) to match cursor size
-        int cursor_height = static_cast<int>(m_cellHeight * 0.85f);
-        int cursor_y_offset = (m_cellHeight - cursor_height) / 2;
-        y += cursor_y_offset;
-
-        // Bounds check
+        // Bounds check (same logic as ShowIMEInputBox)
         wxSize size = GetSize();
-        if (x > size.GetWidth() - m_cellWidth) x = size.GetWidth() - m_cellWidth;
-        if (y > size.GetHeight() - cursor_height) y = size.GetHeight() - cursor_height;
+        wxRect imeRect = m_cursorRect;
+        if (imeRect.x < 0) imeRect.x = 0;
+        if (imeRect.y < 0) imeRect.y = 0;
+        if (imeRect.x + imeRect.width > size.GetWidth()) imeRect.x = size.GetWidth() - imeRect.width;
+        if (imeRect.y + imeRect.height > size.GetHeight()) imeRect.y = size.GetHeight() - imeRect.height;
+
+        // Update m_cursorRect so Render() stays in sync
+        m_cursorRect = imeRect;
 
         // Set input box size and position to match cursor exactly
-        m_imeInputBox->SetSize(x, y, m_cellWidth, cursor_height);
-        // SSH_LOG("IME input box position and size updated to: " << x << ", " << y << " with size: " << m_cellWidth << "x" << m_cellHeight);
-        
+        m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
+        // SSH_LOG("IME input box position and size updated to: " << imeRect.x << ", " << imeRect.y << " with size: " << imeRect.width << "x" << imeRect.height);
+
         // On macOS, notify input method about position
 #ifdef __WXMAC__
         // Use NSTextInputClient to set first rect for line
@@ -249,8 +263,8 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     
     // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
     wxSize size = GetSize();
-    int margin_y = static_cast<int>(4 * m_dpiScale);
-    int availableHeight = size.GetHeight() - margin_y * 2;
+    int scroll_margin_y = static_cast<int>(4 * m_dpiScale);
+    int availableHeight = size.GetHeight() - scroll_margin_y * 2;
     int visible_rows = availableHeight / m_cached_cell_height;
     
     // Calculate scroll offset to keep cursor at bottom
@@ -412,25 +426,16 @@ void TermGLCanvas::Render() {
         glDisable(GL_BLEND);
     }
     
-    // 3. 绘制光标
+    // 3. 绘制光标 (直接使用 SetCursorPosition 中计算好的 m_cursorRect)
     if (m_cursor_visible) {
-        float cursor_x = m_cursor_col * cell_width + margin_x;
-        float cursor_y = (m_cursor_row - m_scroll_offset) * cell_height + margin_y;
-
-        // Adjust cursor height to match actual character height (85% of cell height)
-        // This makes cursor align better with text
-        float cursor_height = cell_height * 0.85f;
-        float cursor_y_offset = (cell_height - cursor_height) / 2.0f;
-        cursor_y += cursor_y_offset;
-
         glColor4f(1.0f, 1.0f, 1.0f, 0.5f);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBegin(GL_QUADS);
-            glVertex2f(cursor_x, cursor_y);
-            glVertex2f(cursor_x + cell_width, cursor_y);
-            glVertex2f(cursor_x + cell_width, cursor_y + cursor_height);
-            glVertex2f(cursor_x, cursor_y + cursor_height);
+            glVertex2f(m_cursorRect.x, m_cursorRect.y);
+            glVertex2f(m_cursorRect.x + m_cursorRect.width, m_cursorRect.y);
+            glVertex2f(m_cursorRect.x + m_cursorRect.width, m_cursorRect.y + m_cursorRect.height);
+            glVertex2f(m_cursorRect.x, m_cursorRect.y + m_cursorRect.height);
         glEnd();
         glDisable(GL_BLEND);
     }
@@ -467,13 +472,13 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
         m_cached_cell_height = std::max(12, m_charHeight);
     }
     
-    // Update OpenGL viewport with 8px left/right, 4px top/bottom margin
+    // Update OpenGL viewport to cover entire window
+    // Margin is already applied manually in rendering coordinates,
+    // so viewport should be 1:1 with window pixel coordinates
     if (m_glInitialized && m_glContext) {
         m_glContext->SetCurrent(*this);
         wxSize size = GetSize();
-        const int margin_x = 8;
-        const int margin_y = 4;
-        glViewport(margin_x, margin_y, size.GetWidth() - margin_x * 2, size.GetHeight() - margin_y * 2);
+        glViewport(0, 0, size.GetWidth(), size.GetHeight());
     }
     
     Refresh();
@@ -764,31 +769,26 @@ void TermGLCanvas::ShowIMEInputBox() {
     };
     SSH_LOG("IME callback set");
 
-    // Use same margins as cursor rendering (8px left/right, 4px top/bottom) with DPI scaling
-    int margin_x = static_cast<int>(8 * m_dpiScale);
-    int margin_y = static_cast<int>(4 * m_dpiScale);
+    // Use pre-calculated cursor rect so IME matches rendered cursor exactly
+    wxRect imeRect = m_cursorRect;
 
-    // Apply scroll offset only to vertical position (y-axis)
-    int x = m_cursor_col * m_cellWidth + margin_x;
-    int y = (m_cursor_row - m_scroll_offset) * m_cellHeight + margin_y;
-
-    // Use cursor height (85% of cell height) to match cursor size
-    int cursor_height = static_cast<int>(m_cellHeight * 0.85f);
-    int cursor_y_offset = (m_cellHeight - cursor_height) / 2;
-    y += cursor_y_offset;
-
-    // Ensure it stays within canvas bounds
+    // Ensure it stays within canvas bounds (same logic as SetCursorPosition)
     wxSize canvasSize = GetSize();
-    if (x > canvasSize.GetWidth() - m_cellWidth) x = canvasSize.GetWidth() - m_cellWidth;
-    if (y > canvasSize.GetHeight() - cursor_height) y = canvasSize.GetHeight() - cursor_height;
+    if (imeRect.x < 0) imeRect.x = 0;
+    if (imeRect.y < 0) imeRect.y = 0;
+    if (imeRect.x + imeRect.width > canvasSize.GetWidth()) imeRect.x = canvasSize.GetWidth() - imeRect.width;
+    if (imeRect.y + imeRect.height > canvasSize.GetHeight()) imeRect.y = canvasSize.GetHeight() - imeRect.height;
+
+    // Update m_cursorRect with bounded values so Render() stays in sync
+    m_cursorRect = imeRect;
 
     // Set input box size and position to match cursor exactly
-    m_imeInputBox->SetSize(x, y, m_cellWidth, cursor_height);
+    m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
     m_imeInputBox->Show();
     m_imeInputBox->SetFocus();
     m_imeInputBoxVisible = true;
 
-    SSH_LOG("IME input box shown at position: " << x << ", " << y << " with size: " << m_cellWidth << "x" << m_cellHeight);
+    SSH_LOG("IME input box shown at position: " << imeRect.x << ", " << imeRect.y << " with size: " << imeRect.width << "x" << imeRect.height);
 }
 
 void TermGLCanvas::HideIMEInputBox() {

@@ -81,6 +81,9 @@ public:
     int m_cellWidth;  // Cached cell width (calculated from font size)
     int m_cellHeight; // Cached cell height (calculated from char height)
 
+    // Cursor rect (calculated once, used by both rendering and IME positioning)
+    wxRect m_cursorRect;
+
     // Local IME input box
     wxTextCtrl* m_imeInputBox;
     bool m_imeInputBoxVisible;
