@@ -6,6 +6,7 @@
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/statbox.h>
+#include <wx/notebook.h>
 
 wxBEGIN_EVENT_TABLE(SettingsDialog, wxDialog)
     EVT_BUTTON(wxID_OK, SettingsDialog::OnOK)
@@ -13,21 +14,25 @@ wxBEGIN_EVENT_TABLE(SettingsDialog, wxDialog)
 wxEND_EVENT_TABLE()
 
 SettingsDialog::SettingsDialog(wxWindow* parent)
-    : wxDialog(parent, wxID_ANY, TranslationHelper::Tr("settings"), wxDefaultPosition, wxSize(450, 400)) {
+    : wxDialog(parent, wxID_ANY, TranslationHelper::Tr("settings"), wxDefaultPosition, wxSize(450, 350)) {
 
-    wxPanel* panel = new wxPanel(this);
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
 
-    // Basic configuration group
-    wxStaticBox* basicConfigBox = new wxStaticBox(panel, wxID_ANY, TranslationHelper::Tr("basicConfig"));
-    wxStaticBoxSizer* basicConfigSizer = new wxStaticBoxSizer(basicConfigBox, wxVERTICAL);
+    // Create Tab control (Notebook)
+    wxNotebook* notebook = new wxNotebook(this, wxID_ANY);
+
+    // -------------------------------------------------------------
+    // Tab 1: Basic configuration
+    // -------------------------------------------------------------
+    wxPanel* basicPanel = new wxPanel(notebook, wxID_ANY);
+    wxBoxSizer* basicSizer = new wxBoxSizer(wxVERTICAL);
 
     // Language selection
     wxBoxSizer* languageSizer = new wxBoxSizer(wxHORIZONTAL);
-    languageSizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("language")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    languageSizer->Add(new wxStaticText(basicPanel, wxID_ANY, TranslationHelper::Tr("language")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
 
     wxString languageChoices[] = { TranslationHelper::Tr("chinese"), TranslationHelper::Tr("english") };
-    m_languageChoice = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, 2, languageChoices);
+    m_languageChoice = new wxChoice(basicPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, 2, languageChoices);
 
     // Set current language
     std::string currentLang = GlobalConfig::GetLanguage();
@@ -38,74 +43,77 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     }
 
     languageSizer->Add(m_languageChoice, 1, wxEXPAND | wxALL, 5);
-    basicConfigSizer->Add(languageSizer, 0, wxEXPAND);
+    basicSizer->Add(languageSizer, 0, wxEXPAND | wxALL, 10);
 
     // Font selection
     wxBoxSizer* fontSizer = new wxBoxSizer(wxHORIZONTAL);
-    fontSizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("font")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    fontSizer->Add(new wxStaticText(basicPanel, wxID_ANY, TranslationHelper::Tr("font")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
 
-    // Set current font
     std::string currentFontName = GlobalConfig::GetFontName();
     int currentFontSize = GlobalConfig::GetFontSize();
 
-    m_fontButton = new wxButton(panel, wxID_ANY, "Select Font");
+    m_fontButton = new wxButton(basicPanel, wxID_ANY, "Select Font");
     fontSizer->Add(m_fontButton, 0, wxALL, 5);
 
-    m_fontDisplayText = new wxStaticText(panel, wxID_ANY, wxString::FromUTF8(currentFontName.c_str()));
+    m_fontDisplayText = new wxStaticText(basicPanel, wxID_ANY, wxString::FromUTF8(currentFontName.c_str()));
     fontSizer->Add(m_fontDisplayText, 1, wxEXPAND | wxALL, 5);
-    basicConfigSizer->Add(fontSizer, 0, wxEXPAND);
+    basicSizer->Add(fontSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
     // Bind font button event
     m_fontButton->Bind(wxEVT_BUTTON, &SettingsDialog::OnFontButtonClicked, this);
 
     // Font size
     wxBoxSizer* fontSizeSizer = new wxBoxSizer(wxHORIZONTAL);
-    fontSizeSizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("fontSize")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    fontSizeSizer->Add(new wxStaticText(basicPanel, wxID_ANY, TranslationHelper::Tr("fontSize")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
 
-    m_fontSizeSpin = new wxSpinCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 8, 72, currentFontSize);
+    m_fontSizeSpin = new wxSpinCtrl(basicPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 8, 72, currentFontSize);
     fontSizeSizer->Add(m_fontSizeSpin, 0, wxALL, 5);
-    basicConfigSizer->Add(fontSizeSizer, 0, wxEXPAND);
+    basicSizer->Add(fontSizeSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
-    // Save and Cancel buttons in basic config group
-    wxBoxSizer* basicButtonSizer = new wxBoxSizer(wxHORIZONTAL);
-    basicButtonSizer->Add(new wxButton(panel, wxID_OK, TranslationHelper::Tr("save")), 0, wxALL, 5);
-    basicButtonSizer->Add(new wxButton(panel, wxID_CANCEL, TranslationHelper::Tr("cancel")), 0, wxALL, 5);
-    basicConfigSizer->Add(basicButtonSizer, 0, wxALIGN_RIGHT | wxALL, 5);
+    basicPanel->SetSizer(basicSizer);
+    notebook->AddPage(basicPanel, TranslationHelper::Tr("basicConfig"));
 
-    mainSizer->Add(basicConfigSizer, 0, wxEXPAND | wxALL, 10);
-
-    // Master password group
-    wxStaticBox* masterPasswordBox = new wxStaticBox(panel, wxID_ANY, TranslationHelper::Tr("masterPasswordConfig"));
-    wxStaticBoxSizer* masterPasswordSizer = new wxStaticBoxSizer(masterPasswordBox, wxVERTICAL);
+    // -------------------------------------------------------------
+    // Tab 2: Master password group
+    // -------------------------------------------------------------
+    wxPanel* passwordPanel = new wxPanel(notebook, wxID_ANY);
+    wxBoxSizer* passwordSizer = new wxBoxSizer(wxVERTICAL);
 
     // Show password input fields
     wxBoxSizer* password1Sizer = new wxBoxSizer(wxHORIZONTAL);
-    password1Sizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("enterPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
-    m_masterPassword1 = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
+    password1Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("enterPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    m_masterPassword1 = new wxTextCtrl(passwordPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
     password1Sizer->Add(m_masterPassword1, 1, wxEXPAND | wxALL, 5);
-    masterPasswordSizer->Add(password1Sizer, 0, wxEXPAND);
+    passwordSizer->Add(password1Sizer, 0, wxEXPAND | wxALL, 10);
 
     wxBoxSizer* password2Sizer = new wxBoxSizer(wxHORIZONTAL);
-    password2Sizer->Add(new wxStaticText(panel, wxID_ANY, TranslationHelper::Tr("confirmPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
-    m_masterPassword2 = new wxTextCtrl(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
+    password2Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("confirmPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    m_masterPassword2 = new wxTextCtrl(passwordPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
     password2Sizer->Add(m_masterPassword2, 1, wxEXPAND | wxALL, 5);
-    masterPasswordSizer->Add(password2Sizer, 0, wxEXPAND);
+    passwordSizer->Add(password2Sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
-    // Only show reset button
+    // Show reset button
     wxBoxSizer* masterButtonSizer = new wxBoxSizer(wxHORIZONTAL);
-    wxButton* resetButton = new wxButton(panel, wxID_ANY, TranslationHelper::Tr("reset"));
+    wxButton* resetButton = new wxButton(passwordPanel, wxID_ANY, TranslationHelper::Tr("reset"));
     masterButtonSizer->Add(resetButton, 0, wxALL, 5);
-    masterPasswordSizer->Add(masterButtonSizer, 0, wxALIGN_RIGHT | wxALL, 5);
+    passwordSizer->Add(masterButtonSizer, 0, wxALIGN_RIGHT | wxRIGHT | wxBOTTOM, 10);
 
     // Bind button event
     resetButton->Bind(wxEVT_BUTTON, &SettingsDialog::OnResetMasterPassword, this);
 
-    mainSizer->Add(masterPasswordSizer, 0, wxEXPAND | wxALL, 10);
+    passwordPanel->SetSizer(passwordSizer);
+    notebook->AddPage(passwordPanel, TranslationHelper::Tr("masterPasswordConfig"));
 
-    panel->SetSizer(mainSizer);
-    wxBoxSizer* dialogSizer = new wxBoxSizer(wxVERTICAL);
-    dialogSizer->Add(panel, 1, wxEXPAND);
-    SetSizerAndFit(dialogSizer);
+    // Add notebook to dialog sizer
+    mainSizer->Add(notebook, 1, wxEXPAND | wxALL, 10);
+
+    // Bottom standard buttons
+    wxBoxSizer* bottomButtonSizer = new wxBoxSizer(wxHORIZONTAL);
+    bottomButtonSizer->Add(new wxButton(this, wxID_OK, TranslationHelper::Tr("save")), 0, wxALL, 5);
+    bottomButtonSizer->Add(new wxButton(this, wxID_CANCEL, TranslationHelper::Tr("cancel")), 0, wxALL, 5);
+    mainSizer->Add(bottomButtonSizer, 0, wxALIGN_RIGHT | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+
+    SetSizerAndFit(mainSizer);
     Centre();
 }
 
