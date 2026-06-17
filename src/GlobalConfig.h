@@ -34,6 +34,9 @@ public:
 
     static std::string ComputeMD5(const std::string& input);
 
+    static void SetDPIScaleFactor(double scale);
+    static double GetDPIScaleFactor();
+
 private:
     static std::string s_workspacePath;
     static bool s_workspacePathSpecified;
@@ -42,6 +45,7 @@ private:
     static int s_fontSize;
     static std::string s_masterPassword;
     static std::string x7f3a9k2m5p8q1r4; // Random variable name for active master password
+    static double s_dpiScaleFactor;
 
     static std::string GetSettingsFilePath();
 };

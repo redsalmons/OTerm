@@ -16,6 +16,7 @@ std::string GlobalConfig::s_fontName = "";
 int GlobalConfig::s_fontSize = 0;
 std::string GlobalConfig::s_masterPassword = "";
 std::string GlobalConfig::x7f3a9k2m5p8q1r4 = "";
+double GlobalConfig::s_dpiScaleFactor = 1.0;
 
 std::string GlobalConfig::GetWorkspacePath() {
     if (s_workspacePath.empty()) {
@@ -232,4 +233,15 @@ void GlobalConfig::SaveSettings() {
         file << j.dump(4);
         file.close();
     }
+}
+
+void GlobalConfig::SetDPIScaleFactor(double scale) {
+    s_dpiScaleFactor = scale;
+}
+
+double GlobalConfig::GetDPIScaleFactor() {
+    if (s_dpiScaleFactor <= 0.0) {
+        s_dpiScaleFactor = 1.0;
+    }
+    return s_dpiScaleFactor;
 }

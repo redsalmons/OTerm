@@ -17,13 +17,18 @@
 wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_REQUEST, wxCommandEvent);
 
 FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, const DeviceConfig& deviceConfig)
-    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxSize(1000, 800),
+    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize,
                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER | wxDIALOG_NO_PARENT),
       m_deviceConfig(deviceConfig), m_sshThread(nullptr), m_imageList(nullptr),
       m_localList(nullptr), m_remoteList(nullptr), m_taskList(nullptr), m_localPathLabel(nullptr),
       m_remotePathLabel(nullptr), m_remoteDropTarget(nullptr), m_localDropTarget(nullptr),
       m_localCurrentPath(wxGetHomeDir()), m_remoteCurrentPath("~"), m_taskTimer(nullptr)
 {
+    double dpiScale = GlobalConfig::GetDPIScaleFactor();
+    int baseWidth = 834;
+    int baseHeight = 667;
+    SetSize(wxSize(static_cast<int>(baseWidth * dpiScale), static_cast<int>(baseHeight * dpiScale)));
+
     SSH_LOG("FileTransferDialog constructor - Creating dialog");
     
     Bind(wxEVT_SSH_FILE_LIST, &FileTransferDialog::OnSSHFileList, this);
@@ -536,6 +541,7 @@ void FileTransferDialog::LayoutControls() {
     Layout();
     Centre();
     AdjustTaskListColumns();
+    AdjustFileListColumns();
 }
 
 void FileTransferDialog::AdjustTaskListColumns() {
@@ -566,6 +572,39 @@ void FileTransferDialog::AdjustTaskListColumns() {
     }
 }
 
+void FileTransferDialog::AdjustFileListColumns() {
+    if (!m_localList || !m_remoteList) return;
+    
+    int localWidth = m_localList->GetClientSize().GetWidth();
+    int remoteWidth = m_remoteList->GetClientSize().GetWidth();
+    
+    if (localWidth > 0) {
+        // Calculate proportional column widths for local list
+        int sizeWidth = 120;
+        int dateWidth = 140;
+        int nameWidth = localWidth - sizeWidth - dateWidth - 40; // 40 for scrollbar padding
+        
+        if (nameWidth > 50) {
+            m_localList->SetColumnWidth(0, nameWidth);  // Name
+            m_localList->SetColumnWidth(1, sizeWidth);  // Size
+            m_localList->SetColumnWidth(2, dateWidth);  // Changed
+        }
+    }
+    
+    if (remoteWidth > 0) {
+        // Calculate proportional column widths for remote list
+        int sizeWidth = 120;
+        int dateWidth = 140;
+        int nameWidth = remoteWidth - sizeWidth - dateWidth - 40; // 40 for scrollbar padding
+        
+        if (nameWidth > 50) {
+            m_remoteList->SetColumnWidth(0, nameWidth);  // Name
+            m_remoteList->SetColumnWidth(1, sizeWidth);  // Size
+            m_remoteList->SetColumnWidth(2, dateWidth);  // Changed
+        }
+    }
+}
+
 void FileTransferDialog::OnTimer(wxTimerEvent& event) {
     LoadAndDisplayTasks();
 }
@@ -573,6 +612,7 @@ void FileTransferDialog::OnTimer(wxTimerEvent& event) {
 void FileTransferDialog::OnSize(wxSizeEvent& event) {
     event.Skip();
     AdjustTaskListColumns();
+    AdjustFileListColumns();
 }
 
 void FileTransferDialog::LoadAndDisplayTasks() {

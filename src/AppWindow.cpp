@@ -161,7 +161,7 @@ bool MyApp::OnInit() {
             // If log initialization fails, silently continue without logging
         }
 
-        // Get DPI scale factor after enabling DPI awareness
+        // Get DPI scale factor after enabling DPI awareness and store globally
         double dpiScale = 1.0;
 #ifdef __WXMSW__
         HDC hdc = GetDC(nullptr);
@@ -170,6 +170,7 @@ bool MyApp::OnInit() {
             ReleaseDC(nullptr, hdc);
         }
 #endif
+        GlobalConfig::SetDPIScaleFactor(dpiScale);
 
         // Adjust initial window size by DPI scale factor
         wxSize initialSize(800, 600);

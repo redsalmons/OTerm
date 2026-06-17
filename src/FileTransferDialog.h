@@ -174,6 +174,7 @@ private:
     wxString FormatFileDate(const wxDateTime& date);
     void LoadAndDisplayTasks();
     void AdjustTaskListColumns();
+    void AdjustFileListColumns();
     
     struct FileItem {
         wxString name;

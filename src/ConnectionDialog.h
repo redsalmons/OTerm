@@ -28,6 +28,7 @@ private:
     void OnCancel(wxCommandEvent& event);
     void OnAuthMethodChanged(wxCommandEvent& event);
     void OnKeyBrowse(wxCommandEvent& event);
+    void OnSize(wxSizeEvent& event);
 
     void LoadConfig();
     void SaveConfig();

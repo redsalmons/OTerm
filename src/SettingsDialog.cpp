@@ -81,13 +81,13 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
 
     // Show password input fields
     wxBoxSizer* password1Sizer = new wxBoxSizer(wxHORIZONTAL);
-    password1Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("enterPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    password1Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("enterPassword") + ":"), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
     m_masterPassword1 = new wxTextCtrl(passwordPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
     password1Sizer->Add(m_masterPassword1, 1, wxEXPAND | wxALL, 5);
     passwordSizer->Add(password1Sizer, 0, wxEXPAND | wxALL, 10);
 
     wxBoxSizer* password2Sizer = new wxBoxSizer(wxHORIZONTAL);
-    password2Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("confirmPassword")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    password2Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("confirmPassword") + ":"), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
     m_masterPassword2 = new wxTextCtrl(passwordPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
     password2Sizer->Add(m_masterPassword2, 1, wxEXPAND | wxALL, 5);
     passwordSizer->Add(password2Sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);

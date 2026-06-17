@@ -19,10 +19,10 @@ msgstr ""
 
 # FileTransferDialog
 msgid "localDirectory"
-msgstr "Local Directory: "
+msgstr "Local Directory"
 
 msgid "remoteDirectory"
-msgstr "Remote Directory: "
+msgstr "Remote Directory"
 
 msgid "name"
 msgstr "Name"
@@ -53,25 +53,25 @@ msgstr "Result"
 
 # ConnectionDialog
 msgid "deviceName"
-msgstr "Device Name:"
+msgstr "Device Name"
 
 msgid "username"
-msgstr "Username:"
+msgstr "Username"
 
 msgid "hostAddress"
-msgstr "Host Address:"
+msgstr "Host Address"
 
 msgid "port"
 msgstr "Port"
 
 msgid "deviceGroup"
-msgstr "Device Group:"
+msgstr "Device Group"
 
 msgid "authMethod"
-msgstr "Auth Method:"
+msgstr "Auth Method"
 
 msgid "passwordKey"
-msgstr "Password/Key:"
+msgstr "Password/Key"
 
 msgid "browse"
 msgstr "Browse..."
@@ -99,6 +99,12 @@ msgstr "Failed to read key file"
 
 msgid "keyContentCannotBeEmpty"
 msgstr "Key content cannot be empty"
+
+msgid "loginNameCannotBeEmpty"
+msgstr "Username cannot be empty"
+
+msgid "hostAddressCannotBeEmpty"
+msgstr "Host address cannot be empty"
 
 msgid "invalidKeyFormat"
 msgstr "Invalid key format. Please ensure you paste a private key (containing -----BEGIN and -----END)"
@@ -179,10 +185,10 @@ msgid "masterPasswordConfig"
 msgstr "System Master Password Configuration"
 
 msgid "enterPassword"
-msgstr "Enter Password:"
+msgstr "Enter Password"
 
 msgid "confirmPassword"
-msgstr "Confirm Password:"
+msgstr "Confirm Password"
 
 msgid "set"
 msgstr "Set"

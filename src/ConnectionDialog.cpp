@@ -1,21 +1,28 @@
 #include "ConnectionDialog.h"
 #include "TranslationHelper.h"
 #include "SSHManager.h"
+#include "GlobalConfig.h"
 #include <wx/filedlg.h>
 #include <wx/file.h>
 
+#ifdef __WXMSW__
+#include <commctrl.h>
+#endif
+
 ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect)
-    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxSize(425, 425)) {
+    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize) {
+
+    double dpiScale = GlobalConfig::GetDPIScaleFactor();
+
+    int baseWidth = 550;
+    int baseHeight = 500;
+    SetSize(wxSize(static_cast<int>(baseWidth * dpiScale), static_cast<int>(baseHeight * dpiScale)));
 
     wxBoxSizer* mainSizer = new wxBoxSizer(wxHORIZONTAL);
 
-    // Left Panel (Tree Control)
-#ifdef __APPLE__
-    int treeWidth = 125;
-#else
-    int treeWidth = 250;
-#endif
-    m_treeCtrl = new wxTreeCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(treeWidth, -1));
+    // Left Panel (Tree Control) - let sizer handle sizing dynamically
+    m_treeCtrl = new wxTreeCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                wxTR_DEFAULT_STYLE | wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT | wxTR_SINGLE | wxTR_FULL_ROW_HIGHLIGHT);
     mainSizer->Add(m_treeCtrl, 1, wxEXPAND | wxALL, 5);
 
     // Right Panel (Form)
@@ -23,34 +30,40 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     wxBoxSizer* formSizer = new wxBoxSizer(wxVERTICAL);
 
     wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 5, 5);
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("deviceName")), 0, wxALIGN_CENTER_VERTICAL);
-    m_nameCtrl = new wxTextCtrl(formPanel, wxID_ANY, "");
-    gridSizer->Add(m_nameCtrl, 1, wxEXPAND);
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("deviceName") + ":"), 0, wxALIGN_CENTER_VERTICAL);
+    m_nameCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxSize(static_cast<int>(200 * dpiScale), -1));
+    gridSizer->Add(m_nameCtrl, 0, wxALIGN_CENTER_VERTICAL);
     gridSizer->AddSpacer(0);
     gridSizer->AddSpacer(0);
 
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("username")), 0, wxALIGN_CENTER_VERTICAL);
-    m_usernameCtrl = new wxTextCtrl(formPanel, wxID_ANY, "");
-    gridSizer->Add(m_usernameCtrl, 1, wxEXPAND);
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("username") + ":"), 0, wxALIGN_CENTER_VERTICAL);
+    m_usernameCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxSize(static_cast<int>(200 * dpiScale), -1));
+    gridSizer->Add(m_usernameCtrl, 0, wxALIGN_CENTER_VERTICAL);
     gridSizer->AddSpacer(0);
     gridSizer->AddSpacer(0);
 
-    // Address and Port on the same line
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("hostAddress")), 0, wxALIGN_CENTER_VERTICAL);
-    m_addressCtrl = new wxTextCtrl(formPanel, wxID_ANY, "");
-    gridSizer->Add(m_addressCtrl, 1, wxEXPAND);
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("port")), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 10);
+    // Address field
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("hostAddress") + ":"), 0, wxALIGN_CENTER_VERTICAL);
+    m_addressCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxSize(static_cast<int>(200 * dpiScale), -1));
+    gridSizer->Add(m_addressCtrl, 0, wxALIGN_CENTER_VERTICAL);
+    gridSizer->AddSpacer(0);
+    gridSizer->AddSpacer(0);
+
+    // Port field
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("port") + ":"), 0, wxALIGN_CENTER_VERTICAL);
     m_portCtrl = new wxTextCtrl(formPanel, wxID_ANY, "22");
-    m_portCtrl->SetMinSize(wxSize(60, -1));
-    gridSizer->Add(m_portCtrl, 0);
-
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("deviceGroup")), 0, wxALIGN_CENTER_VERTICAL);
-    m_groupCtrl = new wxTextCtrl(formPanel, wxID_ANY, "");
-    gridSizer->Add(m_groupCtrl, 1, wxEXPAND);
+    m_portCtrl->SetMinSize(wxSize(static_cast<int>(60 * dpiScale), -1));
+    gridSizer->Add(m_portCtrl, 0, wxALIGN_CENTER_VERTICAL);
     gridSizer->AddSpacer(0);
     gridSizer->AddSpacer(0);
 
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("authMethod")), 0, wxALIGN_CENTER_VERTICAL);
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("deviceGroup") + ":"), 0, wxALIGN_CENTER_VERTICAL);
+    m_groupCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxSize(static_cast<int>(200 * dpiScale), -1));
+    gridSizer->Add(m_groupCtrl, 0, wxALIGN_CENTER_VERTICAL);
+    gridSizer->AddSpacer(0);
+    gridSizer->AddSpacer(0);
+
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("authMethod") + ":"), 0, wxALIGN_CENTER_VERTICAL);
     wxString authChoices[] = { TranslationHelper::Tr("password"), TranslationHelper::Tr("key") };
     m_authChoice = new wxChoice(formPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, 2, authChoices);
     m_authChoice->SetSelection(0);
@@ -58,13 +71,13 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     gridSizer->AddSpacer(0);
     gridSizer->AddSpacer(0);
 
-    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("passwordKey")), 0, wxALIGN_CENTER_VERTICAL);
+    gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("passwordKey") + ":"), 0, wxALIGN_CENTER_VERTICAL);
     wxBoxSizer* passwordSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_passwordCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
-    passwordSizer->Add(m_passwordCtrl, 1, wxEXPAND);
-    m_keyTextCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD | wxTE_MULTILINE | wxTE_DONTWRAP);
+    m_passwordCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxSize(static_cast<int>(200 * dpiScale), -1), wxTE_PASSWORD);
+    passwordSizer->Add(m_passwordCtrl, 0, wxALIGN_CENTER_VERTICAL);
+    m_keyTextCtrl = new wxTextCtrl(formPanel, wxID_ANY, "", wxDefaultPosition, wxSize(static_cast<int>(200 * dpiScale), -1), wxTE_PASSWORD | wxTE_MULTILINE | wxTE_DONTWRAP);
     m_keyTextCtrl->Hide();
-    passwordSizer->Add(m_keyTextCtrl, 1, wxEXPAND);
+    passwordSizer->Add(m_keyTextCtrl, 0, wxALIGN_CENTER_VERTICAL);
     m_keyBrowseButton = new wxButton(formPanel, wxID_ANY, TranslationHelper::Tr("browse"));
     m_keyBrowseButton->Hide();
     passwordSizer->Add(m_keyBrowseButton, 0, wxLEFT, 5);
@@ -73,7 +86,7 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     gridSizer->AddSpacer(0);
 
     gridSizer->AddGrowableCol(1, 1);
-    formSizer->Add(gridSizer, 1, wxEXPAND | wxALL, 10);
+    formSizer->Add(gridSizer, 1, wxEXPAND | wxALL, 12);
 
     wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
     buttonSizer->Add(new wxButton(formPanel, wxID_SAVE, TranslationHelper::Tr("save")), 0, wxALL, 5);
@@ -87,9 +100,9 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     formSizer->Add(buttonSizer, 0, wxALIGN_RIGHT | wxALL, 10);
 
     formPanel->SetSizer(formSizer);
-    mainSizer->Add(formPanel, 2, wxEXPAND | wxALL, 5);
+    mainSizer->Add(formPanel, 1, wxEXPAND | wxALL, 12);
 
-    SetSizerAndFit(mainSizer);
+    SetSizer(mainSizer);
     Centre();
 
     LoadConfig();
@@ -101,6 +114,7 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnCancel, this, wxID_CANCEL);
     Bind(wxEVT_CHOICE, &ConnectionDialog::OnAuthMethodChanged, this, m_authChoice->GetId());
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnKeyBrowse, this, m_keyBrowseButton->GetId());
+    Bind(wxEVT_SIZE, &ConnectionDialog::OnSize, this);
 }
 
 void ConnectionDialog::LoadConfig() {
@@ -328,6 +342,29 @@ void ConnectionDialog::UpdatePasswordFieldVisibility() {
     m_passwordCtrl->Show(!isKeyAuth);
     m_keyTextCtrl->Show(isKeyAuth);
     m_keyBrowseButton->Show(isKeyAuth);
+    Layout();
+}
+
+void ConnectionDialog::OnSize(wxSizeEvent& event) {
+    event.Skip();
+    // Force tree control to recalculate its best size and layout to adapt to new width during dragging
+    if (m_treeCtrl) {
+        m_treeCtrl->InvalidateBestSize();
+        m_treeCtrl->Layout();
+        m_treeCtrl->Refresh();
+        
+#ifdef __WXMSW__
+        // On Windows, force the tree control column to expand to fill the available width
+        wxSize treeSize = m_treeCtrl->GetSize();
+        if (treeSize.GetWidth() > 0) {
+            HWND hwndTree = (HWND)m_treeCtrl->GetHandle();
+            if (hwndTree) {
+                // Send TVM_SETCOLUMNWIDTH message to set the column width (TV_FIRST + 35 = 0x1127)
+                ::SendMessage(hwndTree, 0x1127, 0, treeSize.GetWidth() - 20);
+            }
+        }
+#endif
+    }
     Layout();
 }
 

@@ -19,10 +19,10 @@ msgstr ""
 
 # FileTransferDialog
 msgid "localDirectory"
-msgstr "本地目录: "
+msgstr "本地目录"
 
 msgid "remoteDirectory"
-msgstr "远程目录: "
+msgstr "远程目录"
 
 msgid "name"
 msgstr "名称"
@@ -53,25 +53,25 @@ msgstr "结果"
 
 # ConnectionDialog
 msgid "deviceName"
-msgstr "设备名称:"
+msgstr "设备名称"
 
 msgid "username"
-msgstr "登录名:"
+msgstr "登录名"
 
 msgid "hostAddress"
-msgstr "设备地址:"
+msgstr "设备地址"
 
 msgid "port"
 msgstr "端口"
 
 msgid "deviceGroup"
-msgstr "设备分组:"
+msgstr "设备分组"
 
 msgid "authMethod"
-msgstr "认证方式:"
+msgstr "认证方式"
 
 msgid "passwordKey"
-msgstr "密码/密钥:"
+msgstr "密码/密钥"
 
 msgid "browse"
 msgstr "浏览..."
@@ -99,6 +99,12 @@ msgstr "读取密钥文件失败"
 
 msgid "keyContentCannotBeEmpty"
 msgstr "密钥内容不能为空"
+
+msgid "loginNameCannotBeEmpty"
+msgstr "登录名不能为空"
+
+msgid "hostAddressCannotBeEmpty"
+msgstr "设备地址不能为空"
 
 msgid "invalidKeyFormat"
 msgstr "无效的密钥格式，请确保粘贴的是私钥（包含 -----BEGIN 和 -----END）"
@@ -179,10 +185,10 @@ msgid "masterPasswordConfig"
 msgstr "系统主密码配置"
 
 msgid "enterPassword"
-msgstr "输入密码:"
+msgstr "输入密码"
 
 msgid "confirmPassword"
-msgstr "确认密码:"
+msgstr "确认密码"
 
 msgid "set"
 msgstr "设置"
