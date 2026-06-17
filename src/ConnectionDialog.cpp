@@ -191,15 +191,46 @@ void ConnectionDialog::OnTreeSelectionChanged(wxTreeEvent& event) {
 }
 
 void ConnectionDialog::OnSave(wxCommandEvent& event) {
-    m_currentDevice.name = m_nameCtrl->GetValue().ToStdString();
-    m_currentDevice.username = m_usernameCtrl->GetValue().ToStdString();
-    m_currentDevice.address = m_addressCtrl->GetValue().ToStdString();
-    m_currentDevice.port = m_portCtrl->GetValue().ToStdString();
-    if (m_currentDevice.port.empty()) {
-        m_currentDevice.port = "22";
+    wxString username = m_usernameCtrl->GetValue().Trim(true).Trim(false);
+    wxString address = m_addressCtrl->GetValue().Trim(true).Trim(false);
+    wxString port = m_portCtrl->GetValue().Trim(true).Trim(false);
+
+    if (port.IsEmpty()) {
+        port = "22";
+        m_portCtrl->SetValue(port);
     }
-    m_currentDevice.group = m_groupCtrl->GetValue().ToStdString();
+
+    if (username.IsEmpty()) {
+        wxMessageBox(TranslationHelper::Tr("loginNameCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+        return;
+    }
+
+    if (address.IsEmpty()) {
+        wxMessageBox(TranslationHelper::Tr("hostAddressCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+        return;
+    }
+
     m_currentDevice.auth_method = m_authChoice->GetStringSelection() == TranslationHelper::Tr("password") ? "password" : "key";
+
+    if (m_currentDevice.auth_method == "key") {
+        wxString keyContent = m_keyTextCtrl->GetValue().Trim(true).Trim(false);
+        if (keyContent.IsEmpty()) {
+            wxMessageBox(TranslationHelper::Tr("keyContentCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+            return;
+        }
+    }
+
+    wxString name = m_nameCtrl->GetValue().Trim(true).Trim(false);
+    if (name.IsEmpty()) {
+        name = username + "@" + address;
+        m_nameCtrl->SetValue(name);
+    }
+
+    m_currentDevice.name = name.ToStdString();
+    m_currentDevice.username = username.ToStdString();
+    m_currentDevice.address = address.ToStdString();
+    m_currentDevice.port = port.ToStdString();
+    m_currentDevice.group = m_groupCtrl->GetValue().ToStdString();
 
     // Save password or key content based on auth method
     if (m_currentDevice.auth_method == "password") {

@@ -127,13 +127,46 @@ AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
 }
 
 void AddDeviceDialog::OnSave(wxCommandEvent& event) {
-    m_deviceConfig.name = m_nameCtrl->GetValue().ToStdString();
-    m_deviceConfig.username = m_usernameCtrl->GetValue().ToStdString();
-    m_deviceConfig.address = m_addressCtrl->GetValue().ToStdString();
-    m_deviceConfig.port = m_portCtrl->GetValue().ToStdString();
+    wxString username = m_usernameCtrl->GetValue().Trim(true).Trim(false);
+    wxString address = m_addressCtrl->GetValue().Trim(true).Trim(false);
+    wxString port = m_portCtrl->GetValue().Trim(true).Trim(false);
+
+    if (port.IsEmpty()) {
+        port = "22";
+        m_portCtrl->SetValue(port);
+    }
+
+    if (username.IsEmpty()) {
+        wxMessageBox(TranslationHelper::Tr("loginNameCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+        return;
+    }
+
+    if (address.IsEmpty()) {
+        wxMessageBox(TranslationHelper::Tr("hostAddressCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+        return;
+    }
+
+    int authSelection = m_authChoice->GetSelection();
+    if (authSelection == 1) {
+        wxString keyContent = m_keyTextCtrl->GetValue().Trim(true).Trim(false);
+        if (keyContent.IsEmpty()) {
+            wxMessageBox(TranslationHelper::Tr("keyContentCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
+            return;
+        }
+    }
+
+    wxString name = m_nameCtrl->GetValue().Trim(true).Trim(false);
+    if (name.IsEmpty()) {
+        name = username + "@" + address;
+        m_nameCtrl->SetValue(name);
+    }
+
+    m_deviceConfig.name = name.ToStdString();
+    m_deviceConfig.username = username.ToStdString();
+    m_deviceConfig.address = address.ToStdString();
+    m_deviceConfig.port = port.ToStdString();
     m_deviceConfig.group = m_groupCtrl->GetValue().ToStdString();
     
-    int authSelection = m_authChoice->GetSelection();
     if (authSelection == 0) {
         m_deviceConfig.auth_method = "password";
         m_deviceConfig.password = m_passwordCtrl->GetValue().ToStdString();
