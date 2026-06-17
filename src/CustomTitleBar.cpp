@@ -123,55 +123,43 @@ void CustomTitleBar::UpdateMaxTabContainerWidth() {
     m_maxTabContainerWidth = totalWidth - titleWidth - newTabWidth - rightButtonsWidth - 20;
 }
 
-int CustomTitleBar::CalcMaxVisibleTabs() const {
-    int totalWidth = GetClientSize().GetWidth();
-    int titleWidth = m_titleText->GetSize().GetWidth() + 40;
-
-    // Get actual button sizes (they are DPI-scaled now)
-    int newTabWidth = m_newTabButton->GetSize().GetWidth();
-    int drawerWidth = m_drawerButton->GetSize().GetWidth();
-    int minBtnWidth = m_minimizeButton->GetSize().GetWidth();
-    int maxBtnWidth = m_maximizeButton->GetSize().GetWidth();
-    int closeBtnWidth = m_closeButton->GetSize().GetWidth();
-
-    int buttonGap = 5;
-    int rightButtonsWidth = drawerWidth + minBtnWidth + maxBtnWidth + closeBtnWidth + buttonGap * 4;
-
-    // Each tab has 3px margin on all sides (6px total per tab)
-    int tabMargin = 6;
-    int totalTabs = (int)m_tabs.size();
-    if (totalTabs == 0) return 0;
-
-    // Calculate tab width dynamically based on available space
-    int availWidth = totalWidth - titleWidth - newTabWidth - rightButtonsWidth - 20;
-    int tabWidth = (availWidth - tabMargin * totalTabs) / totalTabs;
-
-    // Set minimum and maximum tab width
-    int minTabWidth = 120;
-    int maxTabWidth = 200;
-#ifdef __APPLE__
-    minTabWidth /= 2;
-    maxTabWidth /= 2;
-#endif
-    tabWidth = std::max(minTabWidth, std::min(maxTabWidth, tabWidth));
-
-    if (tabWidth <= 0) return 0;
-
-    // Calculate max visible tabs based on available space
-    int maxVisible = availWidth / (tabWidth + tabMargin);
-
-    return std::max(1, maxVisible);
-}
-
 void CustomTitleBar::LayoutTabs() {
     if (m_tabs.empty()) return;
 
-    int maxVisible = CalcMaxVisibleTabs();
-    int totalTabs = (int)m_tabs.size();
+    UpdateMaxTabContainerWidth();
+    int availWidth = m_maxTabContainerWidth;
 
+    // Minimum tab width
+    int minTabWidth = 80;
+#ifdef __APPLE__
+    minTabWidth /= 2;
+#endif
+
+    int tabMargin = 6; // 3px left + 3px right margin on each tab sizer item
+    
+    std::vector<int> preferredWidths;
+    for (auto tab : m_tabs) {
+        preferredWidths.push_back(tab->GetPreferredWidth());
+    }
+
+    // Determine how many tabs can be visible based on minimum tab width
+    int maxVisible = 0;
+    int currentWidthSum = 0;
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        int minRequired = minTabWidth + tabMargin;
+        if (currentWidthSum + minRequired <= availWidth) {
+            currentWidthSum += minRequired;
+            maxVisible = i + 1;
+        } else {
+            break;
+        }
+    }
+    if (maxVisible == 0) maxVisible = 1; // Ensure at least 1 tab is visible
+
+    int totalTabs = (int)m_tabs.size();
     m_overflowIndices.clear();
 
-    // Determine which tabs overflow
+    // Show/hide tabs based on visibility
     for (int i = 0; i < totalTabs; ++i) {
         bool visible = (i < maxVisible);
         m_tabs[i]->Show(visible);
@@ -180,6 +168,43 @@ void CustomTitleBar::LayoutTabs() {
         }
     }
 
+    // Now, calculate the actual widths for visible tabs
+    int visibleRequiredWidth = 0;
+    for (int i = 0; i < maxVisible; ++i) {
+        visibleRequiredWidth += preferredWidths[i] + tabMargin;
+    }
+
+    if (visibleRequiredWidth <= availWidth) {
+        // There is enough space! Draw each visible tab at its ideal preferred width
+        for (int i = 0; i < maxVisible; ++i) {
+            int tabWidth = preferredWidths[i];
+            m_tabs[i]->SetMinSize(wxSize(tabWidth, m_tabs[i]->GetMinSize().GetHeight()));
+            m_tabs[i]->SetSize(wxSize(tabWidth, m_tabs[i]->GetSize().GetHeight()));
+        }
+    } else {
+        // Not enough space to draw all visible tabs at preferred widths.
+        // Shrink them proportionally down to minTabWidth!
+        int totalMinRequired = minTabWidth * maxVisible + tabMargin * maxVisible;
+        int remainingSpace = availWidth - totalMinRequired;
+        if (remainingSpace < 0) remainingSpace = 0;
+
+        int totalPreferredSlack = 0;
+        for (int i = 0; i < maxVisible; ++i) {
+            totalPreferredSlack += (preferredWidths[i] - minTabWidth);
+        }
+
+        float scale = (totalPreferredSlack > 0) ? (float)remainingSpace / totalPreferredSlack : 0.0f;
+        if (scale > 1.0f) scale = 1.0f;
+
+        for (int i = 0; i < maxVisible; ++i) {
+            int tabWidth = minTabWidth + static_cast<int>((preferredWidths[i] - minTabWidth) * scale);
+            m_tabs[i]->SetMinSize(wxSize(tabWidth, m_tabs[i]->GetMinSize().GetHeight()));
+            m_tabs[i]->SetSize(wxSize(tabWidth, m_tabs[i]->GetSize().GetHeight()));
+        }
+    }
+
+    // Force layout update on the container
+    m_tabContainer->Layout();
     Layout();
 }
 
@@ -187,108 +212,10 @@ ConnectInfo* CustomTitleBar::GetLastTab() {
     return m_tabs.empty() ? nullptr : m_tabs.back();
 }
 
-int CustomTitleBar::CalculateTabWidth() const {
-    int totalWidth = GetClientSize().GetWidth();
-    int titleWidth = m_titleText->GetSize().GetWidth() + 40;
-
-    // Get actual button sizes (they are DPI-scaled now)
-    int newTabWidth = m_newTabButton->GetSize().GetWidth();
-    int drawerWidth = m_drawerButton->GetSize().GetWidth();
-    int minBtnWidth = m_minimizeButton->GetSize().GetWidth();
-    int maxBtnWidth = m_maximizeButton->GetSize().GetWidth();
-    int closeBtnWidth = m_closeButton->GetSize().GetWidth();
-
-    int buttonGap = 5;
-    int rightButtonsWidth = drawerWidth + minBtnWidth + maxBtnWidth + closeBtnWidth + buttonGap * 4;
-    int availWidth = totalWidth - titleWidth - newTabWidth - rightButtonsWidth - 20;
-
-    // Each tab has 3px margin on all sides (6px total per tab)
-    int tabMargin = 6;
-    int totalTabs = (int)m_tabs.size();
-    if (totalTabs == 0) {
-#ifdef __APPLE__
-        return 60;
-#else
-        return 120;
-#endif
-    }
-
-    // Calculate tab width based on title content
-    wxClientDC dc(const_cast<CustomTitleBar*>(this));
-    int maxTextWidth = 0;
-    for (const auto& tab : m_tabs) {
-        wxSize textSize = dc.GetTextExtent(tab->GetLabel());
-        maxTextWidth = std::max(maxTextWidth, textSize.GetWidth());
-    }
-
-    // Add padding for close button and margins
-    int tabWidth = maxTextWidth + 30; // 30px padding for close button and margins
-
-    // Set minimum and maximum tab width
-    int minTabWidth = 80;
-    int maxTabWidth = 200;
-#ifdef __APPLE__
-    minTabWidth /= 2;
-    maxTabWidth /= 2;
-#endif
-    tabWidth = std::max(minTabWidth, std::min(maxTabWidth, tabWidth));
-
-    // Ensure total tabs fit in available space
-    int totalRequiredWidth = tabWidth * totalTabs + tabMargin * totalTabs;
-    if (totalRequiredWidth > availWidth && totalTabs > 0) {
-        tabWidth = (availWidth - tabMargin * totalTabs) / totalTabs;
-        tabWidth = std::max(minTabWidth, tabWidth);
-    }
-
-    return tabWidth;
-}
-
 ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal) {
     m_notebook->AddPage(contentPanel, label, true);
     ConnectInfo* newTab = new ConnectInfo(this, label, contentPanel, deviceConfig, showCloseButton, isLocalTerminal);
     m_tabs.push_back(newTab);
-
-    // Calculate individual tab width based on its own label
-    wxClientDC dc(this);
-    wxSize textSize = dc.GetTextExtent(label);
-    int tabWidth = textSize.GetWidth() + 30; // 30px padding for close button and margins
-
-    newTab->SetMinSize(wxSize(tabWidth, newTab->GetMinSize().GetHeight()));
-    newTab->SetSize(wxSize(tabWidth, newTab->GetSize().GetHeight()));
-
-    int tabMargin = 6;
-
-    // Calculate current width of all tabs in container
-    int currentTabsWidth = 0;
-    for (size_t i = 0; i < m_tabContainer->GetItemCount(); ++i) {
-        wxWindow* item = m_tabContainer->GetItem(i)->GetWindow();
-        if (item) {
-            currentTabsWidth += item->GetSize().GetWidth() + tabMargin;
-        }
-    }
-
-    // Calculate total width with new tab
-    int totalTabsWidth = currentTabsWidth + tabWidth + tabMargin;
-
-    // If overflow, replace last tab in container
-    if (totalTabsWidth > m_maxTabContainerWidth && m_tabContainer->GetItemCount() > 0) {
-        // Get last tab in container
-        size_t lastIdx = m_tabContainer->GetItemCount() - 1;
-        wxSizerItem* lastItem = m_tabContainer->GetItem(lastIdx);
-        wxWindow* lastTabWindow = lastItem->GetWindow();
-
-        // Find corresponding ConnectInfo in m_tabs
-        for (size_t i = 0; i < m_tabs.size(); ++i) {
-            if (m_tabs[i] == lastTabWindow) {
-                // Add to overflow list
-                m_overflowIndices.push_back(i);
-                // Remove from container
-                m_tabContainer->Remove(lastIdx);
-                lastTabWindow->Hide();
-                break;
-            }
-        }
-    }
 
     m_tabContainer->Add(newTab, 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 3);
 
@@ -297,9 +224,8 @@ ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPane
     // 高亮新添加的tab
     newTab->SetActive(true);
 
-    // Force layout update
-    m_tabContainer->Layout();
-    Layout();
+    // Automatically trigger layout and overflow detection
+    LayoutTabs();
     Refresh();
 
     return newTab;

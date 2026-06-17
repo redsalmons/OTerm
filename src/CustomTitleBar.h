@@ -39,8 +39,6 @@ private:
     void OnTabSelected(wxCommandEvent& event);
 
     void LayoutTabs();
-    int CalcMaxVisibleTabs() const;
-    int CalculateTabWidth() const;
     void UpdateMaxTabContainerWidth();
 
     wxPoint m_delta;

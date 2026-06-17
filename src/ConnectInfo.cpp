@@ -63,14 +63,22 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     m_closeButton->Show(showCloseButton);
 
     wxBoxSizer* h_sizer = new wxBoxSizer(wxHORIZONTAL);
+    int slant = 10;
+    int padding = 12; // Adequate padding to stay away from slanted borders
     if (!showCloseButton) {
-        // Homepage tab: add left/right stretch spacers to center label horizontally
+        // Homepage tab: left padding, stretch spacer, label, stretch spacer, right padding
+        h_sizer->AddSpacer(slant + padding);
         h_sizer->AddStretchSpacer(1);
         h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL);
         h_sizer->AddStretchSpacer(1);
+        h_sizer->AddSpacer(slant + padding);
     } else {
-        h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
-        h_sizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
+        // Left padding, label, stretch spacer, close button, right padding
+        h_sizer->AddSpacer(slant + padding);
+        h_sizer->Add(m_label, 0, wxALIGN_CENTER_VERTICAL);
+        h_sizer->AddStretchSpacer(1); // Spacer in between label and close button
+        h_sizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL);
+        h_sizer->AddSpacer(slant + padding);
     }
 
     wxBoxSizer* v_sizer = new wxBoxSizer(wxVERTICAL);
@@ -424,6 +432,34 @@ wxWindow* ConnectInfo::GetContentPanel() const {
 
 DeviceConfig ConnectInfo::GetDeviceConfig() const {
     return m_deviceConfig;
+}
+
+int ConnectInfo::GetPreferredWidth() const {
+    double dpiScale = 1.0;
+    if (GetHandle()) {
+        dpiScale = GetDPIScaleFactor();
+    }
+    if (dpiScale <= 0.0) dpiScale = 1.0;
+
+    wxClientDC dc(const_cast<ConnectInfo*>(this));
+    wxSize textSize = dc.GetTextExtent(m_label->GetLabel());
+    
+    int slant = 10;
+    int padding = 12;
+
+    if (m_closeButton && m_closeButton->IsShown()) {
+        int baseCloseButtonSize = 20;
+#ifdef __APPLE__
+        int scaledCloseButtonSize = baseCloseButtonSize;
+#else
+        int scaledCloseButtonSize = static_cast<int>(baseCloseButtonSize * dpiScale);
+#endif
+        // Left slant + Left padding + text + middle spacing (e.g. 15px minimum) + close btn + Right padding + Right slant
+        return slant + padding + textSize.GetWidth() + 15 + scaledCloseButtonSize + padding + slant;
+    } else {
+        // No close button (e.g. Home tab)
+        return slant + padding + textSize.GetWidth() + padding + slant;
+    }
 }
 
 void ConnectInfo::OnPaint(wxPaintEvent& event)

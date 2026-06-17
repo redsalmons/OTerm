@@ -24,6 +24,7 @@ public:
     DeviceConfig GetDeviceConfig() const;
     TermGLCanvas* GetCanvas() const { return m_termCanvas; }
     wxString GetLabel() const { return m_label->GetLabel(); }
+    int GetPreferredWidth() const;
 
     void Connect();
     TerminalThread* GetTerminalThread() const { return m_terminalThread; }
