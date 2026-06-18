@@ -505,14 +505,6 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
                 cell_buffer_[row][col].attrs = attrs;
                 cell_buffer_[row][col].width = cell.width;
                 cell_buffer_[row][col].dirty = true;
-                
-                // Debug output for first few cells (commented out to reduce noise)
-                // if (row == 0 && col < 5) {
-                //     std::cout << "CELL[" << row << "," << col << "]: char='" 
-                //               << (char)(char_code < 128 ? char_code : '?') 
-                //               << "' fg=0x" << std::hex << fg_color 
-                //               << " bg=0x" << bg_color << " attrs=0x" << attrs << std::dec << std::endl;
-                // }
             }
         }
     }

@@ -277,8 +277,6 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
 void TermGLCanvas::Render() {
     if (!m_glInitialized) return;
     
-    auto t0 = std::chrono::steady_clock::now();
-    
     // 【强制上下文绑定】：不加这行，多窗口或初始化时上传的纹理在 Render 里就是隐形的！
     m_glContext->SetCurrent(*this);
     
@@ -363,6 +361,15 @@ void TermGLCanvas::Render() {
     
     // 2. 绘制前景色文字 (带纹理映射)
     if (m_fontAtlas) {
+        // Pre-warm all characters into atlas BEFORE glBegin, because AddCharToAtlas calls
+        // glTexSubImage2D which must NOT be called inside a glBegin/glEnd block.
+        for (const auto& cell : m_screen_cells) {
+            if (cell.char_code == 0) continue;
+            if (cell.char_code < 32 && cell.char_code != '\t') continue;
+            char32_t render_char = (cell.char_code == '\t') ? ' ' : cell.char_code;
+            m_fontAtlas->GetCharMetrics(render_char);
+        }
+
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_TEXTURE_2D);
@@ -393,7 +400,6 @@ void TermGLCanvas::Render() {
             char32_t render_char = (cell.char_code == '\t') ? ' ' : cell.char_code;
             CharMetrics metrics = m_fontAtlas->GetCharMetrics(render_char);
             if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) {
-                // Log missing characters (especially Chinese)
                 if (cell.char_code > 127) {
                     SSH_LOG("Character not found in font atlas: 0x" << std::hex << cell.char_code << std::dec);
                 }
@@ -441,12 +447,6 @@ void TermGLCanvas::Render() {
     }
     
     SwapBuffers();
-    
-    auto t1 = std::chrono::steady_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-    if (ms > 5) {
-        SSH_LOG("PROFILE: TermGLCanvas::Render took " << ms << "ms");
-    }
 }
 
 void TermGLCanvas::OnPaint(wxPaintEvent& event) {
@@ -820,7 +820,6 @@ void TermGLCanvas::HideIMEInputBox() {
 }
 
 void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
-    // SSH_LOG("TermGLCanvas::OnProxyTextReceived called");
     if (m_imeInputBox && m_imeCallback) {
         wxString content = m_imeInputBox->GetValue();
         if (content.IsEmpty()) return;

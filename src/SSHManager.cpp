@@ -194,7 +194,6 @@ void SSHManager::continue_ssh_connection() {
 
 bool SSHManager::send_data(const char* data, int length) {
     if (!is_ready()) {
-        // Silently fail during handshake - don't log errors
         return false;
     }
     
