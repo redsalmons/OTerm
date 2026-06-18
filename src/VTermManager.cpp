@@ -288,6 +288,10 @@ int VTermManager::vterm_damage_callback(VTermRect rect, void *user) {
 int VTermManager::vterm_movecursor_callback(VTermPos pos, VTermPos oldpos, int visible, void *user) {
     VTermManager* manager = static_cast<VTermManager*>(user);
     manager->last_cursor_pos_ = pos;
+    if (manager->damage_callback_) {
+        VTermRect empty_rect = {0, 0, 0, 0};
+        manager->damage_callback_(empty_rect, manager->cell_buffer_);
+    }
     return 1;
 }
 

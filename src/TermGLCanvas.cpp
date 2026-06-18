@@ -514,10 +514,10 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                 sequence = "\x1b[B";
                 break;
             case WXK_RIGHT:
-                sequence = "\x1b[C";
+                sequence = "\x1bOC";
                 break;
             case WXK_LEFT:
-                sequence = "\x1b[D";
+                sequence = "\x1bOD";
                 break;
             case WXK_BACK:
                 sequence = "\x7f"; // Backspace
@@ -873,10 +873,10 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
                 key_seq = "\x1b[B";
                 break;
             case WXK_LEFT:
-                key_seq = "\x1b[D";
+                key_seq = "\x1bOD";
                 break;
             case WXK_RIGHT:
-                key_seq = "\x1b[C";
+                key_seq = "\x1bOC";
                 break;
             case WXK_HOME:
                 if (event.ControlDown()) {
