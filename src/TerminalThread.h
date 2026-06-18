@@ -6,6 +6,7 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
 #include "SSHManager.h"
 #include "VTermManager.h"
 #include "ScreenBuffer.h"
@@ -139,6 +140,9 @@ private:
     // State
     bool m_has_damage;
     VTermRect m_damage_rect;
+    std::chrono::steady_clock::time_point m_last_ui_update;
+    bool m_heavy_streaming;
+    int m_consecutive_updates;
 
     // Pending input buffer for interactive login prompts
     std::string m_pending_input;

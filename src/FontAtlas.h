@@ -46,6 +46,8 @@ private:
     wxFont m_font;
     
     std::unordered_map<char32_t, CharMetrics> m_charMetrics;
+    CharMetrics m_asciiMetrics[128];
+    bool m_asciiMetricsCached[128];
     std::vector<std::pair<int, int>> m_freeSpaces; // Available spaces in atlas
     int m_currentTime; // Global timestamp for LRU
 };

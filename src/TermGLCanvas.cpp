@@ -5,6 +5,7 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <chrono>
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
 #else
@@ -23,6 +24,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_glContext(nullptr),
       m_fontAtlas(nullptr),
       m_testTextureID(0),
+      m_rows_count(0), m_cols_count(0),
       m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_scroll_offset(0),
       m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f),
       m_selecting(false), m_selection_start_row(0), m_selection_start_col(0),
@@ -189,10 +191,12 @@ void TermGLCanvas::InitializeFontMetrics() {
 }
 
 void TermGLCanvas::UpdateScreenData(const std::vector<CellInstance>& instances) {
-    // Accumulate cell updates
-    for (const auto& cell : instances) {
-        std::pair<int, int> key = {(int)cell.cell_x, (int)cell.cell_y};
-        m_screen_cells[key] = cell;
+    m_screen_cells = instances;
+    m_rows_count = 0;
+    m_cols_count = 0;
+    for (const auto& cell : m_screen_cells) {
+        if ((int)cell.cell_y + 1 > m_rows_count) m_rows_count = (int)cell.cell_y + 1;
+        if ((int)cell.cell_x + 1 > m_cols_count) m_cols_count = (int)cell.cell_x + 1;
     }
     
     // Trigger refresh
@@ -201,6 +205,8 @@ void TermGLCanvas::UpdateScreenData(const std::vector<CellInstance>& instances) 
 
 void TermGLCanvas::ClearScreenData() {
     m_screen_cells.clear();
+    m_rows_count = 0;
+    m_cols_count = 0;
 }
 
 void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int vterm_scroll_offset) {
@@ -271,6 +277,8 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
 void TermGLCanvas::Render() {
     if (!m_glInitialized) return;
     
+    auto t0 = std::chrono::steady_clock::now();
+    
     // 【强制上下文绑定】：不加这行，多窗口或初始化时上传的纹理在 Render 里就是隐形的！
     m_glContext->SetCurrent(*this);
     
@@ -295,7 +303,8 @@ void TermGLCanvas::Render() {
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
     
-    for (const auto& [key, cell] : m_screen_cells) {
+    glBegin(GL_QUADS);
+    for (const auto& cell : m_screen_cells) {
         // Skip continuation cells (char_code = 0 for wide character continuation)
         if (cell.char_code == 0) continue;
 
@@ -317,13 +326,12 @@ void TermGLCanvas::Render() {
         uint8_t bg_b = (cell.bg_color >> 16) & 0xFF;
 
         glColor3f(bg_r / 255.0f, bg_g / 255.0f, bg_b / 255.0f);
-        glBegin(GL_QUADS);
-            glVertex2f(x, y);
-            glVertex2f(x + render_width, y);
-            glVertex2f(x + render_width, y + cell_height);
-            glVertex2f(x, y + cell_height);
-        glEnd();
+        glVertex2f(x, y);
+        glVertex2f(x + render_width, y);
+        glVertex2f(x + render_width, y + cell_height);
+        glVertex2f(x, y + cell_height);
     }
+    glEnd();
     
     // 1.5 绘制选择高亮
     if (m_selecting || (m_selection_start_row != m_selection_end_row || m_selection_start_col != m_selection_end_col)) {
@@ -361,7 +369,8 @@ void TermGLCanvas::Render() {
         glBindTexture(GL_TEXTURE_2D, m_fontAtlas->GetTextureID());
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
         
-        for (const auto& [key, cell] : m_screen_cells) {
+        glBegin(GL_QUADS);
+        for (const auto& cell : m_screen_cells) {
             // Skip continuation cells (char_code = 0 for wide character continuation)
             if (cell.char_code == 0) continue;
             // Skip control chars except tab
@@ -406,14 +415,12 @@ void TermGLCanvas::Render() {
             // Apply bearingX offset so left padding in atlas maps to correct screen position.
             // For tab, use 0 so the space glyph fills the widened tab area evenly (centered).
             float x_offset = (cell.char_code == '\t') ? 0.0f : metrics.bearingX;
-            glBegin(GL_QUADS);
-                glTexCoord2f(test_u1, test_v1); glVertex2f(x + x_offset, y);
-                glTexCoord2f(test_u2, test_v1); glVertex2f(x + render_width, y);
-                glTexCoord2f(test_u2, test_v2); glVertex2f(x + render_width, y + cell_height);
-                glTexCoord2f(test_u1, test_v2); glVertex2f(x + x_offset, y + cell_height);
-            glEnd();
+            glTexCoord2f(test_u1, test_v1); glVertex2f(x + x_offset, y);
+            glTexCoord2f(test_u2, test_v1); glVertex2f(x + render_width, y);
+            glTexCoord2f(test_u2, test_v2); glVertex2f(x + render_width, y + cell_height);
+            glTexCoord2f(test_u1, test_v2); glVertex2f(x + x_offset, y + cell_height);
         }
-        
+        glEnd();
         
         glDisable(GL_TEXTURE_2D);
         glDisable(GL_BLEND);
@@ -434,6 +441,12 @@ void TermGLCanvas::Render() {
     }
     
     SwapBuffers();
+    
+    auto t1 = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    if (ms > 5) {
+        SSH_LOG("PROFILE: TermGLCanvas::Render took " << ms << "ms");
+    }
 }
 
 void TermGLCanvas::OnPaint(wxPaintEvent& event) {
@@ -675,10 +688,19 @@ void TermGLCanvas::CopySelectionToClipboard() {
     
     for (int row = start_row; row <= end_row; row++) {
         for (int col = start_col; col <= end_col; col++) {
-            std::pair<int, int> key = {col, row};
-            auto it = m_screen_cells.find(key);
-            if (it != m_screen_cells.end()) {
-                char32_t charCode = it->second.char_code;
+            int index = row * m_cols_count + col;
+            bool found = false;
+            char32_t charCode = ' ';
+            
+            if (index >= 0 && index < (int)m_screen_cells.size()) {
+                const auto& cell = m_screen_cells[index];
+                if ((int)cell.cell_x == col && (int)cell.cell_y == row) {
+                    charCode = cell.char_code;
+                    found = true;
+                }
+            }
+            
+            if (found) {
                 if (charCode < 32) {
                     selected_text += ' ';
                 } else if (charCode < 128) {

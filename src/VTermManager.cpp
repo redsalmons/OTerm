@@ -571,10 +571,11 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
     // Create a new history line
     HistoryLine history_line;
     history_line.timestamp = time(nullptr);
+    history_line.cells.resize(cols);
     
     // Convert VTermScreenCell to TerminalCell format
     for (int col = 0; col < cols; col++) {
-        TerminalCell terminal_cell;
+        TerminalCell& terminal_cell = history_line.cells[col];
         
         if (cells[col].chars[0] != 0) {
             terminal_cell.char_code = cells[col].chars[0];
@@ -613,8 +614,6 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
         
         terminal_cell.attrs = attrs;
         terminal_cell.dirty = false; // History lines don't need dirty tracking
-        
-        history_line.cells.push_back(terminal_cell);
     }
     
     // Add to history buffer
@@ -622,7 +621,7 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
     
     // Maintain maximum history size (10000 lines)
     if (scroll_history_.size() > MAX_HISTORY_LINES) {
-        scroll_history_.erase(scroll_history_.begin());
+        scroll_history_.pop_front();
     }
 }
 
@@ -652,7 +651,7 @@ void VTermManager::save_top_row_to_history() {
     
     // Maintain maximum history size
     if (scroll_history_.size() > MAX_HISTORY_LINES) {
-        scroll_history_.erase(scroll_history_.begin());
+        scroll_history_.pop_front();
     }
 }
 
@@ -682,7 +681,7 @@ void VTermManager::save_row_to_history(int row_index) {
     
     // Maintain maximum history size
     if (scroll_history_.size() > MAX_HISTORY_LINES) {
-        scroll_history_.erase(scroll_history_.begin());
+        scroll_history_.pop_front();
     }
 }
 

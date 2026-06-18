@@ -3,6 +3,7 @@
 
 #include <vterm.h>
 #include <vector>
+#include <deque>
 #include <string>
 #include <functional>
 #include <ctime>
@@ -78,7 +79,7 @@ public:
     void add_line_to_history(const VTermScreenCell* cells, int cols);
     void save_top_row_to_history();
     void save_row_to_history(int row_index);
-    const std::vector<HistoryLine>& get_scroll_history() const { return scroll_history_; }
+    const std::deque<HistoryLine>& get_scroll_history() const { return scroll_history_; }
     void clear_scroll_history();
     
     // Screen access methods for scrolling
@@ -135,7 +136,7 @@ private:
     std::vector<std::vector<TerminalCell>> cell_buffer_;
     
     // Scroll history buffer (max 10000 lines)
-    std::vector<HistoryLine> scroll_history_;
+    std::deque<HistoryLine> scroll_history_;
     static const int MAX_HISTORY_LINES = 10000;
     
     // Output tracking for auto-scroll

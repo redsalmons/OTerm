@@ -56,7 +56,9 @@ public:
     FontAtlas* m_fontAtlas;
     GLuint m_testTextureID;
 
-    std::map<std::pair<int, int>, CellInstance> m_screen_cells;
+    std::vector<CellInstance> m_screen_cells;
+    int m_rows_count;
+    int m_cols_count;
     int m_cursor_row;
     int m_cursor_col;
     bool m_cursor_visible;

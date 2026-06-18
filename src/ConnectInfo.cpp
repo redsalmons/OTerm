@@ -8,6 +8,7 @@
 #include "GlobalConfig.h"
 #include <wx/display.h>
 #include <nlohmann/json.hpp>
+#include <chrono>
 
 wxDEFINE_EVENT(wxEVT_TAB_CLOSE, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_TAB_SELECTED, wxCommandEvent);
@@ -298,7 +299,7 @@ void ConnectInfo::Connect() {
 }
 
 void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
-    // SSH_LOG("OnTerminalDamage called");
+    auto t0 = std::chrono::steady_clock::now();
 
     // Get the appropriate thread based on terminal type
     const ScreenBuffer* buffer = nullptr;
@@ -351,7 +352,12 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
     }
     
     m_termCanvas->Refresh();
-    // SSH_LOG("OnTerminalDamage: Refresh called");
+    
+    auto t1 = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    if (ms > 5) {
+        SSH_LOG("PROFILE: ConnectInfo::OnTerminalDamage took " << ms << "ms");
+    }
 }
 
 void ConnectInfo::OnTerminalExit(wxThreadEvent& event) {

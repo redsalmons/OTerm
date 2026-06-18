@@ -19,6 +19,9 @@ FontAtlas::FontAtlas()
     , m_fontSize(0)
     , m_charHeight(0)
     , m_currentTime(0) {
+    for (int i = 0; i < 128; ++i) {
+        m_asciiMetricsCached[i] = false;
+    }
 }
 
 FontAtlas::~FontAtlas() {
@@ -341,17 +344,33 @@ void FontAtlas::UpdateTexture(int x, int y, int width, int height, unsigned char
 }
 
 CharMetrics FontAtlas::GetCharMetrics(char32_t charCode) {
+    if (charCode < 128) {
+        if (m_asciiMetricsCached[charCode]) {
+            return m_asciiMetrics[charCode];
+        }
+    }
+
     auto it = m_charMetrics.find(charCode);
     if (it != m_charMetrics.end()) {
         it->second.last_used = m_currentTime++;
-        return it->second;
+        CharMetrics metrics = it->second;
+        if (charCode < 128) {
+            m_asciiMetrics[charCode] = metrics;
+            m_asciiMetricsCached[charCode] = true;
+        }
+        return metrics;
     }
     
     // Character not found, try to add it dynamically
     if (AddCharToAtlas(charCode)) {
         it = m_charMetrics.find(charCode);
         if (it != m_charMetrics.end()) {
-            return it->second;
+            CharMetrics metrics = it->second;
+            if (charCode < 128) {
+                m_asciiMetrics[charCode] = metrics;
+                m_asciiMetricsCached[charCode] = true;
+            }
+            return metrics;
         }
     }
     

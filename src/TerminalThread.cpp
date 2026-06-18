@@ -13,10 +13,13 @@ TerminalThread::TerminalThread(wxEvtHandler* ui_handler, int rows, int cols, con
       m_cols(cols),
       m_has_damage(false),
       m_shutting_down(false),
-      m_resize_pending(false) {
+      m_resize_pending(false),
+      m_heavy_streaming(false),
+      m_consecutive_updates(0) {
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
     m_damage_rect = {0, 0, 0, 0};
+    m_last_ui_update = std::chrono::steady_clock::now();
 }
 
 TerminalThread::~TerminalThread() {
@@ -244,37 +247,60 @@ wxThread::ExitCode TerminalThread::Entry() {
             }
         }
         
-        // Check if we have damage to report
-        if (m_has_damage) {
-            // Copy full screen from VTerm cell buffer to back buffer once
-            int vterm_rows = m_vtermManager.get_rows();
-            for (int row = 0; row < vterm_rows; ++row) {
-                const auto& row_cells = m_vtermManager.get_screen_row(row);
-                for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
-                    const auto& cell = row_cells[col];
-                    CellInstance& inst = m_back_buffer.cells[row][col];
-                    inst.cell_x = (float)col;
-                    inst.cell_y = (float)row;
-                    inst.uv_u = 0;
-                    inst.uv_v = 0;
-                    inst.uv_w = 0;
-                    inst.uv_h = 0;
-                    inst.fg_color = cell.fg_color;
-                    inst.bg_color = cell.bg_color;
-                    inst.char_code = cell.char_code;
-                    inst.width = cell.width;
-                }
+        // Stream state detection: enter heavy streaming if we receive data consecutively
+        if (had_data) {
+            m_consecutive_updates++;
+            if (m_consecutive_updates >= 5) {
+                m_heavy_streaming = true;
             }
-            VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
-            m_back_buffer.cursor_row = cursor_pos.row;
-            m_back_buffer.cursor_col = cursor_pos.col;
-            m_damage_rect = {0, 0, vterm_rows, m_cols};
-            m_has_damage = false;
-            swap_buffers();
-            send_damage_event();
+        } else {
+            m_consecutive_updates = 0;
+            m_heavy_streaming = false; // Immediately exit heavy streaming when idle
         }
         
-        // Only sleep when no data was processed to avoid unnecessary delay
+        // Check if we have damage to report
+        if (m_has_damage) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_ui_update).count();
+            
+            // Dynamic refresh rate based on stream speed:
+            // 1. Heavy streaming: Throttle to ~150ms (Approx 6 FPS) so scrolling is super lightweight
+            // 2. Regular / typing: Throttle to ~16ms (60 FPS) for smooth interactive input
+            // 3. Just went idle (!had_data): Render immediately with 0ms delay for the final frame
+            int throttle_ms = m_heavy_streaming ? 150 : 16;
+            
+            if (!had_data || elapsed >= throttle_ms) {
+                // Copy full screen from VTerm cell buffer to back buffer once
+                int vterm_rows = m_vtermManager.get_rows();
+                for (int row = 0; row < vterm_rows; ++row) {
+                    const auto& row_cells = m_vtermManager.get_screen_row(row);
+                    for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
+                        const auto& cell = row_cells[col];
+                        CellInstance& inst = m_back_buffer.cells[row][col];
+                        inst.cell_x = (float)col;
+                        inst.cell_y = (float)row;
+                        inst.uv_u = 0;
+                        inst.uv_v = 0;
+                        inst.uv_w = 0;
+                        inst.uv_h = 0;
+                        inst.fg_color = cell.fg_color;
+                        inst.bg_color = cell.bg_color;
+                        inst.char_code = cell.char_code;
+                        inst.width = cell.width;
+                    }
+                }
+                VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
+                m_back_buffer.cursor_row = cursor_pos.row;
+                m_back_buffer.cursor_col = cursor_pos.col;
+                m_damage_rect = {0, 0, vterm_rows, m_cols};
+                m_has_damage = false;
+                swap_buffers();
+                send_damage_event();
+                m_last_ui_update = now;
+            }
+        }
+        
+        // Only sleep when no data was processed to avoid CPU spinning
         if (!had_data) {
             wxMilliSleep(1);
         }
@@ -299,12 +325,30 @@ bool TerminalThread::process_ssh_data_queue() {
         if (m_ssh_data_queue.empty()) return false;
         batch.swap(m_ssh_data_queue);
     }
+    
+    auto t0 = std::chrono::steady_clock::now();
+    size_t batch_bytes = 0;
     // Write all batched data to vterm without flushing damage in between
     for (const auto& chunk : batch) {
+        batch_bytes += chunk.size();
         m_vtermManager.write_input_no_flush(chunk.c_str(), chunk.size());
     }
     // Flush damage once after all data is written
     m_vtermManager.flush_damage();
+    
+    auto t1 = std::chrono::steady_clock::now();
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    
+    static size_t total_bytes = 0;
+    static auto last_log = std::chrono::steady_clock::now();
+    total_bytes += batch_bytes;
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(t1 - last_log).count();
+    if (elapsed >= 1) {
+        SSH_LOG("THROUGHPUT: " << (total_bytes / 1024) << " KB/s, batch processed: " << batch_bytes << " bytes, vterm write took: " << us << "us");
+        total_bytes = 0;
+        last_log = t1;
+    }
+    
     return true;
 }
 
