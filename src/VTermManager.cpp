@@ -1,6 +1,7 @@
 #include "VTermManager.h"
 #include "SSHManager.h"
 #include <cstring>
+#include <chrono>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -73,6 +74,17 @@ bool VTermManager::initialize(int rows, int cols) {
     return true;
 }
 
+int VTermManager::write_input_no_flush(const char* data, int length) {
+    if (!vt_ || !data || length <= 0) return -1;
+    return vterm_input_write(vt_, data, length);
+}
+
+void VTermManager::flush_damage() {
+    if (vts_) {
+        vterm_screen_flush_damage(vts_);
+    }
+}
+
 int VTermManager::write_input(const char* data, int length) {
     if (!vt_) {
         return -1;
@@ -130,11 +142,7 @@ int VTermManager::write_input(const char* data, int length) {
         escape_buffer_ = escape_buffer_.substr(escape_buffer_.length() - 100);
     }
 
-    SSH_LOG("VTermManager::write_input: length=" << length << ", content=" << std::hex << (int)(unsigned char)data[0] << " " << (int)(unsigned char)data[1] << " " << (int)(unsigned char)data[2] << std::dec);
-
     int result = vterm_input_write(vt_, data, length);
-
-    SSH_LOG("VTermManager::write_input: vterm_input_write result=" << result);
 
     // Ensure proper data synchronization by flushing damage
     if (vts_) {
@@ -375,11 +383,8 @@ int VTermManager::vterm_sb_pushline_callback(int cols, const VTermScreenCell *ce
     
     // Check if we're in alternate screen mode or entering it - if so, don't add to history
     if (manager->in_alternate_screen_ || manager->entering_alternate_screen_) {
-        SSH_LOG("vterm_sb_pushline_callback: skipped (in_alternate_screen_=" << manager->in_alternate_screen_ << ", entering_alternate_screen_=" << manager->entering_alternate_screen_ << ")");
         return 1; // Return success but don't add to history
     }
-    
-    SSH_LOG("vterm_sb_pushline_callback: adding line to history, in_alternate_screen_=" << manager->in_alternate_screen_ << ", cols=" << cols);
     
     // Add to history with error handling
     try {
@@ -403,6 +408,12 @@ int VTermManager::vterm_sb_pushline_callback(int cols, const VTermScreenCell *ce
 void VTermManager::update_cell_buffer(VTermRect rect) {
     // Mark that we have new output for auto-scroll
     has_new_output_ = true;
+
+    // Obtain VTerm state once outside the loop to avoid repeated calls
+    VTermState* state = vterm_obtain_state(vt_);
+    if (!state) return;
+    VTermColor def_fg, def_bg;
+    vterm_state_get_default_colors(state, &def_fg, &def_bg);
     
     // Update cells in the damaged region
     for (int row = rect.start_row; row < rect.end_row && row < rows_; row++) {
@@ -434,20 +445,6 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             // Extract colors using VTerm's actual color structure
             uint32_t fg_color = 0xffffffff; // Default white
             uint32_t bg_color = 0x00000000; // Default black
-            
-            // Debug: Print basic color info (commented out to reduce noise)
-            // if (row == 0 && col < 5) {
-            //     std::cout << "VTERM CELL DEBUG: attrs=" << (int)cell.attrs.bold 
-            //               << " fg_ptr=" << (void*)&cell.fg 
-            //               << " bg_ptr=" << (void*)&cell.bg << std::dec << std::endl;
-            // }
-            
-            // Proper VTermColor extraction to get real terminal colors
-            VTermState* state = vterm_obtain_state(vt_);
-            
-            // Get terminal default colors
-            VTermColor def_fg, def_bg;
-            vterm_state_get_default_colors(state, &def_fg, &def_bg);
             
             // Convert foreground color from VTermColor to RGB (ABGR format for ImGui)
             VTermColor vt_fg = cell.fg;

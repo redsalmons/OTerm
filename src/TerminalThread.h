@@ -64,6 +64,9 @@ public:
     // Thread-safe input queue for user keystrokes
     void QueueInput(const std::string& input);
     
+    // Queue SSH received data (called from libuv callback)
+    void QueueSshData(const char* data, int length);
+    
     // Get front buffer (read-only for UI thread)
     const ScreenBuffer* GetFrontBuffer() const { return &m_front_buffer; }
     
@@ -92,6 +95,7 @@ protected:
 private:
     void setup_callbacks();
     void process_input_queue();
+    bool process_ssh_data_queue();
     void swap_buffers();
     void send_damage_event(bool cursor_visible = true);
     void cleanup();
@@ -106,6 +110,10 @@ private:
     std::queue<std::string> m_input_queue;
     std::mutex m_input_mutex;
     std::condition_variable m_input_cv;
+
+    // SSH received data queue (written by libuv thread, read by main loop)
+    std::vector<std::string> m_ssh_data_queue;
+    std::mutex m_ssh_data_mutex;
     
     // Resize request (thread-safe)
     std::pair<int, int> m_resize_request;

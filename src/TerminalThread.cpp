@@ -159,8 +159,11 @@ wxThread::ExitCode TerminalThread::Entry() {
     
     // Main loop
     while (!TestDestroy()) {
-        // Run libuv event loop once
-        uv_run(&m_loop, UV_RUN_ONCE);
+        // Run libuv event loop - non-blocking, returns immediately if no events
+        uv_run(&m_loop, UV_RUN_NOWAIT);
+        
+        // Batch process all queued SSH data, flush damage only once
+        bool had_data = process_ssh_data_queue();
         
         // Process input queue
         process_input_queue();
@@ -243,13 +246,38 @@ wxThread::ExitCode TerminalThread::Entry() {
         
         // Check if we have damage to report
         if (m_has_damage) {
+            // Copy full screen from VTerm cell buffer to back buffer once
+            int vterm_rows = m_vtermManager.get_rows();
+            for (int row = 0; row < vterm_rows; ++row) {
+                const auto& row_cells = m_vtermManager.get_screen_row(row);
+                for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
+                    const auto& cell = row_cells[col];
+                    CellInstance& inst = m_back_buffer.cells[row][col];
+                    inst.cell_x = (float)col;
+                    inst.cell_y = (float)row;
+                    inst.uv_u = 0;
+                    inst.uv_v = 0;
+                    inst.uv_w = 0;
+                    inst.uv_h = 0;
+                    inst.fg_color = cell.fg_color;
+                    inst.bg_color = cell.bg_color;
+                    inst.char_code = cell.char_code;
+                    inst.width = cell.width;
+                }
+            }
+            VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
+            m_back_buffer.cursor_row = cursor_pos.row;
+            m_back_buffer.cursor_col = cursor_pos.col;
+            m_damage_rect = {0, 0, vterm_rows, m_cols};
+            m_has_damage = false;
             swap_buffers();
             send_damage_event();
-            m_has_damage = false;
         }
         
-        // Small sleep to prevent CPU spinning
-        wxMilliSleep(1);
+        // Only sleep when no data was processed to avoid unnecessary delay
+        if (!had_data) {
+            wxMilliSleep(1);
+        }
     }
     
     // Cleanup
@@ -259,15 +287,36 @@ wxThread::ExitCode TerminalThread::Entry() {
     return (ExitCode)0;
 }
 
+void TerminalThread::QueueSshData(const char* data, int length) {
+    std::lock_guard<std::mutex> lock(m_ssh_data_mutex);
+    m_ssh_data_queue.emplace_back(data, length);
+}
+
+bool TerminalThread::process_ssh_data_queue() {
+    std::vector<std::string> batch;
+    {
+        std::lock_guard<std::mutex> lock(m_ssh_data_mutex);
+        if (m_ssh_data_queue.empty()) return false;
+        batch.swap(m_ssh_data_queue);
+    }
+    // Write all batched data to vterm without flushing damage in between
+    for (const auto& chunk : batch) {
+        m_vtermManager.write_input_no_flush(chunk.c_str(), chunk.size());
+    }
+    // Flush damage once after all data is written
+    m_vtermManager.flush_damage();
+    return true;
+}
+
 void TerminalThread::setup_callbacks() {
-    // SSH data callback -> feed to VTerm
+    // SSH data callback -> queue data for batch processing in main loop
     m_sshManager.set_data_callback([this](const char* data, int length) {
-        m_vtermManager.write_input(data, length);
+        QueueSshData(data, length);
     });
     
-    // SSH status callback -> feed to VTerm (login prompts, auth messages)
+    // SSH status callback -> queue data for batch processing in main loop
     m_sshManager.set_status_callback([this](const char* data, int length) {
-        m_vtermManager.write_input(data, length);
+        QueueSshData(data, length);
     });
 
     // SSH resize callback -> send terminal size to SSH
@@ -279,35 +328,8 @@ void TerminalThread::setup_callbacks() {
         }
     });
     
-    // VTerm damage callback -> update back buffer
+    // VTerm damage callback -> just mark dirty, actual copy is done once in main loop
     m_vtermManager.set_damage_callback([this](VTermRect rect, const std::vector<std::vector<VTermManager::TerminalCell>>& cells) {
-        // 使用 get_screen_row 获取每一行数据（支持从历史记录读取）
-        // Use current VTerm rows instead of m_rows to avoid reading out of bounds during resize
-        int vterm_rows = m_vtermManager.get_rows();
-        for (int row = 0; row < vterm_rows; ++row) {
-            const auto& row_cells = m_vtermManager.get_screen_row(row);
-            for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
-                const auto& cell = row_cells[col];
-                CellInstance& inst = m_back_buffer.cells[row][col];
-                inst.cell_x = (float)col;
-                inst.cell_y = (float)row;
-                inst.uv_u = 0;
-                inst.uv_v = 0;
-                inst.uv_w = 0;
-                inst.uv_h = 0;
-                inst.fg_color = cell.fg_color;
-                inst.bg_color = cell.bg_color;
-                inst.char_code = cell.char_code;
-                inst.width = cell.width;
-            }
-        }
-        // Update cursor position from VTerm AFTER screen content
-        VTermPos cursor_pos = m_vtermManager.get_cursor_pos();
-        m_back_buffer.cursor_row = cursor_pos.row;
-        m_back_buffer.cursor_col = cursor_pos.col;
-        
-        // Store damage rect for partial refresh
-        m_damage_rect = rect;
         m_has_damage = true;
     });
     

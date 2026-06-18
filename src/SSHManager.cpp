@@ -503,20 +503,30 @@ void SSHManager::request_shell() {
 void SSHManager::process_ssh_data() {
     if (!ssh_channel_) return;
 
-    char buffer[8192];
-    int rc = libssh2_channel_read(ssh_channel_, buffer, sizeof(buffer));
+    char buffer[65536];
+    // Loop until EAGAIN to drain all available data from the channel
+    while (true) {
+        int rc = libssh2_channel_read(ssh_channel_, buffer, sizeof(buffer));
 
-    if (rc > 0) {
-        if (data_callback_) {
-            data_callback_(buffer, rc);
+        if (rc > 0) {
+            if (data_callback_) {
+                data_callback_(buffer, rc);
+            }
+        } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+            // No more data available right now
+            break;
+        } else if (rc == 0) {
+            SSH_LOG("SSH channel closed");
+            break;
+        } else {
+            SSH_ERR("Channel read error: " << rc);
+            break;
         }
-        SSH_LOG("Read " << rc << " bytes from SSH channel");
-    } else if (rc == LIBSSH2_ERROR_EAGAIN) {
-        // No data available, will be called again on next poll event
-    } else if (rc < 0) {
-        SSH_ERR("Channel read error: " << rc);
-    } else {
-        SSH_LOG("Channel closed (rc=0)");
+    }
+
+    // Check for EOF
+    if (libssh2_channel_eof(ssh_channel_)) {
+        SSH_LOG("SSH channel EOF detected");
     }
 }
 

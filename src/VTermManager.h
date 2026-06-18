@@ -44,6 +44,12 @@ public:
     // Write data to VTerm input (from SSH)
     int write_input(const char* data, int length);
     
+    // Write data without flushing damage (for batch processing)
+    int write_input_no_flush(const char* data, int length);
+    
+    // Flush pending damage (call once after batch write_input_no_flush)
+    void flush_damage();
+    
     // Get terminal dimensions
     void get_size(int& rows, int& cols) const { rows = rows_; cols = cols_; }
     
