@@ -7,6 +7,8 @@
 #include <vector>
 #include "DeviceConfig.h"
 
+wxDECLARE_EVENT(wxEVT_DEVICE_LIST_UPDATE, wxCommandEvent);
+
 class DeviceTreeItemData : public wxTreeItemData {
 public:
     DeviceTreeItemData(size_t index) : m_index(index) {}

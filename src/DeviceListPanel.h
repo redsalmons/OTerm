@@ -10,7 +10,7 @@ wxDECLARE_EVENT(wxEVT_DEVICE_DELETE_REQUEST, wxCommandEvent);
 
 class DeviceRowPanel : public wxPanel {
 public:
-    DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, float dpiScale);
+    DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, int index, float dpiScale);
     const std::string& GetDeviceId() const { return m_deviceId; }
 
 private:
@@ -25,14 +25,14 @@ class DeviceListPanel : public wxPanel {
 public:
     DeviceListPanel(wxWindow* parent);
     void DeleteDeviceById(const std::string& deviceId);
+    void LoadDevices();
+    void RefreshDeviceList(const std::string& filter = "");
 
 private:
     void OnSearch(wxCommandEvent& event);
     void OnAddDevice(wxCommandEvent& event);
     void OnSearchFocus(wxFocusEvent& event);
     void OnSearchKillFocus(wxFocusEvent& event);
-    void LoadDevices();
-    void RefreshDeviceList(const std::string& filter = "");
 
     wxTextCtrl* m_searchCtrl;
     wxButton* m_addButton;

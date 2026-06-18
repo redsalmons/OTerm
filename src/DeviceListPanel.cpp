@@ -9,15 +9,15 @@
 wxDEFINE_EVENT(wxEVT_DEVICE_OPEN_REQUEST, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_DEVICE_DELETE_REQUEST, wxCommandEvent);
 
-DeviceRowPanel::DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, float dpiScale)
+DeviceRowPanel::DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, int index, float dpiScale)
     : wxPanel(parent, wxID_ANY), m_deviceId(deviceId), m_device(device) {
 
     SetBackgroundColour(wxColour(20, 20, 20));
 
     wxBoxSizer* rowSizer = new wxBoxSizer(wxHORIZONTAL);
 
-    // Index (display only, not used for operations)
-    wxStaticText* indexText = new wxStaticText(this, wxID_ANY, "#");
+    // Index (sequential number)
+    wxStaticText* indexText = new wxStaticText(this, wxID_ANY, wxString::Format("%d", index));
     indexText->SetForegroundColour(wxColour(255, 255, 255));
     indexText->SetMinSize(wxSize(static_cast<int>(30 * dpiScale), -1));
     rowSizer->Add(indexText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
@@ -299,6 +299,7 @@ void DeviceListPanel::RefreshDeviceList(const std::string& filter) {
                 m_contentPanel,
                 filteredDevices[i],
                 filteredDevices[i].id,
+                static_cast<int>(i + 1),
                 m_dpiScale
             );
             contentSizer->Add(rowPanel, 0, wxEXPAND | wxALL, 2);

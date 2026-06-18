@@ -202,6 +202,7 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_SIZE(AppWindow::OnSize)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_OPEN_REQUEST, AppWindow::OnDeviceOpenRequest)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_DELETE_REQUEST, AppWindow::OnDeviceDeleteRequest)
+    EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_LIST_UPDATE, AppWindow::OnDeviceListUpdate)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
@@ -338,6 +339,20 @@ void AppWindow::OnDeviceDeleteRequest(wxCommandEvent& event) {
         }
     } else {
         SSH_LOG("Device not found with id: " << deviceIdStr);
+    }
+}
+
+void AppWindow::OnDeviceListUpdate(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnDeviceListUpdate called - refreshing device list");
+    // Find the DeviceListPanel and refresh it
+    for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+        wxWindow* page = m_notebook->GetPage(i);
+        DeviceListPanel* deviceListPanel = dynamic_cast<DeviceListPanel*>(page);
+        if (deviceListPanel) {
+            deviceListPanel->LoadDevices();
+            deviceListPanel->RefreshDeviceList();
+            break;
+        }
     }
 }
 

@@ -9,6 +9,8 @@
 #include <commctrl.h>
 #endif
 
+wxDEFINE_EVENT(wxEVT_DEVICE_LIST_UPDATE, wxCommandEvent);
+
 ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect)
     : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize) {
 
@@ -273,6 +275,13 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
 
     SaveConfig();
     RebuildTree();
+
+    // Send event to notify parent window to refresh device list
+    wxCommandEvent updateEvent(wxEVT_DEVICE_LIST_UPDATE);
+    wxWindow* parent = GetParent();
+    if (parent) {
+        parent->GetEventHandler()->ProcessEvent(updateEvent);
+    }
 
     // Close dialog with save result
     EndModal(wxID_SAVE);

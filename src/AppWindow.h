@@ -31,6 +31,7 @@ private:
     void OnSize(wxSizeEvent& event);
     void OnDeviceOpenRequest(wxCommandEvent& event);
     void OnDeviceDeleteRequest(wxCommandEvent& event);
+    void OnDeviceListUpdate(wxCommandEvent& event);
     
     void CreateDashboardTab();
     void CreateTerminalTab(const DeviceConfig& device);
