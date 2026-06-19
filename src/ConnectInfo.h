@@ -25,6 +25,7 @@ public:
     TermGLCanvas* GetCanvas() const { return m_termCanvas; }
     wxString GetLabel() const { return m_label->GetLabel(); }
     int GetPreferredWidth() const;
+    int GetCachedWidth() const { return m_cachedWidth; }
 
     void Connect();
     TerminalThread* GetTerminalThread() const { return m_terminalThread; }
@@ -63,4 +64,5 @@ private:
     FileTransferThread* m_fileTransferThread; // File transfer thread
     int m_prevRows;
     int m_prevCols;
+    mutable int m_cachedWidth;
 };

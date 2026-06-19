@@ -16,7 +16,7 @@ wxDEFINE_EVENT(wxEVT_TAB_SELECTED, wxCommandEvent);
 ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal)
     : wxPanel(parent, wxID_ANY), m_contentPanel(contentPanel), m_deviceConfig(deviceConfig),
       m_isActive(false), m_isHovered(false), m_isLocalTerminal(isLocalTerminal), m_terminalThread(nullptr), m_localTerminalThread(nullptr), m_termCanvas(nullptr),
-      m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr), m_prevRows(0), m_prevCols(0) {
+      m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr), m_prevRows(0), m_prevCols(0), m_cachedWidth(0) {
     // Calculate DPI scale
     double dpiScale = 1.0;
     if (GetHandle()) {
@@ -461,11 +461,12 @@ int ConnectInfo::GetPreferredWidth() const {
         int scaledCloseButtonSize = static_cast<int>(baseCloseButtonSize * dpiScale);
 #endif
         // Left slant + Left padding + text + middle spacing (e.g. 15px minimum) + close btn + Right padding + Right slant
-        return slant + padding + textSize.GetWidth() + 15 + scaledCloseButtonSize + padding + slant;
+        m_cachedWidth = slant + padding + textSize.GetWidth() + 15 + scaledCloseButtonSize + padding + slant;
     } else {
         // No close button (e.g. Home tab)
-        return slant + padding + textSize.GetWidth() + padding + slant;
+        m_cachedWidth = slant + padding + textSize.GetWidth() + padding + slant;
     }
+    return m_cachedWidth;
 }
 
 void ConnectInfo::OnPaint(wxPaintEvent& event)

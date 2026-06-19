@@ -126,29 +126,58 @@ void CustomTitleBar::UpdateMaxTabContainerWidth() {
 void CustomTitleBar::LayoutTabs() {
     if (m_tabs.empty()) return;
 
+    // Resync sizer order to match m_tabs order (tabs may have been reordered)
+    // Detach all from sizer then re-add in m_tabs order
+    {
+        std::vector<ConnectInfo*> inSizer;
+        for (size_t i = 0; i < m_tabContainer->GetItemCount(); ++i) {
+            wxSizerItem* item = m_tabContainer->GetItem(i);
+            if (item && item->GetWindow()) {
+                inSizer.push_back(static_cast<ConnectInfo*>(item->GetWindow()));
+            }
+        }
+        // Check if order already matches
+        bool orderOk = (inSizer.size() == m_tabs.size());
+        for (size_t i = 0; orderOk && i < m_tabs.size(); ++i) {
+            if (inSizer[i] != m_tabs[i]) orderOk = false;
+        }
+        if (!orderOk) {
+            // Detach all, re-add in correct order
+            for (auto tab : inSizer) {
+                m_tabContainer->Detach(tab);
+            }
+            for (auto tab : m_tabs) {
+                m_tabContainer->Add(tab, 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 3);
+            }
+        }
+    }
+
     UpdateMaxTabContainerWidth();
     int availWidth = m_maxTabContainerWidth;
 
     // Minimum tab width
     int minTabWidth = 80;
-#ifdef __APPLE__
-    minTabWidth /= 2;
-#endif
 
     int tabMargin = 6; // 3px left + 3px right margin on each tab sizer item
     
+    // Refresh each tab's cached width, then accumulate to find how many fit
     std::vector<int> preferredWidths;
     for (auto tab : m_tabs) {
-        preferredWidths.push_back(tab->GetPreferredWidth());
+        preferredWidths.push_back(tab->GetPreferredWidth()); // also updates m_cachedWidth
     }
 
-    // Determine how many tabs can be visible based on minimum tab width
+    // Determine how many tabs can be visible:
+    // accumulate preferred widths; when adding the next tab would exceed availWidth
+    // (even at minTabWidth), that tab and everything after overflows.
     int maxVisible = 0;
     int currentWidthSum = 0;
     for (size_t i = 0; i < m_tabs.size(); ++i) {
-        int minRequired = minTabWidth + tabMargin;
-        if (currentWidthSum + minRequired <= availWidth) {
-            currentWidthSum += minRequired;
+        int w = preferredWidths[i] + tabMargin;
+        int minW = minTabWidth + tabMargin;
+        // Use the larger of preferred and min to avoid undercount
+        int needed = std::max(w, minW);
+        if (currentWidthSum + needed <= availWidth) {
+            currentWidthSum += needed;
             maxVisible = i + 1;
         } else {
             break;
@@ -215,8 +244,46 @@ ConnectInfo* CustomTitleBar::GetLastTab() {
 ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal) {
     m_notebook->AddPage(contentPanel, label, true);
     ConnectInfo* newTab = new ConnectInfo(this, label, contentPanel, deviceConfig, showCloseButton, isLocalTerminal);
-    m_tabs.push_back(newTab);
 
+    // Check if there is space for one more visible tab using accumulated preferred widths
+    UpdateMaxTabContainerWidth();
+    int availWidth = m_maxTabContainerWidth;
+    int tabMargin = 6;
+
+    // Sum up preferred widths of currently visible tabs
+    int usedWidth = 0;
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        bool isOverflow = std::find(m_overflowIndices.begin(), m_overflowIndices.end(), (int)i) != m_overflowIndices.end();
+        if (!isOverflow) {
+            int w = m_tabs[i]->GetCachedWidth();
+            if (w <= 0) w = m_tabs[i]->GetPreferredWidth();
+            usedWidth += w + tabMargin;
+        }
+    }
+    int newTabWidth = newTab->GetPreferredWidth();
+
+    if (usedWidth + newTabWidth + tabMargin <= availWidth) {
+        // Enough space: append new tab at the end
+        m_tabs.push_back(newTab);
+    } else {
+        // No space: insert new tab before the last visible tab so LayoutTabs
+        // will show it and push the last visible tab into overflow
+        int lastVisibleIdx = -1;
+        for (int i = (int)m_tabs.size() - 1; i >= 0; --i) {
+            bool isOverflow = std::find(m_overflowIndices.begin(), m_overflowIndices.end(), i) != m_overflowIndices.end();
+            if (!isOverflow) {
+                lastVisibleIdx = i;
+                break;
+            }
+        }
+        if (lastVisibleIdx != -1) {
+            m_tabs.insert(m_tabs.begin() + lastVisibleIdx, newTab);
+        } else {
+            m_tabs.push_back(newTab);
+        }
+    }
+
+    // Always add to sizer — LayoutTabs controls Show/Hide
     m_tabContainer->Add(newTab, 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 3);
 
     // 取消所有其他tab的高亮
@@ -224,7 +291,6 @@ ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPane
     // 高亮新添加的tab
     newTab->SetActive(true);
 
-    // Automatically trigger layout and overflow detection
     LayoutTabs();
     Refresh();
 
@@ -255,23 +321,28 @@ void CustomTitleBar::OnNewTabClicked(wxCommandEvent& event) {
 void CustomTitleBar::OnDrawerClicked(wxCommandEvent& event) {
     wxMenu menu;
     menu.Append(ID_SETTINGS, TranslationHelper::Tr("settings"));
-    menu.Append(ID_NEW_TERMINAL, TranslationHelper::Tr("deviceList"));
 
-    Bind(wxEVT_MENU, &CustomTitleBar::OnSettings, this, ID_SETTINGS);
-    Bind(wxEVT_MENU, &CustomTitleBar::OnNewTerminal, this, ID_NEW_TERMINAL);
+    // Build device list submenu: "Open device list" entry + hidden (overflow) tabs
+    wxMenu* deviceSubMenu = new wxMenu();
+    deviceSubMenu->Append(ID_NEW_TERMINAL, TranslationHelper::Tr("deviceList"));
 
-    // Add overflow tabs to menu
     if (!m_overflowIndices.empty()) {
-        menu.AppendSeparator();
+        deviceSubMenu->AppendSeparator();
         for (size_t i = 0; i < m_overflowIndices.size(); ++i) {
             int tabIdx = m_overflowIndices[i];
             int menuId = ID_OVERFLOW_TAB_BASE + tabIdx;
-            wxString tabLabel = m_tabs[tabIdx]->GetDeviceConfig().name;
+            wxString tabLabel = wxString::FromUTF8(m_tabs[tabIdx]->GetDeviceConfig().name.c_str());
             if (tabLabel.empty()) tabLabel = wxString::Format("Tab %d", tabIdx + 1);
-            menu.Append(menuId, tabLabel);
+            deviceSubMenu->Append(menuId, tabLabel);
             Bind(wxEVT_MENU, &CustomTitleBar::OnOverflowTabClicked, this, menuId);
         }
     }
+
+    // Attach the submenu to the drawer menu
+    menu.AppendSubMenu(deviceSubMenu, TranslationHelper::Tr("deviceList"));
+
+    Bind(wxEVT_MENU, &CustomTitleBar::OnSettings, this, ID_SETTINGS);
+    Bind(wxEVT_MENU, &CustomTitleBar::OnNewTerminal, this, ID_NEW_TERMINAL);
 
     PopupMenu(&menu);
 
@@ -287,56 +358,43 @@ void CustomTitleBar::OnOverflowTabClicked(wxCommandEvent& event) {
     int tabIdx = event.GetId() - ID_OVERFLOW_TAB_BASE;
     if (tabIdx < 0 || tabIdx >= (int)m_tabs.size()) return;
 
-    // Check if tab container has any tabs
-    if (m_tabContainer->GetItemCount() == 0) {
-        // No tabs in container, just add this one
-        m_tabContainer->Add(m_tabs[tabIdx], 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 3);
-        m_tabs[tabIdx]->Show();
-        m_tabs[tabIdx]->SetActive(true);
+    ConnectInfo* selectedTab = m_tabs[tabIdx];
 
-        // Remove from overflow list
-        auto it = std::find(m_overflowIndices.begin(), m_overflowIndices.end(), tabIdx);
-        if (it != m_overflowIndices.end()) {
-            m_overflowIndices.erase(it);
-        }
-
-        Layout();
-        return;
-    }
-
-    // Get last tab in container
-    size_t lastIdx = m_tabContainer->GetItemCount() - 1;
-    wxSizerItem* lastItem = m_tabContainer->GetItem(lastIdx);
-    wxWindow* lastTabWindow = lastItem->GetWindow();
-
-    // Find corresponding ConnectInfo in m_tabs
-    int lastTabIdx = -1;
-    for (size_t i = 0; i < m_tabs.size(); ++i) {
-        if (m_tabs[i] == lastTabWindow) {
-            lastTabIdx = i;
+    // Find the last currently visible tab index
+    int lastVisibleIdx = -1;
+    for (int i = (int)m_tabs.size() - 1; i >= 0; --i) {
+        bool isOverflow = std::find(m_overflowIndices.begin(), m_overflowIndices.end(), i) != m_overflowIndices.end();
+        if (!isOverflow) {
+            lastVisibleIdx = i;
             break;
         }
     }
 
-    if (lastTabIdx == -1) return;
+    // Move selected tab to the position of the last visible tab in m_tabs,
+    // so LayoutTabs will render it visible and push the old last visible tab to overflow
+    m_tabs.erase(m_tabs.begin() + tabIdx);
+    int insertAt = (lastVisibleIdx != -1) ? lastVisibleIdx : (int)m_tabs.size();
+    if (insertAt > (int)m_tabs.size()) insertAt = (int)m_tabs.size();
+    m_tabs.insert(m_tabs.begin() + insertAt, selectedTab);
 
-    // Remove last tab from container and add to overflow
-    m_tabContainer->Remove(lastIdx);
-    lastTabWindow->Hide();
-    m_overflowIndices.push_back(lastTabIdx);
+    // Activate selected tab and deactivate all others
+    for (auto t : m_tabs) t->SetActive(false);
+    selectedTab->SetActive(true);
 
-    // Add selected tab to container
-    m_tabContainer->Add(m_tabs[tabIdx], 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 3);
-    m_tabs[tabIdx]->Show();
-    m_tabs[tabIdx]->SetActive(true);
-
-    // Remove selected tab from overflow list
-    auto it = std::find(m_overflowIndices.begin(), m_overflowIndices.end(), tabIdx);
-    if (it != m_overflowIndices.end()) {
-        m_overflowIndices.erase(it);
+    // Switch notebook to the selected tab's content panel
+    int notebookIndex = m_notebook->FindPage(selectedTab->GetContentPanel());
+    if (notebookIndex != wxNOT_FOUND) {
+        m_notebook->SetSelection(notebookIndex);
     }
 
-    Layout();
+    // Show IME input box for new active tab
+    TermGLCanvas* canvas = selectedTab->GetCanvas();
+    if (canvas) {
+        canvas->ShowIMEInputBox();
+    }
+
+    LayoutTabs();
+    Refresh();
 }
 
 void CustomTitleBar::OnSettings(wxCommandEvent& event) {
