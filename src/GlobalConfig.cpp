@@ -36,8 +36,12 @@ std::string GlobalConfig::GetWorkspacePath() {
             workspaceDir.RemoveLastDir();
             s_workspacePath = workspaceDir.GetPath().ToStdString();
         }
+#elif defined(_WIN32)
+        // On Windows, use user data directory for installed applications
+        wxString userDataDir = stdPaths.GetUserDataDir();
+        s_workspacePath = userDataDir.ToStdString();
 #else
-        // Non-macOS platforms
+        // Other platforms (Linux), use executable directory
         wxString exePath = stdPaths.GetExecutablePath();
         wxFileName fn(exePath);
         wxFileName workspaceDir(fn.GetPath(), "");

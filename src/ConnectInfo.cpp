@@ -412,13 +412,27 @@ void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
 void ConnectInfo::OnFileTransferProgress(wxCommandEvent& event) {
     wxString json = event.GetString();
     SSH_LOG("File Transfer Progress: " << json);
-    // TODO: Update UI to show progress
+    
+    // Forward event to FileTransferDialog if it exists
+    if (m_fileTransferDialog) {
+        SSH_LOG("Forwarding progress event to FileTransferDialog");
+        wxQueueEvent(m_fileTransferDialog, event.Clone());
+    } else {
+        SSH_LOG("FileTransferDialog is null, cannot forward event");
+    }
 }
 
 void ConnectInfo::OnFileTransferComplete(wxCommandEvent& event) {
     wxString json = event.GetString();
     SSH_LOG("File Transfer Complete: " << json);
-    // TODO: Update UI to show completion
+    
+    // Forward event to FileTransferDialog if it exists
+    if (m_fileTransferDialog) {
+        SSH_LOG("Forwarding complete event to FileTransferDialog");
+        wxQueueEvent(m_fileTransferDialog, event.Clone());
+    } else {
+        SSH_LOG("FileTransferDialog is null, cannot forward event");
+    }
 }
 
 void ConnectInfo::UpdateVTermSize(int rows, int cols) {

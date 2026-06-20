@@ -162,6 +162,8 @@ public:
     void OnSSHCommandOutput(wxCommandEvent& event);
     void OnTimer(wxTimerEvent& event);
     void OnSize(wxSizeEvent& event);
+    void OnFileTransferProgress(wxCommandEvent& event);
+    void OnFileTransferComplete(wxCommandEvent& event);
 
 private:
     void CreateControls();

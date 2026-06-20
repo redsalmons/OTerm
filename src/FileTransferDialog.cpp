@@ -2,6 +2,7 @@
 #include "SSHFileThread.h"
 #include "SSHManager.h"
 #include "FileTransferTask.h"
+#include "FileTransferThread.h"
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
 #include <wx/dir.h>
@@ -18,11 +19,17 @@ wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_REQUEST, wxCommandEvent);
 
 FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, const DeviceConfig& deviceConfig)
     : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize,
-               wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER | wxDIALOG_NO_PARENT),
+               wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
       m_deviceConfig(deviceConfig), m_sshThread(nullptr), m_imageList(nullptr),
       m_localList(nullptr), m_remoteList(nullptr), m_taskList(nullptr), m_localPathLabel(nullptr),
       m_remotePathLabel(nullptr), m_remoteDropTarget(nullptr), m_localDropTarget(nullptr),
-      m_localCurrentPath(wxGetHomeDir()), m_remoteCurrentPath("~"), m_taskTimer(nullptr)
+      m_localCurrentPath(
+#ifdef _WIN32
+          wxEmptyString
+#else
+          wxGetHomeDir()
+#endif
+      ), m_remoteCurrentPath("~"), m_taskTimer(nullptr)
 {
     double dpiScale = GlobalConfig::GetDPIScaleFactor();
     int baseWidth = 834;
@@ -33,6 +40,8 @@ FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, 
     
     Bind(wxEVT_SSH_FILE_LIST, &FileTransferDialog::OnSSHFileList, this);
     Bind(wxEVT_SSH_COMMAND_OUTPUT, &FileTransferDialog::OnSSHCommandOutput, this);
+    Bind(wxEVT_FILE_TRANSFER_PROGRESS, &FileTransferDialog::OnFileTransferProgress, this);
+    Bind(wxEVT_FILE_TRANSFER_COMPLETE, &FileTransferDialog::OnFileTransferComplete, this);
     
     CreateImageList();
     CreateControls();
@@ -241,10 +250,40 @@ void FileTransferDialog::PopulateLocalList(const wxString& path) {
     }
     
     m_localList->DeleteAllItems();
+
+#ifdef _WIN32
+    if (path.IsEmpty()) {
+        // Show all drives
+        DWORD drives = GetLogicalDrives();
+        int itemIndex = 0;
+        for (int i = 0; i < 26; i++) {
+            if (drives & (1 << i)) {
+                wxString driveLabel = wxString::Format("%c:", 'A' + i);
+                long index = m_localList->InsertItem(itemIndex, driveLabel, ICON_FOLDER);
+                m_localList->SetItem(index, 1, "");
+                m_localList->SetItem(index, 2, "");
+                itemIndex++;
+            }
+        }
+        m_localPathLabel->SetLabel(TranslationHelper::Tr("localDirectory") + "Computer");
+        m_localCurrentPath = wxEmptyString;
+        return;
+    }
+#endif
     
     // Add parent directory entry
+    bool showParent = false;
     wxFileName fn(path);
     if (fn.GetDirCount() > 0) {
+        showParent = true;
+    }
+#ifdef _WIN32
+    // On Windows, show ".." for drive roots to go back to drive list
+    if (!path.IsEmpty() && path.Length() >= 2 && path[1] == ':') {
+        showParent = true;
+    }
+#endif
+    if (showParent) {
         long parentIndex = m_localList->InsertItem(0, "..", ICON_FOLDER);
         m_localList->SetItem(parentIndex, 1, "");
         m_localList->SetItem(parentIndex, 2, "");
@@ -374,26 +413,46 @@ void FileTransferDialog::CreateControls() {
             wxString newPath;
             if (name == "..") {
                 // Go to parent directory
-                wxFileName fn(m_localCurrentPath);
-                fn.RemoveLastDir();
-                newPath = fn.GetFullPath();
-                // Ensure path ends with separator for directories
-                if (!newPath.IsEmpty() && newPath.Last() != wxFileName::GetPathSeparator()) {
-                    newPath += wxFileName::GetPathSeparator();
-                }
-            } else {
-                // Go into subdirectory - use simple path concatenation
-                if (m_localCurrentPath.Last() == wxFileName::GetPathSeparator()) {
-                    newPath = m_localCurrentPath + name;
+#ifdef _WIN32
+                if (m_localCurrentPath.Length() == 3 && m_localCurrentPath[1] == ':') {
+                    // Drive root like C:\, go back to drive list
+                    newPath = wxEmptyString;
                 } else {
-                    newPath = m_localCurrentPath + wxFileName::GetPathSeparator() + name;
+#endif
+                    wxFileName fn(m_localCurrentPath);
+                    fn.RemoveLastDir();
+                    newPath = fn.GetFullPath();
+                    // Ensure path ends with separator for directories
+                    if (!newPath.IsEmpty() && newPath.Last() != wxFileName::GetPathSeparator()) {
+                        newPath += wxFileName::GetPathSeparator();
+                    }
+#ifdef _WIN32
                 }
-                newPath += wxFileName::GetPathSeparator();
+#endif
+            } else {
+                // Go into subdirectory / drive
+#ifdef _WIN32
+                if (m_localCurrentPath.IsEmpty()) {
+                    // Drive selection view
+                    newPath = name + wxFileName::GetPathSeparator();
+                } else {
+#endif
+                    // Go into subdirectory - use simple path concatenation
+                    if (m_localCurrentPath.Last() == wxFileName::GetPathSeparator()) {
+                        newPath = m_localCurrentPath + name;
+                    } else {
+                        newPath = m_localCurrentPath + wxFileName::GetPathSeparator() + name;
+                    }
+                    newPath += wxFileName::GetPathSeparator();
+#ifdef _WIN32
+                }
+#endif
             }
             
-            if (!newPath.IsEmpty()) {
+            if (newPath != m_localCurrentPath) {
                 m_localCurrentPath = newPath;
-                m_localPathLabel->SetLabel(TranslationHelper::Tr("localDirectory") + m_localCurrentPath);
+                wxString labelPath = m_localCurrentPath.IsEmpty() ? wxString("Computer") : m_localCurrentPath;
+                m_localPathLabel->SetLabel(TranslationHelper::Tr("localDirectory") + labelPath);
                 PopulateLocalList(m_localCurrentPath);
             }
         }
@@ -615,6 +674,40 @@ void FileTransferDialog::OnSize(wxSizeEvent& event) {
     AdjustFileListColumns();
 }
 
+void FileTransferDialog::OnFileTransferProgress(wxCommandEvent& event) {
+    wxString json = event.GetString();
+    SSH_LOG("File Transfer Progress: " << json);
+    
+    try {
+        nlohmann::json j = nlohmann::json::parse(json.ToStdString());
+        std::string taskId = j["id"];
+        int progress = j["progress"];
+        std::string status = j["status"];
+        
+        // Update task list in real-time
+        LoadAndDisplayTasks();
+    } catch (const std::exception& e) {
+        SSH_LOG("Failed to parse file transfer progress: " << e.what());
+    }
+}
+
+void FileTransferDialog::OnFileTransferComplete(wxCommandEvent& event) {
+    wxString json = event.GetString();
+    SSH_LOG("File Transfer Complete: " << json);
+    
+    try {
+        nlohmann::json j = nlohmann::json::parse(json.ToStdString());
+        std::string taskId = j["id"];
+        int progress = j["progress"];
+        std::string status = j["status"];
+        
+        // Update task list to show completion
+        LoadAndDisplayTasks();
+    } catch (const std::exception& e) {
+        SSH_LOG("Failed to parse file transfer complete: " << e.what());
+    }
+}
+
 void FileTransferDialog::LoadAndDisplayTasks() {
     if (!m_taskList) {
         return;
@@ -663,8 +756,20 @@ void FileTransferDialog::LoadAndDisplayTasks() {
             m_taskList->SetItem(index, 2, wxString::FromUTF8(task.remote.c_str()));
             m_taskList->SetItem(index, 3, FormatFileSize(task.size));
             m_taskList->SetItem(index, 4, wxString::Format("%d%%", task.progress));
-            m_taskList->SetItem(index, 5, TranslationHelper::Tr(wxString::FromUTF8(task.status.c_str())));
-            m_taskList->SetItem(index, 6, TranslationHelper::Tr(wxString::FromUTF8(task.result.c_str())));
+            
+            // Defensive: fallback for empty status
+            wxString statusText = wxString::FromUTF8(task.status.c_str());
+            if (statusText.IsEmpty()) {
+                statusText = "pending";
+                SSH_LOG("WARNING: Empty status for task " << task.id << ", defaulting to pending");
+            }
+            wxString resultText = wxString::FromUTF8(task.result.c_str());
+            if (resultText.IsEmpty() && task.status == "completed") {
+                resultText = "success";
+            }
+            
+            m_taskList->SetItem(index, 5, TranslationHelper::Tr(statusText));
+            m_taskList->SetItem(index, 6, TranslationHelper::Tr(resultText));
             
             // Set color based on status
             wxColour color;

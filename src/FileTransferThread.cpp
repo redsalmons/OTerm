@@ -465,10 +465,15 @@ void FileTransferThread::ProcessNextTask() {
         SSH_LOG("Download completed, success: " << success);
     }
     
-    // Update status to completed
-    std::string result = success ? "success" : "transferFailed";
-    UpdateTaskProgress(task.id, 100, "completed", result);
-    SendProgressEvent(task.id, 100, "completed");
+    // Update status to completed (but don't overwrite if already failed)
+    if (task.status != "failed") {
+        std::string result = success ? "success" : "transferFailed";
+        UpdateTaskProgress(task.id, success ? 100 : task.progress, success ? "completed" : "failed", result);
+        SendProgressEvent(task.id, success ? 100 : task.progress, success ? "completed" : "failed");
+    } else {
+        SSH_LOG("Task already marked as failed, preserving failed status");
+        SendProgressEvent(task.id, task.progress, "failed");
+    }
 }
 
 void FileTransferThread::SendProgressEvent(const std::string& taskId, int progress, const std::string& status) {
