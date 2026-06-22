@@ -8,6 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build-macos"
 APP_NAME="OceanTerm"
+APP_VERSION="1.0.2"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -60,7 +61,7 @@ fi
 
 # Create Info.plist
 echo "Creating Info.plist..."
-cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
+cat > "${CONTENTS_DIR}/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -74,9 +75,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundleDisplayName</key>
     <string>OceanTerm</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
@@ -190,7 +191,7 @@ codesign --force --deep --sign - "${APP_BUNDLE}" 2>/dev/null || true
 
 # Create DMG for distribution
 echo "Creating DMG for distribution..."
-DMG_NAME="OceanTerm-macos-$(uname -m)-v1.0.0.dmg"
+DMG_NAME="OceanTerm-macos-$(uname -m)-${APP_VERSION}.dmg"
 hdiutil create -volname "OceanTerm" -srcfolder "${APP_BUNDLE}" -ov -format UDZO "${BUILD_DIR}/${DMG_NAME}"
 
 echo ""
