@@ -27,8 +27,11 @@ private:
     bool m_running;
 
 #ifdef _WIN32
-    void* m_hPipe;
-    void* m_hProcess;
+    void* m_hConPTY;        // HPCON pseudo console handle
+    void* m_hInPipeWrite;   // App writes user keystrokes here (PTY stdin)
+    void* m_hOutPipeRead;   // App reads PTY output from here (PTY stdout/stderr)
+    void* m_hProcess;       // Shell process handle
+    void* m_hThread;       // Shell process main thread handle
 #endif
 };
 

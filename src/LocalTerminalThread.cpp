@@ -1,11 +1,22 @@
 #include "LocalTerminalThread.h"
 #include "TerminalThread.h"
 #include <cstring>
+#include <fstream>
+#include <iostream>
+#include <sstream>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <unistd.h>
 #endif
+
+static void LT_LOG(const std::string& msg) {
+    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    if (f.is_open()) {
+        f << "[LT-DEBUG] " << msg << std::endl;
+        f.flush();
+    }
+}
 
 LocalTerminalThread::LocalTerminalThread(wxEvtHandler* ui_handler, int rows, int cols, const std::string& shell)
     : wxThread(wxTHREAD_JOINABLE),
@@ -17,6 +28,7 @@ LocalTerminalThread::LocalTerminalThread(wxEvtHandler* ui_handler, int rows, int
       m_resize_pending(false),
       m_shutting_down(false),
       m_has_damage(false) {
+    LT_LOG("LocalTerminalThread constructor called");
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
     m_vtermManager.initialize(rows, cols);
@@ -33,13 +45,19 @@ LocalTerminalThread::~LocalTerminalThread() {
 }
 
 void LocalTerminalThread::Start() {
-    if (Create() == wxTHREAD_NO_ERROR) {
-        Run();
+    wxThreadError err = Run();
+    if (err != wxTHREAD_NO_ERROR) {
+        LT_LOG("LocalTerminalThread::Start() Run() failed, err=" + std::to_string(err));
+    } else {
+        LT_LOG("LocalTerminalThread::Start() thread started successfully");
     }
 }
 
 void LocalTerminalThread::QueueInput(const std::string& input) {
-    SSH_LOG("LocalTerminalThread::QueueInput: input length=" << input.length() << ", content=" << std::hex << (int)(unsigned char)input[0] << " " << (int)(unsigned char)input[1] << " " << (int)(unsigned char)input[2] << std::dec);
+    if (input.empty()) {
+        return;
+    }
+    LT_LOG("QueueInput: len=" + std::to_string(input.length()) + " first=" + std::to_string((int)(unsigned char)input[0]));
     {
         std::lock_guard<std::mutex> lock(m_input_mutex);
         m_input_queue.push(input);
@@ -132,7 +150,7 @@ void LocalTerminalThread::process_input_queue() {
         m_input_queue.pop();
         lock.unlock();
 
-        SSH_LOG("LocalTerminalThread::process_input_queue: writing to terminal, length=" << input.size() << ", content=" << std::hex << (int)(unsigned char)input[0] << " " << (int)(unsigned char)input[1] << " " << (int)(unsigned char)input[2] << std::dec);
+        LT_LOG("process_input_queue: writing len=" + std::to_string(input.size()));
 
         // Send input to local terminal
         m_terminalManager.Write(input.c_str(), input.size());
@@ -198,66 +216,84 @@ void LocalTerminalThread::process_resize() {
 }
 
 wxThread::ExitCode LocalTerminalThread::Entry() {
-    // Start local terminal
-    if (!m_terminalManager.Start(m_shell)) {
-        {
-            std::lock_guard<std::mutex> lock(m_shutdown_mutex);
-            if (m_ui_handler && !m_shutting_down) {
-                wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
-                m_ui_handler->AddPendingEvent(exitEvent);
+    try {
+        LT_LOG("LocalTerminalThread::Entry() started");
+
+        // Start local terminal
+        if (!m_terminalManager.Start(m_shell)) {
+            LT_LOG("LocalTerminalThread::Entry() m_terminalManager.Start() failed");
+            {
+                std::lock_guard<std::mutex> lock(m_shutdown_mutex);
+                if (m_ui_handler && !m_shutting_down) {
+                    wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
+                    m_ui_handler->AddPendingEvent(exitEvent);
+                }
             }
+            return (ExitCode)1;
         }
-        return (ExitCode)1;
-    }
+        LT_LOG("LocalTerminalThread::Entry() m_terminalManager.Start() succeeded");
 
-    // Setup VTerm callbacks
-    setup_callbacks();
+        // Setup VTerm callbacks
+        setup_callbacks();
 
-    // Main loop
-    char buffer[8192];
-    while (!TestDestroy()) {
-        // Process resize requests
-        process_resize();
+        // Main loop
+        char buffer[8192];
+        while (!TestDestroy()) {
+            // Process resize requests
+            process_resize();
 
-        // Process input queue
-        process_input_queue();
+            // Process input queue
+            process_input_queue();
 
-        // Read from terminal
-        int bytesRead = m_terminalManager.Read(buffer, sizeof(buffer));
-        if (bytesRead > 0) {
-            // Feed data to VTerm
-            m_vtermManager.write_input(buffer, bytesRead);
-        } else if (bytesRead < 0) {
-            // Error or EOF
-            break;
-        }
-
-        // Check for damage
-        {
-            std::lock_guard<std::mutex> lock(m_input_mutex);
-            if (m_has_damage) {
-                swap_buffers();
-                // Show cursor only when at bottom (scroll offset = 0)
-                bool cursor_visible = (m_vtermManager.get_scroll_offset() == 0);
-                send_damage_event(cursor_visible);
-                m_has_damage = false;
+            // Read from terminal
+            int bytesRead = m_terminalManager.Read(buffer, sizeof(buffer));
+            if (bytesRead > 0) {
+                // Feed data to VTerm
+                m_vtermManager.write_input(buffer, bytesRead);
+            } else if (bytesRead < 0) {
+                // Error or EOF
+                LT_LOG("LocalTerminalThread::Entry() Read() returned -1, breaking loop");
+                break;
             }
-        }
 
-        // Small sleep to prevent busy-waiting
+            // Check for damage
+            {
+                std::lock_guard<std::mutex> lock(m_input_mutex);
+                if (m_has_damage) {
+                    swap_buffers();
+                    // Show cursor only when at bottom (scroll offset = 0)
+                    bool cursor_visible = (m_vtermManager.get_scroll_offset() == 0);
+                    send_damage_event(cursor_visible);
+                    m_has_damage = false;
+                }
+            }
+
+            // Small sleep to prevent busy-waiting
 #ifdef _WIN32
-        Sleep(10);
+            Sleep(10);
 #else
-        usleep(10000); // 10ms
+            usleep(10000); // 10ms
 #endif
-    }
+        }
 
-    cleanup();
+        LT_LOG("LocalTerminalThread::Entry() loop ended");
+        cleanup();
+
+        if (m_ui_handler) {
+            wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
+            m_ui_handler->AddPendingEvent(exitEvent);
+        }
+
+        return (ExitCode)0;
+    } catch (const std::exception& e) {
+        LT_LOG(std::string("LocalTerminalThread::Entry() EXCEPTION: ") + e.what());
+    } catch (...) {
+        LT_LOG("LocalTerminalThread::Entry() UNKNOWN EXCEPTION");
+    }
 
     if (m_ui_handler) {
         wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
         m_ui_handler->AddPendingEvent(exitEvent);
     }
-
-    return (ExitCode)0;
+    return (ExitCode)1;
 }

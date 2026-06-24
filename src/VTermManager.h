@@ -1,6 +1,11 @@
 #ifndef VTERMMANAGER_H
 #define VTERMMANAGER_H
 
+// Windows headers may define 'small' as a macro, which breaks vterm.h bit-field syntax
+#ifdef small
+#undef small
+#endif
+
 #include <vterm.h>
 #include <vector>
 #include <deque>

@@ -35,6 +35,7 @@ private:
     
     void CreateDashboardTab();
     void CreateTerminalTab(const DeviceConfig& device);
+    void CreateLocalTerminalTab();
     //std::vector<std::shared_ptr<TerminalTab>> terminal_tabs_;
     
     wxDECLARE_EVENT_TABLE();

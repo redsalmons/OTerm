@@ -16,6 +16,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <fstream>
 #include "ConnectInfo.h"
 
 #if defined(__WXMSW__)
@@ -23,13 +24,94 @@
 #include <Windows.h>
 #endif
 
+// Custom logger that writes to both stderr and a fixed log file
+class wxLogFileAndStderr : public wxLog {
+public:
+    wxLogFileAndStderr(const std::string& path) : m_path(path) {
+        std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+    }
+protected:
+    virtual void DoLogText(const wxString& msg) override {
+        wxLogStderr* stderrLog = new wxLogStderr();
+        stderrLog->LogText(msg);
+        delete stderrLog;
+        std::ofstream f(m_path, std::ios::app);
+        if (f.is_open()) {
+            auto now = std::chrono::system_clock::now();
+            auto t = std::chrono::system_clock::to_time_t(now);
+            std::tm tm;
+#ifdef _WIN32
+            localtime_s(&tm, &t);
+#else
+            localtime_r(&t, &tm);
+#endif
+            f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [wxLog] " << msg.ToStdString() << std::endl;
+        }
+    }
+private:
+    std::string m_path;
+};
+
+static void CustomAssertHandler(const wxString& file, int line, const wxString& func,
+                                const wxString& cond, const wxString& msg) {
+    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    if (f.is_open()) {
+        auto now = std::chrono::system_clock::now();
+        auto t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm;
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+        f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [ASSERT] ";
+        f << "File: " << file.ToStdString() << ":" << line;
+        if (!func.IsEmpty()) f << " Func: " << func.ToStdString();
+        if (!cond.IsEmpty()) f << " Condition: " << cond.ToStdString();
+        if (!msg.IsEmpty()) f << " Message: " << msg.ToStdString();
+        f << std::endl;
+    }
+    // Also write to stderr so it shows up in console if attached
+    std::cerr << "ASSERT in " << file.ToStdString() << ":" << line;
+    if (!cond.IsEmpty()) std::cerr << " condition '" << cond.ToStdString() << "'";
+    if (!msg.IsEmpty()) std::cerr << " message '" << msg.ToStdString() << "'";
+    std::cerr << std::endl;
+}
+
 class MyApp : public wxApp {
 public:
     virtual bool OnInit() override;
     virtual int OnRun() override;
+    virtual void OnAssertFailure(const wxChar* file, int line, const wxChar* func,
+                                 const wxChar* cond, const wxChar* msg) override;
 };
 
 wxIMPLEMENT_APP(MyApp);
+
+void MyApp::OnAssertFailure(const wxChar* file, int line, const wxChar* func,
+                            const wxChar* cond, const wxChar* msg) {
+    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    if (f.is_open()) {
+        auto now = std::chrono::system_clock::now();
+        auto t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm;
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+        f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [ASSERT] ";
+        if (file) f << "File: " << wxString(file).ToStdString() << ":" << line;
+        if (func && wxString(func).Len() > 0) f << " Func: " << wxString(func).ToStdString();
+        if (cond && wxString(cond).Len() > 0) f << " Condition: " << wxString(cond).ToStdString();
+        if (msg && wxString(msg).Len() > 0) f << " Message: " << wxString(msg).ToStdString();
+        f << std::endl;
+    }
+    std::cerr << "ASSERT in " << (file ? wxString(file).ToStdString() : "?") << ":" << line;
+    if (cond) std::cerr << " condition '" << wxString(cond).ToStdString() << "'";
+    if (msg) std::cerr << " message '" << wxString(msg).ToStdString() << "'";
+    std::cerr << std::endl;
+}
 
 bool MyApp::OnInit() {
     try {
@@ -48,7 +130,7 @@ bool MyApp::OnInit() {
         }
 #endif
 
-        wxLog::SetActiveTarget(new wxLogStderr);
+        wxLog::SetActiveTarget(new wxLogFileAndStderr("D:/temp/oterm_wx.log"));
 
         // Set application name for proper config directory
         wxApp::SetAppName("OceanTerm");
@@ -233,7 +315,8 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     SetFocus();
 
     CreateDashboardTab();
-    
+    CreateLocalTerminalTab();
+
     Centre();
 
 #ifdef __WXMSW__
@@ -273,10 +356,35 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
         SSH_LOG("Calling Connect() on tab");
         newTab->Connect();
         SSH_LOG("Connect() returned");
-        
+
         // Show IME input box by triggering tab selection
         terminalCanvas->ShowIMEInputBox();
         SSH_LOG("IME input box shown for new tab");
+    }
+}
+
+void AppWindow::CreateLocalTerminalTab() {
+    {
+        std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+        if (f.is_open()) f << "[APP] CreateLocalTerminalTab entered" << std::endl;
+    }
+
+    TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
+
+    DeviceConfig emptyConfig;
+    wxString tabLabel = TranslationHelper::Tr("localTerminal");
+    if (tabLabel.IsEmpty()) {
+        tabLabel = "Local";
+    }
+    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalCanvas, emptyConfig, true, true);
+
+    {
+        std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+        if (f.is_open()) f << "[APP] AddTab returned newTab=" << (newTab ? "yes" : "no") << std::endl;
+    }
+
+    if (newTab) {
+        terminalCanvas->ShowIMEInputBox();
     }
 }
 

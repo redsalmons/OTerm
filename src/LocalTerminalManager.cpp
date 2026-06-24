@@ -24,10 +24,21 @@
 #include <sys/ioctl.h>
 #endif
 
+#include <fstream>
+
+static void LT_LOG(const std::string& msg) {
+    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    if (f.is_open()) {
+        f << "[LT-DEBUG] " << msg << std::endl;
+        f.flush();
+    }
+}
+
 LocalTerminalManager::LocalTerminalManager()
     : m_masterFd(-1), m_slaveFd(-1), m_childPid(-1), m_running(false)
 #ifdef _WIN32
-    , m_hPipe(nullptr), m_hProcess(nullptr)
+    , m_hConPTY(nullptr), m_hInPipeWrite(nullptr), m_hOutPipeRead(nullptr),
+      m_hProcess(nullptr), m_hThread(nullptr)
 #endif
 {
 }
@@ -38,68 +49,135 @@ LocalTerminalManager::~LocalTerminalManager() {
 
 bool LocalTerminalManager::Start(const std::string& shell) {
 #ifdef _WIN32
-    // Windows ConPTY implementation
+    // Windows ConPTY implementation (requires Windows 10 1809+)
+    LT_LOG("LocalTerminalManager::Start() called, shell='" + shell + "'");
     HRESULT hr;
-    HPCON hPseudoConsole = nullptr;
-    HANDLE hPipeRead = nullptr, hPipeWrite = nullptr;
+    HPCON hPC = nullptr;
+    HANDLE hInPipeRead = nullptr, hInPipeWrite = nullptr;
+    HANDLE hOutPipeRead = nullptr, hOutPipeWrite = nullptr;
 
-    // Create pipes for communication
     SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, TRUE };
-    if (!CreatePipe(&hPipeRead, &hPipeWrite, &sa, 0)) {
+
+    // Create input pipe: App writes -> PTY reads (stdin)
+    if (!CreatePipe(&hInPipeRead, &hInPipeWrite, &sa, 0)) {
+        LT_LOG("LocalTerminalManager::Start() CreatePipe(input) failed, err=" + std::to_string(GetLastError()));
+        return false;
+    }
+    LT_LOG("LocalTerminalManager::Start() input pipe created");
+
+    // Create output pipe: PTY writes -> App reads (stdout/stderr)
+    if (!CreatePipe(&hOutPipeRead, &hOutPipeWrite, &sa, 0)) {
+        CloseHandle(hInPipeRead);
+        CloseHandle(hInPipeWrite);
         return false;
     }
 
-    // Set the read end to non-blocking
-    DWORD mode = PIPE_NOWAIT;
-    SetNamedPipeHandleState(hPipeRead, &mode, nullptr, nullptr);
-
-    // Create pseudo console
+    // Create pseudo console.
+    // hInPipeRead  = PTY reads user input from here
+    // hOutPipeWrite = PTY writes terminal output here
     COORD size = { 80, 25 };
-    hr = CreatePseudoConsole(size, hPipeRead, hPipeWrite, 0, &hPseudoConsole);
+    hr = CreatePseudoConsole(size, hInPipeRead, hOutPipeWrite, 0, &hPC);
     if (FAILED(hr)) {
-        CloseHandle(hPipeRead);
-        CloseHandle(hPipeWrite);
+        LT_LOG("LocalTerminalManager::Start() CreatePseudoConsole failed, hr=" + std::to_string(hr));
+        CloseHandle(hInPipeRead);
+        CloseHandle(hInPipeWrite);
+        CloseHandle(hOutPipeRead);
+        CloseHandle(hOutPipeWrite);
         return false;
     }
+    LT_LOG("LocalTerminalManager::Start() CreatePseudoConsole succeeded");
 
-    // Create startup info for the process
-    STARTUPINFOEXW siEx = { 0 };
+    // ConPTY duplicates the handles internally; close PTY-side ends on our side.
+    CloseHandle(hInPipeRead);
+    hInPipeRead = nullptr;
+    CloseHandle(hOutPipeWrite);
+    hOutPipeWrite = nullptr;
+
+    // Prepare STARTUPINFOEXW with PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
+    STARTUPINFOEXW siEx = {};
     siEx.StartupInfo.cb = sizeof(siEx);
-    SIZE_T bytesRequired = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &bytesRequired);
-    siEx.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, bytesRequired);
-    InitializeProcThreadAttributeList(siEx.lpAttributeList, 1, 0, &bytesRequired);
-    UpdateProcThreadAttribute(siEx.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, hPseudoConsole, sizeof(hPseudoConsole), nullptr, nullptr);
-
-    // Get default shell
-    std::wstring shellPath = L"cmd.exe";
-    if (!shell.empty()) {
-        int needed = MultiByteToWideChar(CP_UTF8, 0, shell.c_str(), -1, nullptr, 0);
-        shellPath.resize(needed);
-        MultiByteToWideChar(CP_UTF8, 0, shell.c_str(), -1, &shellPath[0], needed);
+    SIZE_T attrSize = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
+    siEx.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrSize);
+    if (!siEx.lpAttributeList) {
+        LT_LOG("LocalTerminalManager::Start() HeapAlloc for attribute list failed");
+        ClosePseudoConsole(hPC);
+        CloseHandle(hInPipeWrite);
+        CloseHandle(hOutPipeRead);
+        return false;
     }
-
-    // Create the process
-    PROCESS_INFORMATION pi = { 0 };
-    if (!CreateProcessW(nullptr, &shellPath[0], nullptr, nullptr, FALSE, 
-                        CREATE_UNICODE_ENVIRONMENT, nullptr, nullptr, 
-                        &siEx.StartupInfo, &pi)) {
+    if (!InitializeProcThreadAttributeList(siEx.lpAttributeList, 1, 0, &attrSize)) {
+        LT_LOG("LocalTerminalManager::Start() InitializeProcThreadAttributeList failed, err=" + std::to_string(GetLastError()));
+        HeapFree(GetProcessHeap(), 0, siEx.lpAttributeList);
+        ClosePseudoConsole(hPC);
+        CloseHandle(hInPipeWrite);
+        CloseHandle(hOutPipeRead);
+        return false;
+    }
+    if (!UpdateProcThreadAttribute(siEx.lpAttributeList, 0,
+                              PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                              hPC, sizeof(hPC), nullptr, nullptr)) {
+        LT_LOG("LocalTerminalManager::Start() UpdateProcThreadAttribute failed, err=" + std::to_string(GetLastError()));
         DeleteProcThreadAttributeList(siEx.lpAttributeList);
         HeapFree(GetProcessHeap(), 0, siEx.lpAttributeList);
-        ClosePseudoConsole(hPseudoConsole);
-        CloseHandle(hPipeRead);
-        CloseHandle(hPipeWrite);
+        ClosePseudoConsole(hPC);
+        CloseHandle(hInPipeWrite);
+        CloseHandle(hOutPipeRead);
         return false;
     }
 
-    // Clean up
+    // Choose shell executable
+    std::wstring shellCmd;
+    if (!shell.empty()) {
+        int needed = MultiByteToWideChar(CP_UTF8, 0, shell.c_str(), -1, nullptr, 0);
+        shellCmd.resize(needed);
+        MultiByteToWideChar(CP_UTF8, 0, shell.c_str(), -1, &shellCmd[0], needed);
+    } else {
+        // Default to PowerShell if available, otherwise cmd.exe
+        wchar_t psPath[MAX_PATH];
+        DWORD psLen = ExpandEnvironmentStringsW(L"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", psPath, MAX_PATH);
+        if (psLen > 0 && psLen < MAX_PATH && GetFileAttributesW(psPath) != INVALID_FILE_ATTRIBUTES) {
+            shellCmd = psPath;
+        } else {
+            shellCmd = L"cmd.exe";
+        }
+    }
+
+    // Build command line: shell + interactive/login flags for better terminal behavior
+    std::wstring cmdLine = shellCmd;
+    if (cmdLine.find(L"powershell.exe") != std::wstring::npos ||
+        cmdLine.find(L"pwsh.exe") != std::wstring::npos) {
+        cmdLine += L" -NoExit -Command \"$host.UI.RawUI.WindowTitle='OceanTerm Local'\"";
+    }
+
+    // Create the child process attached to the pseudo console
+    PROCESS_INFORMATION pi = {};
+    BOOL created = CreateProcessW(
+        nullptr, &cmdLine[0], nullptr, nullptr, FALSE,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+        nullptr, nullptr, &siEx.StartupInfo, &pi);
+
+    // Cleanup attribute list regardless of result
     DeleteProcThreadAttributeList(siEx.lpAttributeList);
     HeapFree(GetProcessHeap(), 0, siEx.lpAttributeList);
-    CloseHandle(pi.hThread);
 
-    m_hPipe = hPipeWrite;
+    if (!created) {
+        LT_LOG("LocalTerminalManager::Start() CreateProcessW failed, err=" + std::to_string(GetLastError()));
+        ClosePseudoConsole(hPC);
+        CloseHandle(hInPipeWrite);
+        CloseHandle(hOutPipeRead);
+        return false;
+    }
+    LT_LOG("LocalTerminalManager::Start() CreateProcessW succeeded");
+
+    CloseHandle(pi.hThread); // We don't need the thread handle
+
+    m_hConPTY = hPC;
+    m_hInPipeWrite = hInPipeWrite;
+    m_hOutPipeRead = hOutPipeRead;
     m_hProcess = pi.hProcess;
     m_running = true;
+    LT_LOG("LocalTerminalManager::Start() success");
     return true;
 
 #elif defined(__APPLE__) || defined(__linux__)
@@ -168,14 +246,31 @@ void LocalTerminalManager::Stop() {
     if (!m_running) return;
 
 #ifdef _WIN32
+    // Close input pipe first so the shell sees EOF and can exit gracefully
+    if (m_hInPipeWrite) {
+        CloseHandle((HANDLE)m_hInPipeWrite);
+        m_hInPipeWrite = nullptr;
+    }
+
+    // Give the process a brief chance to exit on its own
     if (m_hProcess) {
+        WaitForSingleObject((HANDLE)m_hProcess, 500);
         TerminateProcess((HANDLE)m_hProcess, 0);
+        WaitForSingleObject((HANDLE)m_hProcess, 1000);
         CloseHandle((HANDLE)m_hProcess);
         m_hProcess = nullptr;
     }
-    if (m_hPipe) {
-        CloseHandle((HANDLE)m_hPipe);
-        m_hPipe = nullptr;
+
+    // Close output pipe
+    if (m_hOutPipeRead) {
+        CloseHandle((HANDLE)m_hOutPipeRead);
+        m_hOutPipeRead = nullptr;
+    }
+
+    // Close pseudo console last
+    if (m_hConPTY) {
+        ClosePseudoConsole((HPCON)m_hConPTY);
+        m_hConPTY = nullptr;
     }
 #elif defined(__APPLE__) || defined(__linux__)
     if (m_childPid > 0) {
@@ -197,19 +292,17 @@ void LocalTerminalManager::Stop() {
 }
 
 bool LocalTerminalManager::Write(const char* data, size_t len) {
-    if (!m_running) return false;
-
-    std::stringstream ss;
-    ss << "LocalTerminalManager::Write: len=" << len << ", content=";
-    for (size_t i = 0; i < len && i < 3; i++) {
-        ss << std::hex << (int)(unsigned char)data[i] << " ";
+    if (!m_running) {
+        LT_LOG("Write: not running, rejected");
+        return false;
     }
-    ss << std::dec;
-    SSH_LOG(ss.str());
+    LT_LOG("Write: len=" + std::to_string(len));
 
 #ifdef _WIN32
+    if (!m_hInPipeWrite) return false;
     DWORD written = 0;
-    return WriteFile((HANDLE)m_hPipe, data, len, &written, nullptr) && written == len;
+    BOOL ok = WriteFile((HANDLE)m_hInPipeWrite, data, (DWORD)len, &written, nullptr);
+    return ok && written == len;
 #elif defined(__APPLE__) || defined(__linux__)
     ssize_t result = write(m_masterFd, data, len);
     std::stringstream ss2;
@@ -225,9 +318,21 @@ int LocalTerminalManager::Read(char* buffer, size_t len) {
     if (!m_running) return -1;
 
 #ifdef _WIN32
+    if (!m_hOutPipeRead) return -1;
+
+    // Use PeekNamedPipe to avoid blocking when no data is available.
+    DWORD avail = 0;
+    if (!PeekNamedPipe((HANDLE)m_hOutPipeRead, nullptr, 0, nullptr, &avail, nullptr)) {
+        return -1; // Pipe broken
+    }
+    if (avail == 0) {
+        return 0; // No data right now
+    }
+
+    DWORD toRead = (avail < (DWORD)len) ? avail : (DWORD)len;
     DWORD read = 0;
-    if (ReadFile((HANDLE)m_hPipe, buffer, len, &read, nullptr)) {
-        return read;
+    if (ReadFile((HANDLE)m_hOutPipeRead, buffer, toRead, &read, nullptr)) {
+        return (int)read;
     }
     return -1;
 #elif defined(__APPLE__) || defined(__linux__)
@@ -245,8 +350,10 @@ void LocalTerminalManager::Resize(int rows, int cols) {
     if (!m_running) return;
 
 #ifdef _WIN32
-    // ConPTY resize would require recreating the pseudo console
-    // For now, this is a limitation
+    if (m_hConPTY) {
+        COORD size = { (SHORT)cols, (SHORT)rows };
+        ResizePseudoConsole((HPCON)m_hConPTY, size);
+    }
 #elif defined(__APPLE__) || defined(__linux__)
     struct winsize ws = { (unsigned short)rows, (unsigned short)cols, 0, 0 };
     ioctl(m_masterFd, TIOCSWINSZ, &ws);

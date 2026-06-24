@@ -161,6 +161,47 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 << ", Initial vterm size calculated: " << initialRows << "x" << initialCols);
     }
 
+    // Bind terminal-specific events BEFORE creating threads so handlers are ready
+    Bind(wxEVT_TERMINAL_DAMAGE, &ConnectInfo::OnTerminalDamage, this);
+    Bind(wxEVT_TERMINAL_EXIT, &ConnectInfo::OnTerminalExit, this);
+
+    // Set scroll callback to scroll vterm history (shared for both terminal types)
+    if (m_termCanvas) {
+        m_termCanvas->SetScrollCallback([this](int lines) {
+            if (m_isLocalTerminal && m_localTerminalThread) {
+                m_localTerminalThread->ScrollVTerm(lines);
+            } else if (m_terminalThread) {
+                m_terminalThread->ScrollVTerm(lines);
+            }
+        });
+
+        // Set mouse callback for vi mouse mode (X10 protocol)
+        m_termCanvas->SetMouseCallback([this](int row, int col, int button) {
+            bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
+            SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << inAltScreen);
+            if (inAltScreen) {
+                // X10 mouse protocol: \x1b[M<btn><col><row>
+                // btn: 0=left, 1=middle, 2=right
+                // col: column + 33 (ASCII '!' is 33)
+                // row: row + 33
+                char seq[6];
+                seq[0] = '\x1b';
+                seq[1] = '[';
+                seq[2] = 'M';
+                seq[3] = static_cast<char>(button + 32);
+                seq[4] = static_cast<char>(col + 33);
+                seq[5] = static_cast<char>(row + 33);
+                std::string seq_str(seq, 6);
+                SSH_LOG("Sending X10 mouse sequence: " << std::hex << (int)(unsigned char)seq[0] << " " << (int)(unsigned char)seq[1] << " " << (int)(unsigned char)seq[2] << " " << (int)(unsigned char)seq[3] << " " << (int)(unsigned char)seq[4] << " " << (int)(unsigned char)seq[5] << std::dec);
+                if (m_isLocalTerminal && m_localTerminalThread) {
+                    m_localTerminalThread->QueueInput(seq_str);
+                } else if (m_terminalThread) {
+                    m_terminalThread->QueueInput(seq_str);
+                }
+            }
+        });
+    }
+
     // Create appropriate thread based on terminal type
     if (m_isLocalTerminal) {
         // Create LocalTerminalThread for local shell
@@ -245,47 +286,6 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
             });
         }
     }
-
-    // Set scroll callback to scroll vterm history (shared for both terminal types)
-    if (m_termCanvas) {
-        m_termCanvas->SetScrollCallback([this](int lines) {
-            if (m_isLocalTerminal && m_localTerminalThread) {
-                m_localTerminalThread->ScrollVTerm(lines);
-            } else if (m_terminalThread) {
-                m_terminalThread->ScrollVTerm(lines);
-            }
-        });
-
-        // Set mouse callback for vi mouse mode (X10 protocol)
-        m_termCanvas->SetMouseCallback([this](int row, int col, int button) {
-            bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
-            SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << inAltScreen);
-            if (inAltScreen) {
-                // X10 mouse protocol: \x1b[M<btn><col><row>
-                // btn: 0=left, 1=middle, 2=right
-                // col: column + 33 (ASCII '!' is 33)
-                // row: row + 33
-                char seq[6];
-                seq[0] = '\x1b';
-                seq[1] = '[';
-                seq[2] = 'M';
-                seq[3] = static_cast<char>(button + 32);
-                seq[4] = static_cast<char>(col + 33);
-                seq[5] = static_cast<char>(row + 33);
-                std::string seq_str(seq, 6);
-                SSH_LOG("Sending X10 mouse sequence: " << std::hex << (int)(unsigned char)seq[0] << " " << (int)(unsigned char)seq[1] << " " << (int)(unsigned char)seq[2] << " " << (int)(unsigned char)seq[3] << " " << (int)(unsigned char)seq[4] << " " << (int)(unsigned char)seq[5] << std::dec);
-                if (m_isLocalTerminal && m_localTerminalThread) {
-                    m_localTerminalThread->QueueInput(seq_str);
-                } else if (m_terminalThread) {
-                    m_terminalThread->QueueInput(seq_str);
-                }
-            }
-        });
-    }
-
-    // Bind terminal-specific events only for terminal tabs
-    Bind(wxEVT_TERMINAL_DAMAGE, &ConnectInfo::OnTerminalDamage, this);
-    Bind(wxEVT_TERMINAL_EXIT, &ConnectInfo::OnTerminalExit, this);
 }
 
 void ConnectInfo::Connect() {
