@@ -136,9 +136,14 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     // Calculate DPI-scaled dimensions
     int panelWidth = static_cast<int>(760 * m_dpiScale);
     int searchWidth = static_cast<int>(340 * m_dpiScale);
-    int buttonWidth = static_cast<int>(70 * m_dpiScale);
-    int controlHeight = static_cast<int>(30 * m_dpiScale);
+    int buttonWidth = static_cast<int>(35 * m_dpiScale); // Reduced from 70 to 35
     int scrollHeight = static_cast<int>(500 * m_dpiScale);
+
+    // Calculate font height for control height
+    wxFont font(static_cast<int>(12 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+    wxScreenDC dc;
+    dc.SetFont(font);
+    int controlHeight = dc.GetCharHeight()+4; // Add some padding
 
     // Create a centered panel with DPI-scaled width
     wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, -1));
@@ -151,11 +156,14 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     wxBoxSizer* searchSizer = new wxBoxSizer(wxHORIZONTAL);
 
     // Search box with DPI-scaled dimensions
-    m_searchCtrl = new wxTextCtrl(centerPanel, ID_SEARCH_CTRL, TranslationHelper::Tr("searchHint"),
+    m_searchCtrl = new wxSearchCtrl(centerPanel, ID_SEARCH_CTRL, wxEmptyString,
                                    wxDefaultPosition, wxSize(searchWidth, controlHeight),
                                    wxTE_PROCESS_ENTER | wxBORDER_SIMPLE);
+    m_searchCtrl->ShowSearchButton(false); // Hide built-in search button to reduce left margin
+    m_searchCtrl->SetDescriptiveText(TranslationHelper::Tr("searchHint"));
     m_searchCtrl->SetBackgroundColour(wxColour(0, 0, 0));
     m_searchCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_searchCtrl->SetFont(wxFont(static_cast<int>(12 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
 
     // Add button with DPI-scaled dimensions
     m_addButton = new wxButton(centerPanel, ID_ADD_BUTTON, "+",
@@ -165,8 +173,8 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     m_addButton->SetFont(wxFont(static_cast<int>(14 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
 
     // Add to search sizer
-    searchSizer->Add(m_searchCtrl, 1, wxRIGHT, 5);
-    searchSizer->Add(m_addButton, 0, wxEXPAND);
+    searchSizer->Add(m_searchCtrl, 1, wxRIGHT | wxALIGN_CENTER_VERTICAL);
+    searchSizer->Add(m_addButton, 0, wxEXPAND | wxALIGN_CENTER_VERTICAL);
 
     // Device list - use wxScrolledWindow with DPI-scaled dimensions
     m_scrolledWindow = new wxScrolledWindow(centerPanel, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, scrollHeight));

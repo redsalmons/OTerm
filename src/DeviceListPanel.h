@@ -2,6 +2,7 @@
 
 #include <wx/wx.h>
 #include <wx/scrolwin.h>
+#include <wx/srchctrl.h>
 #include <vector>
 #include "DeviceConfig.h"
 
@@ -34,7 +35,7 @@ private:
     void OnSearchFocus(wxFocusEvent& event);
     void OnSearchKillFocus(wxFocusEvent& event);
 
-    wxTextCtrl* m_searchCtrl;
+    wxSearchCtrl* m_searchCtrl;
     wxButton* m_addButton;
     wxScrolledWindow* m_scrolledWindow;
     wxPanel* m_contentPanel;
