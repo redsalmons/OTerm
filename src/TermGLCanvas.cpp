@@ -494,9 +494,40 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
     SSH_LOG("OnKeyDown: keycode=" << event.GetKeyCode() << ", key_callback=" << (key_callback_ ? "set" : "NULL"));
 
-    // Check for Ctrl+C to copy selection
+    // Check for Ctrl+C to copy selection (only if there's a selection)
     if (event.ControlDown() && event.GetKeyCode() == 'C') {
-        CopySelectionToClipboard();
+        if (m_selection_start_row != m_selection_end_row || m_selection_start_col != m_selection_end_col) {
+            CopySelectionToClipboard();
+            return;
+        }
+        // If no selection, fall through to send Ctrl+C to terminal
+    }
+
+    // Check for Ctrl+V to paste from clipboard
+    if (event.ControlDown() && event.GetKeyCode() == 'V') {
+        if (wxTheClipboard->Open()) {
+            if (wxTheClipboard->IsSupported(wxDF_TEXT)) {
+                wxTextDataObject data;
+                wxTheClipboard->GetData(data);
+                wxString text = data.GetText();
+                wxTheClipboard->Close();
+
+                // Check if text length is <= 255
+                if (text.length() <= 255) {
+                    // Convert to UTF-8 and send to terminal
+                    wxScopedCharBuffer utf8_buf = text.ToUTF8();
+                    if (key_callback_) {
+                        key_callback_(utf8_buf.data(), static_cast<int>(strlen(utf8_buf.data())));
+                        SSH_LOG("Pasted " << strlen(utf8_buf.data()) << " characters from clipboard");
+                    }
+                } else {
+                    SSH_LOG("Clipboard text too long (" << text.length() << " > 255), skipping paste");
+                }
+            } else {
+                wxTheClipboard->Close();
+                SSH_LOG("Clipboard does not contain text, skipping paste");
+            }
+        }
         return;
     }
 
@@ -527,6 +558,11 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                 break;
             case WXK_TAB:
                 sequence = "\t";
+                break;
+            case 'C':
+                if (event.ControlDown()) {
+                    sequence = "\x03"; // Ctrl+C = ETX (interrupt)
+                }
                 break;
             default:
                 break;
