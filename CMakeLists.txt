@@ -29,6 +29,8 @@ add_executable(OceanTerm WIN32
     src/ConnectInfo.cpp
     src/ConnectionDialog.cpp
     src/DeviceConfig.cpp
+    src/DeviceListPanel.cpp
+    src/AddDeviceDialog.cpp
     src/SSHManager.cpp
     src/VTermManager.cpp
     src/TermGLCanvas.cpp
@@ -44,6 +46,11 @@ add_executable(OceanTerm WIN32
     src/MonospaceFontDialog.cpp
     src/LocalTerminalManager.cpp
     src/LocalTerminalThread.cpp
+    src/LocalTerminalDelegate.cpp
+    src/TerminalPanel.cpp
+    src/InfiniteSplitter.cpp
+    src/LocalTerminalContainer.cpp
+    src/EventProxy.cpp
 )
 
 # Add include directories
