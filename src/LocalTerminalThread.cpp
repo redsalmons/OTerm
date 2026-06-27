@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <filesystem>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -11,17 +12,17 @@
 #endif
 
 static void LT_LOG(const std::string& msg) {
-    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     if (f.is_open()) {
         f << "[LT-DEBUG] " << msg << std::endl;
         f.flush();
     }
 }
 
-LocalTerminalThread::LocalTerminalThread(wxEvtHandler* ui_handler, int rows, int cols, const std::string& shell)
+LocalTerminalThread::LocalTerminalThread(EventProxyPtr event_proxy, int rows, int cols, const std::string& shell)
     : wxThread(wxTHREAD_JOINABLE),
       m_vtermManager(),
-      m_ui_handler(ui_handler),
+      m_event_proxy(event_proxy),
       m_shell(shell),
       m_rows(rows),
       m_cols(cols),
@@ -39,9 +40,7 @@ LocalTerminalThread::LocalTerminalThread(wxEvtHandler* ui_handler, int rows, int
 }
 
 LocalTerminalThread::~LocalTerminalThread() {
-    if (IsRunning()) {
-        Delete();
-    }
+    // Cleanup should be done by the owner (TermGLCanvas) using SetShuttingDown() + Wait() + delete
 }
 
 void LocalTerminalThread::Start() {
@@ -123,9 +122,9 @@ void LocalTerminalThread::ResetScrollToBottom() {
     send_damage_event(false);
 }
 
-void LocalTerminalThread::ClearUIHandler() {
+void LocalTerminalThread::SetEventProxy(EventProxyPtr event_proxy) {
     std::lock_guard<std::mutex> lock(m_input_mutex);
-    m_ui_handler = nullptr;
+    m_event_proxy = event_proxy;
 }
 
 void LocalTerminalThread::setup_callbacks() {
@@ -162,6 +161,7 @@ void LocalTerminalThread::process_input_queue() {
 void LocalTerminalThread::swap_buffers() {
     // Copy from VTermManager cell buffer to back buffer
     const auto& cell_buffer = m_vtermManager.get_cell_buffer();
+    char32_t first_non_empty = 0;
     for (int row = 0; row < m_rows && row < (int)cell_buffer.size(); ++row) {
         for (int col = 0; col < m_cols && col < (int)cell_buffer[row].size(); ++col) {
             const auto& cell = cell_buffer[row][col];
@@ -170,6 +170,9 @@ void LocalTerminalThread::swap_buffers() {
             inst.fg_color = cell.fg_color;
             inst.bg_color = cell.bg_color;
             inst.width = cell.width;
+            if (cell.char_code != 0 && cell.char_code != ' ' && first_non_empty == 0) {
+                first_non_empty = cell.char_code;
+            }
         }
     }
 
@@ -178,21 +181,24 @@ void LocalTerminalThread::swap_buffers() {
     m_back_buffer.cursor_row = cursor_pos.row;
     m_back_buffer.cursor_col = cursor_pos.col;
 
+    LT_LOG("swap_buffers: first_nonempty=" + std::to_string((int)first_non_empty) +
+           " cursor=" + std::to_string(cursor_pos.row) + "," + std::to_string(cursor_pos.col));
+
     std::swap(m_front_buffer, m_back_buffer);
 }
 
 void LocalTerminalThread::send_damage_event(bool cursor_visible) {
-    if (!m_ui_handler) return;
+    if (!m_event_proxy) {
+        LT_LOG("send_damage_event: no event_proxy");
+        return;
+    }
 
     VTermPos cursor = m_vtermManager.get_cursor_pos();
-    TerminalDamageEvent event(
-        m_rows, m_cols,
-        cursor.row, cursor.col,
-        m_damage_rect.start_row, m_damage_rect.end_row,
-        m_damage_rect.start_col, m_damage_rect.end_col,
-        cursor_visible
-    );
-    m_ui_handler->AddPendingEvent(event);
+    LT_LOG("send_damage_event: posting event rows=" + std::to_string(m_rows) + " cols=" + std::to_string(m_cols) +
+           " cursor=" + std::to_string(cursor.row) + "," + std::to_string(cursor.col));
+    
+    // Use EventProxy to post damage event
+    m_event_proxy->PostDamageEvent(m_rows, m_cols, cursor.row, cursor.col, 0);
 }
 
 void LocalTerminalThread::cleanup() {
@@ -222,13 +228,6 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
         // Start local terminal
         if (!m_terminalManager.Start(m_shell)) {
             LT_LOG("LocalTerminalThread::Entry() m_terminalManager.Start() failed");
-            {
-                std::lock_guard<std::mutex> lock(m_shutdown_mutex);
-                if (m_ui_handler && !m_shutting_down) {
-                    wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
-                    m_ui_handler->AddPendingEvent(exitEvent);
-                }
-            }
             return (ExitCode)1;
         }
         LT_LOG("LocalTerminalThread::Entry() m_terminalManager.Start() succeeded");
@@ -238,7 +237,7 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
 
         // Main loop
         char buffer[8192];
-        while (!TestDestroy()) {
+        while (!TestDestroy() && !IsShuttingDown()) {
             // Process resize requests
             process_resize();
 
@@ -249,6 +248,13 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
             int bytesRead = m_terminalManager.Read(buffer, sizeof(buffer));
             if (bytesRead > 0) {
                 // Feed data to VTerm
+                std::string hexBytes;
+                for (int i = 0; i < std::min(bytesRead, 16); ++i) {
+                    char hex[4];
+                    snprintf(hex, sizeof(hex), "%02x ", (unsigned char)buffer[i]);
+                    hexBytes += hex;
+                }
+                LT_LOG("LocalTerminalThread::Entry() Read() bytesRead=" + std::to_string(bytesRead) + " data=" + hexBytes);
                 m_vtermManager.write_input(buffer, bytesRead);
             } else if (bytesRead < 0) {
                 // Error or EOF
@@ -260,6 +266,7 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
             {
                 std::lock_guard<std::mutex> lock(m_input_mutex);
                 if (m_has_damage) {
+                    LT_LOG("LocalTerminalThread::Entry() has_damage, sending event");
                     swap_buffers();
                     // Show cursor only when at bottom (scroll offset = 0)
                     bool cursor_visible = (m_vtermManager.get_scroll_offset() == 0);
@@ -279,11 +286,6 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
         LT_LOG("LocalTerminalThread::Entry() loop ended");
         cleanup();
 
-        if (m_ui_handler) {
-            wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
-            m_ui_handler->AddPendingEvent(exitEvent);
-        }
-
         return (ExitCode)0;
     } catch (const std::exception& e) {
         LT_LOG(std::string("LocalTerminalThread::Entry() EXCEPTION: ") + e.what());
@@ -291,9 +293,5 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
         LT_LOG("LocalTerminalThread::Entry() UNKNOWN EXCEPTION");
     }
 
-    if (m_ui_handler) {
-        wxThreadEvent exitEvent(wxEVT_TERMINAL_EXIT);
-        m_ui_handler->AddPendingEvent(exitEvent);
-    }
     return (ExitCode)1;
 }

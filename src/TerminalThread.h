@@ -12,6 +12,7 @@
 #include "ScreenBuffer.h"
 #include "DeviceConfig.h"
 #include "TermGLCanvas.h"
+#include "EventProxy.h"
 
 // Custom event for terminal damage notification
 wxDECLARE_EVENT(wxEVT_TERMINAL_DAMAGE, wxThreadEvent);
@@ -59,7 +60,7 @@ private:
 // Runs its own libuv event loop and manages SSH/VTerm independently
 class TerminalThread : public wxThread {
 public:
-    TerminalThread(wxEvtHandler* ui_handler, int rows, int cols, const DeviceConfig& config);
+    TerminalThread(EventProxyPtr event_proxy, int rows, int cols, const DeviceConfig& config);
     virtual ~TerminalThread();
     
     // Thread-safe input queue for user keystrokes
@@ -82,10 +83,14 @@ public:
     
     // Reset scroll to bottom (thread-safe, called from UI thread)
     void ResetScrollToBottom();
-    void ClearUIHandler();
+    void SetEventProxy(EventProxyPtr event_proxy);
     void SetShuttingDown() { 
         std::lock_guard<std::mutex> lock(m_shutdown_mutex);
         m_shutting_down = true; 
+    }
+    bool IsShuttingDown() const {
+        std::lock_guard<std::mutex> lock(m_shutdown_mutex);
+        return m_shutting_down;
     }
     bool IsInAlternateScreen() const { return m_vtermManager.is_in_alternate_screen(); }
     int GetScrollOffset() const { return m_vtermManager.get_scroll_offset(); }
@@ -123,10 +128,10 @@ private:
     
     // Shutdown flag (thread-safe)
     bool m_shutting_down;
-    std::mutex m_shutdown_mutex;
+    mutable std::mutex m_shutdown_mutex;
     
-    // UI thread communication
-    wxEvtHandler* m_ui_handler;
+    // UI thread communication via EventProxy
+    EventProxyPtr m_event_proxy;
     
     // Double buffering
     ScreenBuffer m_front_buffer;  // Read by UI thread

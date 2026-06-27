@@ -1,14 +1,18 @@
 #pragma once
 
 #include <wx/wx.h>
+#include <wx/splitter.h>
 #include "DeviceConfig.h"
 #include "ScreenBuffer.h"
 #include "FileTransferDialog.h"
 #include "FileTransferThread.h"
+#include "EventProxy.h"
 
 class TermGLCanvas;
 class TerminalThread;
 class LocalTerminalThread;
+class TerminalPanel;
+class InfiniteSplitter;
 
 wxDECLARE_EVENT(wxEVT_TAB_CLOSE, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_TAB_SELECTED, wxCommandEvent);
@@ -32,6 +36,9 @@ public:
     LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
 
     void UpdateVTermSize(int rows, int cols);
+    
+    // Split functionality
+    void HandleSplit(wxSplitMode mode);
     
     ~ConnectInfo();
 
@@ -59,6 +66,7 @@ private:
     TerminalThread* m_terminalThread;
     LocalTerminalThread* m_localTerminalThread;
     TermGLCanvas* m_termCanvas;
+    EventProxyPtr m_eventProxy;
     std::string m_currentInput; // Record current keyboard input
     FileTransferDialog* m_fileTransferDialog; // File transfer dialog
     FileTransferThread* m_fileTransferThread; // File transfer thread

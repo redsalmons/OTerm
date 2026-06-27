@@ -286,3 +286,16 @@ msgstr "删除"
 
 msgid "add"
 msgstr "打开"
+
+# Terminal Context Menu
+msgid "horizontalSplit"
+msgstr "水平分割"
+
+msgid "verticalSplit"
+msgstr "垂直分割"
+
+msgid "closePanel"
+msgstr "关闭面板"
+
+msgid "localConnection"
+msgstr "本地连接"

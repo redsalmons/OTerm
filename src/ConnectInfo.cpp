@@ -1,5 +1,7 @@
 #include "ConnectInfo.h"
 #include "TermGLCanvas.h"
+#include "TerminalPanel.h"
+#include "RootPanel.h"
 #include "TerminalThread.h"
 #include "LocalTerminalThread.h"
 #include "SSHManager.h"
@@ -101,11 +103,69 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     Bind(wxEVT_FILE_TRANSFER_PROGRESS, &ConnectInfo::OnFileTransferProgress, this);
     Bind(wxEVT_FILE_TRANSFER_COMPLETE, &ConnectInfo::OnFileTransferComplete, this);
 
-    // Cast contentPanel to TermGLCanvas
-    m_termCanvas = dynamic_cast<TermGLCanvas*>(m_contentPanel);
+    // Find TermGLCanvas from content panel (which might be a TerminalPanel or InfiniteSplitter)
+    m_termCanvas = nullptr;
+    if (m_contentPanel) {
+        wxString className = m_contentPanel->GetClassInfo()->GetClassName();
+        SSH_LOG("ConnectInfo: m_contentPanel=" << m_contentPanel << " class=" << className.ToStdString());
+        
+        // Check if contentPanel is directly a TermGLCanvas
+        m_termCanvas = dynamic_cast<TermGLCanvas*>(m_contentPanel);
+        if (m_termCanvas) {
+            SSH_LOG("ConnectInfo: Found TermGLCanvas directly");
+        }
+        
+        // If not, check if it's a TerminalPanel
+        if (!m_termCanvas) {
+            TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+            if (panel) {
+                SSH_LOG("ConnectInfo: Found TerminalPanel");
+                m_termCanvas = panel->GetCanvas();
+                if (m_termCanvas) {
+                    SSH_LOG("ConnectInfo: Got canvas from TerminalPanel");
+                }
+            }
+        }
+        
+        // If not, check if it's an InfiniteSplitter and find the TerminalPanel inside
+        if (!m_termCanvas) {
+            InfiniteSplitter* splitter = dynamic_cast<InfiniteSplitter*>(m_contentPanel);
+            if (splitter) {
+                SSH_LOG("ConnectInfo: Found InfiniteSplitter");
+                // Get the first window from the splitter
+                wxWindow* window1 = splitter->GetWindow1();
+                if (window1) {
+                    TerminalPanel* panel = dynamic_cast<TerminalPanel*>(window1);
+                    if (panel) {
+                        m_termCanvas = panel->GetCanvas();
+                        if (m_termCanvas) {
+                            SSH_LOG("ConnectInfo: Got canvas from splitter window1");
+                        }
+                    }
+                }
+                if (!m_termCanvas) {
+                    wxWindow* window2 = splitter->GetWindow2();
+                    if (window2) {
+                        TerminalPanel* panel = dynamic_cast<TerminalPanel*>(window2);
+                        if (panel) {
+                            m_termCanvas = panel->GetCanvas();
+                            if (m_termCanvas) {
+                                SSH_LOG("ConnectInfo: Got canvas from splitter window2");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        SSH_LOG("ConnectInfo: ERROR - m_contentPanel is null");
+    }
+    
+    SSH_LOG("ConnectInfo: Found TermGLCanvas: " << m_termCanvas);
+
     if (!m_termCanvas) {
-        SSH_LOG("ConnectInfo: TermGLCanvas cast failed - this is a non-terminal tab (e.g., Dashboard)");
-        // For non-terminal tabs (like Dashboard), don't create TerminalThread
+        SSH_LOG("ConnectInfo: TermGLCanvas not found - this is a non-terminal tab (e.g., Dashboard or RootPanel)");
+        // For non-terminal tabs (like Dashboard or RootPanel), don't create TerminalThread
         return;
     }
     SSH_LOG("ConnectInfo: TermGLCanvas cast successful");
@@ -204,22 +264,61 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
     // Create appropriate thread based on terminal type
     if (m_isLocalTerminal) {
-        // Create LocalTerminalThread for local shell
-        m_localTerminalThread = new LocalTerminalThread(this, initialRows, initialCols);
-        m_localTerminalThread->Start();
-        SSH_LOG("ConnectInfo: LocalTerminalThread created and started");
+        // Use the existing thread from TermGLCanvas instead of creating a new one
+        m_localTerminalThread = m_termCanvas->GetLocalTerminalThread();
+        SSH_LOG("ConnectInfo: Using existing LocalTerminalThread from canvas: " << m_localTerminalThread);
+        
+        // Create EventProxy for local terminal
+        m_eventProxy = std::make_shared<EventProxy>();
+        m_eventProxy->SetTarget(m_termCanvas);
+        
+        // Set damage callback to trigger UI refresh
+        m_eventProxy->SetDamageCallback([this](int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
+            if (m_termCanvas) {
+                // Trigger OnTerminalDamage on the canvas
+                wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
+                wxQueueEvent(m_termCanvas, evt.Clone());
+            }
+        });
+        
+        // Update the thread's EventProxy
+        if (m_localTerminalThread) {
+            m_localTerminalThread->SetEventProxy(m_eventProxy);
+            SSH_LOG("ConnectInfo: Set EventProxy on LocalTerminalThread");
+        }
 
         // Set keyboard callback to send input to local thread
         if (m_termCanvas) {
+            SSH_LOG("ConnectInfo: Setting key callback for local terminal");
             m_termCanvas->SetKeyCallback([this](const char* data, int length) {
+                SSH_LOG("ConnectInfo key callback: len=" << length << " first=" << (int)(unsigned char)data[0]);
                 if (m_localTerminalThread) {
                     m_localTerminalThread->QueueInput(std::string(data, length));
                 }
             });
+            
+            // Set split callback
+            m_termCanvas->SetSplitCallback([this](wxSplitMode mode) {
+                SSH_LOG("ConnectInfo: split_callback called with mode=" << mode);
+                HandleSplit(mode);
+            });
         }
     } else {
+        // Create EventProxy for SSH terminal
+        m_eventProxy = std::make_shared<EventProxy>();
+        m_eventProxy->SetTarget(m_termCanvas);
+        
+        // Set damage callback to trigger UI refresh
+        m_eventProxy->SetDamageCallback([this](int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
+            if (m_termCanvas) {
+                // Trigger OnTerminalDamage on the canvas
+                wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
+                wxQueueEvent(m_termCanvas, evt.Clone());
+            }
+        });
+        
         // Create TerminalThread for SSH
-        m_terminalThread = new TerminalThread(this, initialRows, initialCols, m_deviceConfig);
+        m_terminalThread = new TerminalThread(m_eventProxy, initialRows, initialCols, m_deviceConfig);
         SSH_LOG("ConnectInfo: TerminalThread created");
 
         // Set keyboard callback to send input to thread
@@ -283,6 +382,12 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                         m_terminalThread->QueueInput(modified_data);
                     }
                 }
+            });
+            
+            // Set split callback
+            m_termCanvas->SetSplitCallback([this](wxSplitMode mode) {
+                SSH_LOG("ConnectInfo: split_callback called with mode=" << mode);
+                HandleSplit(mode);
             });
         }
     }
@@ -612,6 +717,49 @@ void ConnectInfo::OnSize(wxSizeEvent& event) {
         }
     }
     event.Skip();
+}
+
+void ConnectInfo::HandleSplit(wxSplitMode mode) {
+    SSH_LOG("ConnectInfo::HandleSplit called with mode=" << mode);
+    
+    // Check if content panel is already a TerminalPanel
+    TerminalPanel* existingPanel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+    
+    if (existingPanel) {
+        SSH_LOG("Content panel is already a TerminalPanel, calling its split");
+        // If it's already a TerminalPanel, let it handle the split
+        existingPanel->DoSplit(mode);
+    } else {
+        SSH_LOG("Content panel is not a TerminalPanel, wrapping it");
+        // If it's a direct TermGLCanvas, wrap it in a TerminalPanel first
+        if (m_termCanvas) {
+            SSH_LOG("Creating new TerminalPanel and InfiniteSplitter");
+            
+            // Create a new TerminalPanel with the canvas
+            TerminalPanel* newPanel = new TerminalPanel(m_contentPanel->GetParent(), nullptr);
+            newPanel->SetCanvas(m_termCanvas);
+            
+            // Create InfiniteSplitter
+            InfiniteSplitter* splitter = new InfiniteSplitter(m_contentPanel->GetParent());
+            splitter->Initialize(newPanel);
+            
+            // Replace the content panel with the splitter
+            // This requires the parent to have a sizer that can be updated
+            wxWindow* parent = m_contentPanel->GetParent();
+            if (parent) {
+                wxSizer* sizer = parent->GetSizer();
+                if (sizer) {
+                    SSH_LOG("Replacing content panel in sizer");
+                    sizer->Replace(m_contentPanel, splitter);
+                    m_contentPanel->Destroy();
+                    m_contentPanel = splitter;
+                    sizer->Layout();
+                    parent->Refresh();
+                    SSH_LOG("Content panel replaced successfully");
+                }
+            }
+        }
+    }
 }
 
 ConnectInfo::~ConnectInfo() {

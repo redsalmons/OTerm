@@ -286,3 +286,16 @@ msgstr "Delete"
 
 msgid "add"
 msgstr "Open"
+
+# Terminal Context Menu
+msgid "horizontalSplit"
+msgstr "Horizontal Split"
+
+msgid "verticalSplit"
+msgstr "Vertical Split"
+
+msgid "closePanel"
+msgstr "Close Panel"
+
+msgid "localConnection"
+msgstr "Local Connection"

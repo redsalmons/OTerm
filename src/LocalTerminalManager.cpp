@@ -2,6 +2,7 @@
 #include "SSHManager.h"
 #include <cstring>
 #include <iomanip>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -27,7 +28,7 @@
 #include <fstream>
 
 static void LT_LOG(const std::string& msg) {
-    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     if (f.is_open()) {
         f << "[LT-DEBUG] " << msg << std::endl;
         f.flush();

@@ -5,9 +5,9 @@
 wxDEFINE_EVENT(wxEVT_TERMINAL_DAMAGE, wxThreadEvent);
 wxDEFINE_EVENT(wxEVT_TERMINAL_EXIT, wxThreadEvent);
 
-TerminalThread::TerminalThread(wxEvtHandler* ui_handler, int rows, int cols, const DeviceConfig& config)
+TerminalThread::TerminalThread(EventProxyPtr event_proxy, int rows, int cols, const DeviceConfig& config)
     : wxThread(wxTHREAD_JOINABLE),
-      m_ui_handler(ui_handler),
+      m_event_proxy(event_proxy),
       m_deviceConfig(config),
       m_rows(rows),
       m_cols(cols),
@@ -36,6 +36,11 @@ void TerminalThread::ResizeVTerm(int rows, int cols) {
     std::lock_guard<std::mutex> lock(m_resize_mutex);
     m_resize_request = {rows, cols};
     m_resize_pending = true;
+}
+
+void TerminalThread::SetEventProxy(EventProxyPtr event_proxy) {
+    std::lock_guard<std::mutex> lock(m_input_mutex);
+    m_event_proxy = event_proxy;
 }
 
 void TerminalThread::ScrollVTerm(int lines) {
@@ -161,7 +166,7 @@ wxThread::ExitCode TerminalThread::Entry() {
                          m_deviceConfig.auth_method);
     
     // Main loop
-    while (!TestDestroy()) {
+    while (!TestDestroy() && !IsShuttingDown()) {
         // Run libuv event loop - non-blocking, returns immediately if no events
         uv_run(&m_loop, UV_RUN_NOWAIT);
         
@@ -442,35 +447,18 @@ void TerminalThread::swap_buffers() {
 
 void TerminalThread::send_damage_event(bool cursor_visible) {
     // SSH_LOG("TerminalThread::send_damage_event called");
-    if (m_ui_handler) {
-        TerminalDamageEvent* evt = new TerminalDamageEvent(
-            m_front_buffer.rows,
-            m_front_buffer.cols,
-            m_front_buffer.cursor_row,
-            m_front_buffer.cursor_col,
-            m_damage_rect.start_row,
-            m_damage_rect.end_row,
-            m_damage_rect.start_col,
-            m_damage_rect.end_col,
-            cursor_visible
-        );
-        // SSH_LOG("TerminalThread::send_damage_event - queuing event, rows: " << m_front_buffer.rows << ", cols: " << m_front_buffer.cols);
-        wxQueueEvent(m_ui_handler, evt);
-        // SSH_LOG("TerminalThread::send_damage_event - event queued");
+    if (m_event_proxy) {
+        // Use EventProxy to post damage event
+        m_event_proxy->PostDamageEvent(m_front_buffer.rows, m_front_buffer.cols, 
+                                        m_front_buffer.cursor_row, m_front_buffer.cursor_col, 0);
     } else {
-        SSH_LOG("TerminalThread::send_damage_event - m_ui_handler is null");
+        SSH_LOG("TerminalThread::send_damage_event - m_event_proxy is null");
     }
 }
 
 void TerminalThread::cleanup() {
-    // Notify UI thread that thread is exiting (before cleanup)
-    // Only send event if UI handler is still valid and not shutting down
-    {
-        std::lock_guard<std::mutex> lock(m_shutdown_mutex);
-        if (m_ui_handler && !m_shutting_down) {
-            wxQueueEvent(m_ui_handler, new wxThreadEvent(wxEVT_TERMINAL_EXIT));
-        }
-    }
+    // No need to notify UI thread via EventProxy for exit
+    // The UI will detect thread termination through other means
     
     // Cleanup SSH Manager
     m_sshManager.cleanup();

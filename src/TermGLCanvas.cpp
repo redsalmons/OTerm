@@ -1,4 +1,5 @@
 #include "TermGLCanvas.h"
+#include "TerminalPanel.h"
 #include <wx/wx.h>
 #include <wx/display.h>
 #include <wx/clipbrd.h>
@@ -6,6 +7,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
 #else
@@ -13,12 +15,14 @@
 #endif
 #include "SSHManager.h"
 #include "GlobalConfig.h"
+#include "LocalTerminalThread.h"
+#include "TerminalThread.h"
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif
 
-TermGLCanvas::TermGLCanvas(wxWindow* parent)
+TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
     : wxGLCanvas(parent, wxID_ANY, nullptr, wxDefaultPosition, wxDefaultSize,
                  wxFULL_REPAINT_ON_RESIZE | wxWANTS_CHARS | wxCLIP_CHILDREN | wxBORDER_NONE),
       m_glContext(nullptr),
@@ -35,7 +39,9 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
       m_cellHeight(0),
       m_cursorRect(0, 0, 0, 0),
       m_imeInputBox(nullptr),
-      m_imeInputBoxVisible(false) {
+      m_imeInputBoxVisible(false),
+      m_localTerminalThread(nullptr),
+      m_terminalThread(nullptr) {
     // Calculate DPI scale
     if (GetHandle()) {
         m_dpiScale = GetDPIScaleFactor();
@@ -58,9 +64,18 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
     Bind(wxEVT_LEFT_DOWN, &TermGLCanvas::OnMouseLeftDown, this);
     Bind(wxEVT_LEFT_UP, &TermGLCanvas::OnMouseLeftUp, this);
     Bind(wxEVT_MOTION, &TermGLCanvas::OnMouseMove, this);
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[CANVAS] Binding events, ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
+    
     Bind(wxEVT_RIGHT_DOWN, &TermGLCanvas::OnMouseRightDown, this);
+    Bind(wxEVT_RIGHT_UP, &TermGLCanvas::OnMouseRightDown, this);
     Bind(wxEVT_SET_FOCUS, &TermGLCanvas::OnSetFocus, this);
     Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnKillFocus, this);
+    Bind(wxEVT_TERMINAL_DAMAGE, &TermGLCanvas::OnTerminalDamage, this);
+    Bind(wxEVT_MENU, &TermGLCanvas::OnHorizontalSplit, this, ID_HORIZONTAL_SPLIT);
+    Bind(wxEVT_MENU, &TermGLCanvas::OnVerticalSplit, this, ID_VERTICAL_SPLIT);
+    
+    if (f.is_open()) f << "[CANVAS] Events bound successfully" << std::endl;
 
     // Create invisible proxy input box (12x18 pixels)
     // wxTE_RICH2 uses Rich Edit 2.0 which has better borderless support on Windows
@@ -84,16 +99,89 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent)
     m_imeInputBox->Bind(wxEVT_KEY_DOWN, &TermGLCanvas::OnProxyKeyDown, this);
     m_imeInputBox->Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnIMETextLostFocus, this);
 
+    // Create local terminal thread by default for console
+    m_localTerminalThread = new LocalTerminalThread(nullptr, 24, 80);
+    m_localTerminalThread->Start();
+
+    // Set key callback to send input to local terminal thread
+    SetKeyCallback([this](const char* data, int length) {
+        if (m_localTerminalThread) {
+            m_localTerminalThread->QueueInput(std::string(data, length));
+        }
+    });
+
     SSH_LOG("TermGLCanvas constructed, IsShown: " << IsShown() << ", IsEnabled: " << IsEnabled() << ", DPI scale: " << m_dpiScale);
 }
 
+void TermGLCanvas::StopThreads() {
+    if (m_localTerminalThread) {
+        m_localTerminalThread->SetShuttingDown();
+        m_localTerminalThread->Wait();
+        delete m_localTerminalThread;
+        m_localTerminalThread = nullptr;
+    }
+    if (m_terminalThread) {
+        m_terminalThread->SetShuttingDown();
+        m_terminalThread->Wait();
+        delete m_terminalThread;
+        m_terminalThread = nullptr;
+    }
+}
+
+void TermGLCanvas::ReinitializeGLContext() {
+    // Delete old context
+    if (m_glContext) {
+        delete m_glContext;
+        m_glContext = nullptr;
+    }
+    
+    // Reset initialization flag
+    m_glInitialized = false;
+    
+    // Force reinitialization on next paint
+    Refresh();
+}
+
 TermGLCanvas::~TermGLCanvas() {
+    SSH_LOG("TermGLCanvas destructor start");
+    StopThreads();
     delete m_fontAtlas;
     delete m_glContext;
     if (m_imeInputBox) {
         delete m_imeInputBox;
         m_imeInputBox = nullptr;
     }
+    SSH_LOG("TermGLCanvas destructor end");
+}
+
+void TermGLCanvas::ConvertToSSH(const std::string& username, const std::string& address, int port) {
+    DeviceConfig device;
+    device.username = wxString::FromUTF8(username.c_str());
+    device.address = wxString::FromUTF8(address.c_str());
+    device.port = port;
+    ConvertToSSH(device);
+}
+
+void TermGLCanvas::ConvertToSSH(const DeviceConfig& device) {
+    // Stop local terminal thread
+    if (m_localTerminalThread) {
+        m_localTerminalThread->SetShuttingDown();
+        m_localTerminalThread->Wait();
+        delete m_localTerminalThread;
+        m_localTerminalThread = nullptr;
+    }
+
+    // Update device config
+    m_deviceConfig = device;
+
+    // Create SSH terminal thread
+    m_terminalThread = new TerminalThread(nullptr, 24, 80, m_deviceConfig);
+    m_terminalThread->Run();
+    m_terminalThread->Connect();
+
+    // Clear screen
+    ClearScreenData();
+    Refresh();
 }
 
 void TermGLCanvas::InitializeGL() {
@@ -451,8 +539,15 @@ void TermGLCanvas::Render() {
 
 void TermGLCanvas::OnPaint(wxPaintEvent& event) {
     static int paintCount = 0;
-    if (paintCount == 0) {
-        SSH_LOG("TermGLCanvas::OnPaint called for the first time");
+    if (paintCount == 0 || paintCount % 30 == 0) {
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        if (f.is_open()) {
+            wxSize size = GetSize();
+            f << "[CANVAS] OnPaint count=" << paintCount
+              << " size=" << size.GetWidth() << "x" << size.GetHeight()
+              << " cells=" << m_screen_cells.size()
+              << " first_char=" << (m_screen_cells.empty() ? 0 : m_screen_cells[0].char_code) << std::endl;
+        }
     }
     paintCount++;
     
@@ -580,6 +675,7 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 }
 
 void TermGLCanvas::OnChar(wxKeyEvent& event) {
+    SSH_LOG("OnChar called, key_callback_=" << (key_callback_ ? "set" : "null"));
     if (key_callback_) {
         // Get the Unicode key - this handles basic character input
         int keycode = event.GetUnicodeKey();
@@ -591,6 +687,7 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
             int len = buffer.length();
 
             if (len > 0) {
+                SSH_LOG("OnChar sending key: len=" << len << " first=" << (int)(unsigned char)buffer.data()[0]);
                 // Send UTF-8 encoded character to terminal
                 key_callback_(buffer.data(), len);
             }
@@ -694,10 +791,52 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
 }
 
 void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[CANVAS] OnMouseRightDown called" << std::endl;
+    
     // Copy selection to clipboard on right click
-    SSH_LOG("OnMouseRightDown called");
     CopySelectionToClipboard();
+
+    // Show context menu with split options
+    wxMenu menu;
+    menu.Append(ID_HORIZONTAL_SPLIT, "Horizontal Split");
+    menu.Append(ID_VERTICAL_SPLIT, "Vertical Split");
+    
+    if (f.is_open()) f << "[CANVAS] Showing context menu at position: " << event.GetPosition().x << "," << event.GetPosition().y << std::endl;
+    if (f.is_open()) f << "[CANVAS] ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
+    int result = PopupMenu(&menu, event.GetPosition());
+    if (f.is_open()) f << "[CANVAS] PopupMenu returned with result: " << result << std::endl;
+    
+    // Skip to let parent handle it too
     event.Skip();
+}
+
+void TermGLCanvas::OnHorizontalSplit(wxCommandEvent& event) {
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[CANVAS] OnHorizontalSplit called" << std::endl;
+    
+    // Get parent TerminalPanel and call DoSplit
+    TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+    if (panel) {
+        if (f.is_open()) f << "[CANVAS] Calling TerminalPanel::DoSplit with wxSPLIT_HORIZONTAL" << std::endl;
+        panel->DoSplit(wxSPLIT_HORIZONTAL);
+    } else {
+        if (f.is_open()) f << "[CANVAS] ERROR: Parent is not TerminalPanel" << std::endl;
+    }
+}
+
+void TermGLCanvas::OnVerticalSplit(wxCommandEvent& event) {
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[CANVAS] OnVerticalSplit called" << std::endl;
+    
+    // Get parent TerminalPanel and call DoSplit
+    TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+    if (panel) {
+        if (f.is_open()) f << "[CANVAS] Calling TerminalPanel::DoSplit with wxSPLIT_VERTICAL" << std::endl;
+        panel->DoSplit(wxSPLIT_VERTICAL);
+    } else {
+        if (f.is_open()) f << "[CANVAS] ERROR: Parent is not TerminalPanel" << std::endl;
+    }
 }
 
 void TermGLCanvas::CopySelectionToClipboard() {
@@ -796,6 +935,97 @@ void TermGLCanvas::OnKillFocus(wxFocusEvent& event) {
     SSH_LOG("TermGLCanvas lost focus");
     // Don't hide IME input box here to avoid focus loop
     event.Skip();
+}
+
+void TermGLCanvas::OnTerminalDamage(wxThreadEvent& event) {
+    const ScreenBuffer* buffer = nullptr;
+    bool in_alt_screen = false;
+    int scroll_offset = 0;
+
+    if (m_terminalThread) {
+        buffer = m_terminalThread->GetFrontBuffer();
+        in_alt_screen = m_terminalThread->IsInAlternateScreen();
+        scroll_offset = m_terminalThread->GetScrollOffset();
+    } else if (m_localTerminalThread) {
+        buffer = m_localTerminalThread->GetFrontBuffer();
+        in_alt_screen = m_localTerminalThread->IsInAlternateScreen();
+        scroll_offset = m_localTerminalThread->GetScrollOffset();
+    }
+
+    if (!buffer) {
+        SSH_LOG("OnTerminalDamage: no buffer");
+        return;
+    }
+
+    static int damageCount = 0;
+    {
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        if (f.is_open()) {
+            f << "[CANVAS] OnTerminalDamage entry count=" << damageCount << std::endl;
+        }
+    }
+    char32_t first_non_empty = 0;
+    for (const auto& row : buffer->cells) {
+        for (const auto& cell : row) {
+            if (cell.char_code != 0) {
+                first_non_empty = cell.char_code;
+                break;
+            }
+        }
+        if (first_non_empty != 0) break;
+    }
+    static bool logged_nonempty = false;
+    uint32_t first_fg = 0, first_bg = 0;
+    if (first_non_empty != 0) {
+        for (const auto& row : buffer->cells) {
+            for (const auto& cell : row) {
+                if (cell.char_code != 0) {
+                    first_fg = cell.fg_color;
+                    first_bg = cell.bg_color;
+                    break;
+                }
+            }
+            if (first_fg != 0 || first_bg != 0) break;
+        }
+    }
+    if (damageCount == 0 || damageCount % 30 == 0 || (!logged_nonempty && first_non_empty != 0)) {
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        if (f.is_open()) {
+            f << "[CANVAS] OnTerminalDamage count=" << damageCount
+              << " rows=" << buffer->rows << " cols=" << buffer->cols
+              << " cursor=" << buffer->cursor_row << "," << buffer->cursor_col
+              << " first_nonempty_char=" << static_cast<int>(first_non_empty)
+              << " fg=0x" << std::hex << first_fg << std::dec
+              << " bg=0x" << std::hex << first_bg << std::dec
+              << " row0=";
+            if (!buffer->cells.empty()) {
+                for (int i = 0; i < 20 && i < (int)buffer->cells[0].size(); ++i) {
+                    f << static_cast<int>(buffer->cells[0][i].char_code) << ",";
+                }
+            }
+            f << std::endl;
+        }
+    }
+    if (first_non_empty != 0) logged_nonempty = true;
+    damageCount++;
+
+    // Convert 2D buffer to flat cell list with proper coordinates
+    std::vector<CellInstance> cells;
+    for (int row = 0; row < buffer->rows; ++row) {
+        for (int col = 0; col < buffer->cols; ++col) {
+            CellInstance inst = buffer->cells[row][col];
+            inst.cell_x = (float)col;
+            inst.cell_y = (float)row;
+            cells.push_back(inst);
+        }
+    }
+
+    m_rows_count = buffer->rows;
+    m_cols_count = buffer->cols;
+    m_screen_cells = std::move(cells);
+
+    SetCursorPosition(buffer->cursor_row, buffer->cursor_col, in_alt_screen, scroll_offset);
+    Refresh();
 }
 
 void TermGLCanvas::ShowIMEInputBox() {

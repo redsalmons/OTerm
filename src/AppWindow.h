@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <uv.h>
+#include <queue>
 //#include "TerminalTab.h"
 
 enum {
@@ -25,7 +26,9 @@ public:
 private:
     CustomTitleBar* m_titleBar;
     wxSimplebook* m_notebook;
+    
     void OnQuit(wxCommandEvent& event);
+    void OnClose(wxCloseEvent& event);
     void OnNewTab(wxCommandEvent& event);
     void OnIdle(wxIdleEvent& event);
     void OnSize(wxSizeEvent& event);

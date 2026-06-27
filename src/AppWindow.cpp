@@ -18,6 +18,9 @@
 #include <sstream>
 #include <fstream>
 #include "ConnectInfo.h"
+#include "TerminalPanel.h"
+#include "InfiniteSplitter.h"
+#include "LocalTerminalContainer.h"
 
 #if defined(__WXMSW__)
 #include <wx/msw/private.h>
@@ -54,7 +57,7 @@ private:
 
 static void CustomAssertHandler(const wxString& file, int line, const wxString& func,
                                 const wxString& cond, const wxString& msg) {
-    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     if (f.is_open()) {
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
@@ -90,7 +93,7 @@ wxIMPLEMENT_APP(MyApp);
 
 void MyApp::OnAssertFailure(const wxChar* file, int line, const wxChar* func,
                             const wxChar* cond, const wxChar* msg) {
-    std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     if (f.is_open()) {
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
@@ -130,7 +133,7 @@ bool MyApp::OnInit() {
         }
 #endif
 
-        wxLog::SetActiveTarget(new wxLogFileAndStderr("D:/temp/oterm_wx.log"));
+        wxLog::SetActiveTarget(new wxLogFileAndStderr((std::filesystem::temp_directory_path() / "oterm_wx.log").string()));
 
         // Set application name for proper config directory
         wxApp::SetAppName("OceanTerm");
@@ -279,6 +282,7 @@ int MyApp::OnRun() {
 
 wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_MENU(wxID_EXIT, AppWindow::OnQuit)
+    EVT_CLOSE(AppWindow::OnClose)
     EVT_MENU(wxID_NEW, AppWindow::OnNewTab)
     EVT_IDLE(AppWindow::OnIdle)
     EVT_SIZE(AppWindow::OnSize)
@@ -343,12 +347,22 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
     DeviceConfig newDevice = device;
     SSH_LOG("Device selected: " << newDevice.name);
 
-    TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
-    SSH_LOG("TermGLCanvas created");
+    // Create TerminalPanel with LocalTerminalContainer (will be converted to SSH later)
+    LocalTerminalContainer* container = new LocalTerminalContainer(24, 80, "");
+    TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, container);
+    
+    // Create TermGLCanvas and set it to the panel
+    TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
+    terminalPanel->SetCanvas(terminalCanvas);
+    
+    // Create InfiniteSplitter and initialize it with the panel
+    InfiniteSplitter* splitter = new InfiniteSplitter(m_notebook);
+    splitter->SetMainWindow(this);
+    splitter->Initialize(terminalPanel);
 
     // Create tab label as "username@address"
     wxString tabLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
-    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalCanvas, newDevice);
+    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, splitter, newDevice);
     SSH_LOG("Tab added to title bar");
 
     // Connect to SSH
@@ -365,31 +379,96 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
 
 void AppWindow::CreateLocalTerminalTab() {
     {
-        std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
         if (f.is_open()) f << "[APP] CreateLocalTerminalTab entered" << std::endl;
     }
 
-    TermGLCanvas* terminalCanvas = new TermGLCanvas(m_notebook);
+    // Create TerminalPanel with LocalTerminalContainer
+    LocalTerminalContainer* container = new LocalTerminalContainer(24, 80, "");
+    TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, container);
+    
+    // Create TermGLCanvas and set it to the panel
+    TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
+    terminalPanel->SetCanvas(terminalCanvas);
+    
+    // Create InfiniteSplitter and initialize it with the panel
+    InfiniteSplitter* splitter = new InfiniteSplitter(m_notebook);
+    splitter->SetMainWindow(this);
+    splitter->Initialize(terminalPanel);
 
     DeviceConfig emptyConfig;
     wxString tabLabel = TranslationHelper::Tr("localTerminal");
     if (tabLabel.IsEmpty()) {
         tabLabel = "Local";
     }
-    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalCanvas, emptyConfig, true, true);
+    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, splitter, emptyConfig, true, true);
 
     {
-        std::ofstream f("D:/temp/oterm_alert.log", std::ios::app);
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
         if (f.is_open()) f << "[APP] AddTab returned newTab=" << (newTab ? "yes" : "no") << std::endl;
     }
 
     if (newTab) {
+        SSH_LOG("Calling Connect() on tab");
+        newTab->Connect();
+        SSH_LOG("Connect() returned");
         terminalCanvas->ShowIMEInputBox();
+    } else {
+        SSH_LOG("ERROR: newTab is null");
     }
 }
 
 void AppWindow::OnQuit(wxCommandEvent& WXUNUSED(event)) {
     Close(true);
+}
+
+void AppWindow::OnClose(wxCloseEvent& event) {
+    SSH_LOG("AppWindow::OnClose called");
+    
+    // Stop all terminal threads before closing
+    // Iterate through all tabs and stop their threads
+    if (m_notebook) {
+        for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+            wxWindow* page = m_notebook->GetPage(i);
+            if (page) {
+                // Try to find TermGLCanvas and stop its threads
+                TermGLCanvas* canvas = dynamic_cast<TermGLCanvas*>(page);
+                if (!canvas) {
+                    // Check if it's a TerminalPanel
+                    TerminalPanel* panel = dynamic_cast<TerminalPanel*>(page);
+                    if (panel) {
+                        canvas = panel->GetCanvas();
+                    }
+                }
+                if (!canvas) {
+                    // Check if it's an InfiniteSplitter
+                    InfiniteSplitter* splitter = dynamic_cast<InfiniteSplitter*>(page);
+                    if (splitter) {
+                        wxWindow* window1 = splitter->GetWindow1();
+                        if (window1) {
+                            TerminalPanel* panel = dynamic_cast<TerminalPanel*>(window1);
+                            if (panel) canvas = panel->GetCanvas();
+                        }
+                        if (!canvas && splitter->GetWindow2()) {
+                            wxWindow* window2 = splitter->GetWindow2();
+                            if (window2) {
+                                TerminalPanel* panel = dynamic_cast<TerminalPanel*>(window2);
+                                if (panel) canvas = panel->GetCanvas();
+                            }
+                        }
+                    }
+                }
+                
+                if (canvas) {
+                    SSH_LOG("Stopping threads for canvas at page " << i);
+                    canvas->StopThreads();
+                }
+            }
+        }
+    }
+    
+    SSH_LOG("All threads stopped, proceeding with close");
+    event.Skip();
 }
 
 void AppWindow::OnNewTab(wxCommandEvent& WXUNUSED(event)) {

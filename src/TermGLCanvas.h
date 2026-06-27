@@ -3,16 +3,21 @@
 
 #include <wx/wx.h>
 #include <wx/glcanvas.h>
+#include <wx/splitter.h>
 #include <vector>
 #include <map>
 #include "CellInstance.h"
 #include "FontAtlas.h"
+#include "DeviceConfig.h"
 
 #include "ConnectInfo.h"
 
+class LocalTerminalThread;
+class TerminalThread;
+
 class TermGLCanvas : public wxGLCanvas {
 public:
-    TermGLCanvas(wxWindow* parent);
+    TermGLCanvas(wxWindow* parent, bool createThread = true);
     ~TermGLCanvas();
 
     void UpdateScreenData(const std::vector<CellInstance>& instances);
@@ -20,6 +25,19 @@ public:
     void SetCursorVisible(bool visible) { m_cursor_visible = visible; }
     void ClearScreenData();
     float GetDPIScale() const { return m_dpiScale; }
+
+    // Convert local terminal to SSH terminal
+    void ConvertToSSH(const std::string& username, const std::string& address, int port = 22);
+    void ConvertToSSH(const DeviceConfig& device);
+
+    // Stop terminal threads (called before window destruction to avoid hanging)
+    void StopThreads();
+    
+    // Reinitialize OpenGL context after reparent
+    void ReinitializeGLContext();
+    
+    // Get local terminal thread
+    LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
 
     typedef std::function<void(const char* data, int length)> KeyCallback;
     void SetKeyCallback(KeyCallback callback) { key_callback_ = callback; }
@@ -29,6 +47,10 @@ public:
     
     typedef std::function<void(int row, int col, int button)> MouseCallback;
     void SetMouseCallback(MouseCallback callback) { mouse_callback_ = callback; }
+    
+    // Split callbacks
+    typedef std::function<void(wxSplitMode mode)> SplitCallback;
+    void SetSplitCallback(SplitCallback callback) { split_callback_ = callback; }
 
 private:
     void OnPaint(wxPaintEvent& event);
@@ -41,8 +63,11 @@ private:
     void OnMouseLeftUp(wxMouseEvent& event);
     void OnMouseMove(wxMouseEvent& event);
     void OnMouseRightDown(wxMouseEvent& event);
+    void OnHorizontalSplit(wxCommandEvent& event);
+    void OnVerticalSplit(wxCommandEvent& event);
     void OnSetFocus(wxFocusEvent& event);
     void OnKillFocus(wxFocusEvent& event);
+    void OnTerminalDamage(wxThreadEvent& event);
     void InitializeGL();
     void InitializeFontMetrics();
     void Render();
@@ -67,6 +92,7 @@ public:
     KeyCallback key_callback_;
     ScrollCallback scroll_callback_;
     MouseCallback mouse_callback_;
+    SplitCallback split_callback_;
     bool m_glInitialized;
     float m_dpiScale;
 
@@ -95,6 +121,16 @@ public:
     void OnProxyTextReceived(wxCommandEvent& event);
     void OnProxyKeyDown(wxKeyEvent& event);
     void OnIMETextLostFocus(wxFocusEvent& event);
+
+    // Terminal threads
+    LocalTerminalThread* m_localTerminalThread;
+    TerminalThread* m_terminalThread;
+    DeviceConfig m_deviceConfig;
+
+    enum {
+        ID_HORIZONTAL_SPLIT = wxID_HIGHEST + 500,
+        ID_VERTICAL_SPLIT
+    };
 
 };
 
