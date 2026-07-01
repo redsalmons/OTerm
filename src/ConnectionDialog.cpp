@@ -91,6 +91,9 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     formSizer->Add(gridSizer, 1, wxEXPAND | wxALL, 12);
 
     wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_deleteButton = new wxButton(formPanel, wxID_DELETE, TranslationHelper::Tr("delete"));
+    m_deleteButton->Enable(false);
+    buttonSizer->Add(m_deleteButton, 0, wxALL, 5);
     buttonSizer->Add(new wxButton(formPanel, wxID_SAVE, TranslationHelper::Tr("save")), 0, wxALL, 5);
     m_connectButton = new wxButton(formPanel, wxID_OK, TranslationHelper::Tr("connect"));
     m_connectButton->Enable(false);
@@ -114,6 +117,7 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnSave, this, wxID_SAVE);
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnConnect, this, wxID_OK);
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnCancel, this, wxID_CANCEL);
+    Bind(wxEVT_BUTTON, &ConnectionDialog::OnDelete, this, wxID_DELETE);
     Bind(wxEVT_CHOICE, &ConnectionDialog::OnAuthMethodChanged, this, m_authChoice->GetId());
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnKeyBrowse, this, m_keyBrowseButton->GetId());
     Bind(wxEVT_SIZE, &ConnectionDialog::OnSize, this);
@@ -190,6 +194,7 @@ void ConnectionDialog::OnTreeSelectionChanged(wxTreeEvent& event) {
         m_currentDevice = DeviceConfig();
         PopulateForm(m_currentDevice);
         m_connectButton->Enable(false);
+        m_deleteButton->Enable(false);
         return;
     }
 
@@ -200,9 +205,11 @@ void ConnectionDialog::OnTreeSelectionChanged(wxTreeEvent& event) {
             m_currentDevice = m_devices[index];
             PopulateForm(m_currentDevice);
             m_connectButton->Enable(true);
+            m_deleteButton->Enable(true);
         }
     } else {
         m_connectButton->Enable(false);
+        m_deleteButton->Enable(false);
     }
 }
 
@@ -312,6 +319,40 @@ void ConnectionDialog::OnConnect(wxCommandEvent& event) {
 
 void ConnectionDialog::OnCancel(wxCommandEvent& event) {
     EndModal(wxID_CANCEL);
+}
+
+void ConnectionDialog::OnDelete(wxCommandEvent& event) {
+    wxTreeItemId itemId = m_treeCtrl->GetSelection();
+    if (!itemId.IsOk()) return;
+
+    DeviceTreeItemData* itemData = dynamic_cast<DeviceTreeItemData*>(m_treeCtrl->GetItemData(itemId));
+    if (!itemData) {
+        // Not a device tree item (root or category), cannot delete
+        return;
+    }
+
+    size_t index = itemData->GetIndex();
+    if (index >= m_devices.size()) return;
+
+    wxString msg = TranslationHelper::Tr("delete") + " '" + m_devices[index].name + "'?";
+    if (wxMessageBox(msg, TranslationHelper::Tr("delete"), wxYES_NO | wxICON_QUESTION, this) == wxYES) {
+        m_devices.erase(m_devices.begin() + index);
+        SaveConfig();
+        RebuildTree();
+        
+        // Reset current selection / form
+        m_currentDevice = DeviceConfig();
+        PopulateForm(m_currentDevice);
+        m_connectButton->Enable(false);
+        m_deleteButton->Enable(false);
+
+        // Send event to notify parent window to refresh device list
+        wxCommandEvent updateEvent(wxEVT_DEVICE_LIST_UPDATE);
+        wxWindow* parent = GetParent();
+        if (parent) {
+            parent->GetEventHandler()->ProcessEvent(updateEvent);
+        }
+    }
 }
 
 void ConnectionDialog::OnAuthMethodChanged(wxCommandEvent& event) {

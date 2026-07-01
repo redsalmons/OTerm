@@ -28,6 +28,7 @@ private:
     void OnSave(wxCommandEvent& event);
     void OnConnect(wxCommandEvent& event);
     void OnCancel(wxCommandEvent& event);
+    void OnDelete(wxCommandEvent& event);
     void OnAuthMethodChanged(wxCommandEvent& event);
     void OnKeyBrowse(wxCommandEvent& event);
     void OnSize(wxSizeEvent& event);
@@ -49,6 +50,7 @@ private:
     wxTextCtrl* m_keyTextCtrl;
     wxButton* m_keyBrowseButton;
     wxButton* m_connectButton;
+    wxButton* m_deleteButton;
 
     std::vector<DeviceConfig> m_devices;
     DeviceConfig m_currentDevice;
