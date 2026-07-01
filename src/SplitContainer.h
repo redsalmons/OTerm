@@ -22,6 +22,9 @@ public:
     // Scale sash position proportionally when container size changes
     void ScaleSashPosition(float ratio);
     void UpdateLayout();
+    
+    // Check if container is being destroyed
+    bool IsBeingDeleted() const { return m_beingDeleted; }
 
 private:
     wxWindow* m_first = nullptr;
@@ -34,6 +37,7 @@ private:
     wxPoint m_dragStart;
     int m_dragStartSashPos;
     int m_lastTotalSize = 0; // Track last size to detect changes
+    bool m_beingDeleted = false; // Track destruction state
     
     void OnSashMouseLeftDown(wxMouseEvent& event);
     void OnSashMouseMotion(wxMouseEvent& event);

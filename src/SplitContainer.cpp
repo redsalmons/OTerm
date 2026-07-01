@@ -29,6 +29,7 @@ SplitContainer::SplitContainer(wxWindow* parent, wxSplitMode mode)
 }
 
 SplitContainer::~SplitContainer() {
+    m_beingDeleted = true;
 }
 
 void SplitContainer::SetChildren(wxWindow* first, wxWindow* second) {

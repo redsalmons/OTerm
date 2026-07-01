@@ -352,10 +352,36 @@ void SplitManager::DoClose(TerminalPanel* panel) {
     
     if (grandparent) {
         bool parentIsLeft = (grandparent->left.get() == parentBranch);
+        
+        SM_LOG("DoClose: sibling type=" << (sibling->type == SplitNodeType::Leaf ? "Leaf" : "Branch"));
+        
+        // Replace parentBranch with sibling in grandparent
         if (parentIsLeft) {
             grandparent->left = std::move(sibling);
         } else {
             grandparent->right = std::move(sibling);
+        }
+        
+        // Composite pattern: grandparent's container should handle both Leaf and Branch children
+        // Update the container's children directly instead of destroying it
+        if (grandparent->container) {
+            SM_LOG("DoClose: updating grandparent container children (composite pattern)");
+            wxWindow* firstWin = nullptr;
+            wxWindow* secondWin = nullptr;
+            
+            if (grandparent->left) {
+                firstWin = (grandparent->left->type == SplitNodeType::Leaf) 
+                    ? grandparent->left->content->GetWindow() 
+                    : grandparent->left->container;
+            }
+            if (grandparent->right) {
+                secondWin = (grandparent->right->type == SplitNodeType::Leaf) 
+                    ? grandparent->right->content->GetWindow() 
+                    : grandparent->right->container;
+            }
+            
+            grandparent->container->SetChildren(firstWin, secondWin);
+            grandparent->container->UpdateLayout();
         }
     } else {
         m_tree->SetRootNode(std::move(sibling));
@@ -393,6 +419,9 @@ void SplitManager::DoClose(TerminalPanel* panel) {
         containerToDestroy->Destroy();
         SM_LOG("DoClose: old container destroyed");
     }
+    
+    // Don't do grandparent container destruction here - let RebuildUIFromTree handle it
+    // The tree structure has been updated, RebuildUIFromTree will rebuild the UI properly
     
     SM_LOG("DoClose: scheduling UI rebuild in CallAfter");
     Thaw();
@@ -614,9 +643,19 @@ void SplitManager::RebuildUIFromTree() {
                         notebook->AddPage(container, "Terminal", true);
                     }
                 } else {
-                    // container 已经在 notebook 中（是 root container），正常显示并刷新
+                    // container 已经在 notebook 中（是 root container），需要重建子节点
                     SM_LOG("RebuildUIFromTree: branch, win already in notebook at page " << pageIndex);
-                    container->Show(true);
+                    // Check if container is still valid before showing
+                    if (container && !container->IsBeingDeleted()) {
+                        container->Show(true);
+                        // Rebuild children to match new tree structure
+                        SM_LOG("RebuildUIFromTree: branch, rebuilding children for existing container");
+                        RebuildUIRecursive(root->left.get(), container);
+                        RebuildUIRecursive(root->right.get(), container);
+                    } else {
+                        SM_LOG("RebuildUIFromTree: branch, container is null or being deleted, skipping Show");
+                        return;
+                    }
                 }
                 
                 // Check if notebook is still valid before operations
@@ -627,11 +666,23 @@ void SplitManager::RebuildUIFromTree() {
                     notebook->SendSizeEvent();
                 } else {
                     SM_LOG("RebuildUIFromTree: notebook is null or being deleted, skipping operations");
+                    return;
                 }
             }
             
             // 确保 container 得到正确尺寸后更新布局
-            container->UpdateLayout();
+            if (container && !container->IsBeingDeleted()) {
+                container->UpdateLayout();
+            } else {
+                SM_LOG("RebuildUIFromTree: container is null or being deleted, skipping UpdateLayout");
+                return;
+            }
+            
+            // Check if children are valid before recursive calls
+            if (!root->left || !root->right) {
+                SM_LOG("RebuildUIFromTree: children are null, skipping recursive calls");
+                return;
+            }
             
             SM_LOG("RebuildUIFromTree: calling RebuildUIRecursive for left child");
             RebuildUIRecursive(root->left.get(), container);
