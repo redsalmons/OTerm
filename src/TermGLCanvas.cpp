@@ -38,6 +38,8 @@
 
 #include "TerminalThread.h"
 
+#include "TranslationHelper.h"
+
 
 
 #ifndef GL_CLAMP_TO_EDGE
@@ -62,7 +64,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
       m_rows_count(0), m_cols_count(0),
 
-      m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_scroll_offset(0),
+      m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_cursor_out_of_bounds(false), m_scroll_offset(0),
 
       m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f),
 
@@ -85,7 +87,8 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
       m_imeInputBoxVisible(false),
       m_localTerminalThread(nullptr),
       m_terminalThread(nullptr),
-      m_ownsThreads(false) {
+      m_ownsThreads(false),
+      m_wheelRotationAccumulator(0) {
 
     // Calculate DPI scale
 
@@ -578,131 +581,86 @@ void TermGLCanvas::ClearScreenData() {
 
 
 void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int vterm_scroll_offset) {
-
     m_cursor_row = row;
-
     m_cursor_col = col;
 
-
-
     // 1. Calculate and update scroll offset first, as it affects coordinate calculation
-
     if (in_alt_screen) {
-
         m_scroll_offset = 0;
-
     } else if (vterm_scroll_offset > 0) {
-
         m_scroll_offset = 0;
-
     } else {
-
         // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
-
         wxSize size = GetSize();
-
         int scroll_margin_y = static_cast<int>(4 * m_dpiScale);
-
         int availableHeight = size.GetHeight() - scroll_margin_y * 2;
-
         int visible_rows = availableHeight / m_cached_cell_height;
-
         
-
         // Calculate scroll offset to keep cursor at bottom
-
         if (m_cursor_row >= visible_rows) {
-
             m_scroll_offset = m_cursor_row - visible_rows + 1;
-
         } else {
-
             m_scroll_offset = 0;
-
         }
-
     }
 
+    // 2. Determine if cursor is within screen bounds
+    int screen_row = row;
+    if (vterm_scroll_offset > 0) {
+        screen_row = row + vterm_scroll_offset;
+    }
 
+    int max_rows = (m_rows_count > 0) ? m_rows_count : 24;
+    m_cursor_out_of_bounds = (vterm_scroll_offset > 0 && screen_row >= max_rows);
 
-    // 2. Now calculate cursor rect with the correct updated m_scroll_offset
-
+    // 3. Now calculate cursor rect with the correct updated m_scroll_offset
     float margin_x = 8.0f * m_dpiScale;
-
     float margin_y = 4.0f * m_dpiScale;
-
     float cell_width = static_cast<float>(m_cellWidth);
-
     float cell_height = static_cast<float>(m_cellHeight);
 
-
-
     float cursor_x = col * cell_width + margin_x;
-
-    float cursor_y = (row - m_scroll_offset) * cell_height + margin_y;
-
+    float cursor_y = (screen_row - m_scroll_offset) * cell_height + margin_y;
     float cursor_height = cell_height * 0.85f;
-
     float cursor_y_offset = (cell_height - cursor_height) / 2.0f;
-
     cursor_y += cursor_y_offset;
 
-
-
     // Save to member for Render() to use
-
-    m_cursorRect = wxRect(static_cast<int>(cursor_x), static_cast<int>(cursor_y),
-
-                          static_cast<int>(cell_width), static_cast<int>(cursor_height));
-
-
-
-    // 3. Update IME input box position and size if visible
-
-    if (m_imeInputBox && m_imeInputBoxVisible) {
-
-        // Bounds check (same logic as ShowIMEInputBox)
-
-        wxSize size = GetSize();
-
-        wxRect imeRect = m_cursorRect;
-
-        if (imeRect.x < 0) imeRect.x = 0;
-
-        if (imeRect.y < 0) imeRect.y = 0;
-
-        if (imeRect.x + imeRect.width > size.GetWidth()) imeRect.x = size.GetWidth() - imeRect.width;
-
-        if (imeRect.y + imeRect.height > size.GetHeight()) imeRect.y = size.GetHeight() - imeRect.height;
-
-
-
-        // Update m_cursorRect so Render() stays in sync
-
-        m_cursorRect = imeRect;
-
-
-
-        // Set input box size and position to match cursor exactly
-
-        m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
-
-
-
-        // On macOS, notify input method about position
-
-#ifdef __WXMAC__
-
-        // Use NSTextInputClient to set first rect for line
-
-        // This is a simplified approach - for production you might need more sophisticated handling
-
-        // The SetSize call above should help with basic alignment
-
-#endif
-
+    if (m_cursor_out_of_bounds) {
+        m_cursorRect = wxRect(0, 0, 0, 0);
+    } else {
+        m_cursorRect = wxRect(static_cast<int>(cursor_x), static_cast<int>(cursor_y),
+                              static_cast<int>(cell_width), static_cast<int>(cursor_height));
     }
 
+    // 4. Update IME input box position and size if visible
+    if (m_imeInputBox && m_imeInputBoxVisible) {
+        if (m_cursor_out_of_bounds) {
+            m_imeInputBox->Hide();
+        } else {
+            m_imeInputBox->Show();
+            wxSize size = GetSize();
+            wxRect imeRect = m_cursorRect;
+
+            if (imeRect.x < 0) imeRect.x = 0;
+            if (imeRect.y < 0) imeRect.y = 0;
+            if (imeRect.x + imeRect.width > size.GetWidth()) imeRect.x = size.GetWidth() - imeRect.width;
+            if (imeRect.y + imeRect.height > size.GetHeight()) imeRect.y = size.GetHeight() - imeRect.height;
+
+            // Update m_cursorRect so Render() stays in sync
+            m_cursorRect = imeRect;
+
+            // Set input box size and position to match cursor exactly
+            m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
+
+            // On macOS, notify input method about position
+#ifdef __WXMAC__
+            // Use NSTextInputClient to set first rect for line
+            // This is a simplified approach - for production you might need more sophisticated handling
+            // The SetSize call above should help with basic alignment
+#endif
+        }
+    }
 }
 
 
@@ -1025,7 +983,7 @@ void TermGLCanvas::Render() {
 
     // 3. 绘制光标 (直接使用 SetCursorPosition 中计算好的 m_cursorRect)
 
-    if (m_cursor_visible) {
+    if (m_cursor_visible && !m_cursor_out_of_bounds) {
 
         glColor4f(1.0f, 1.0f, 1.0f, 0.5f);
 
@@ -1673,41 +1631,27 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
 
 void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
-
     int delta = event.GetWheelRotation();
+    int wheelDelta = event.GetWheelDelta();
+    if (wheelDelta <= 0) wheelDelta = 120; // fallback safety
 
-    int lines = delta / event.GetWheelDelta();
+    m_wheelRotationAccumulator += delta;
+    int lines = m_wheelRotationAccumulator / wheelDelta;
+    m_wheelRotationAccumulator %= wheelDelta;
 
-
-
-    // Normal scrolling
-
-    SSH_LOG("TermGLCanvas::OnMouseWheel: delta=" << delta << ", lines=" << lines);
-
+    SSH_LOG("TermGLCanvas::OnMouseWheel: delta=" << delta << ", lines=" << lines << ", accum=" << m_wheelRotationAccumulator);
     SSH_LOG("  scroll_callback_ is " << (scroll_callback_ ? "set" : "NULL"));
 
-
-
-    // Call scroll callback if set
-
-    if (scroll_callback_) {
-
-        scroll_callback_(lines);
-
-    } else {
-
-        SSH_LOG("  WARNING: scroll_callback_ is NULL, scroll will not work");
-
+    if (lines != 0) {
+        if (scroll_callback_) {
+            scroll_callback_(lines);
+        } else {
+            SSH_LOG("  WARNING: scroll_callback_ is NULL, scroll will not work");
+        }
+        Refresh();
     }
 
-
-
-    Refresh();
-
-
-
     event.Skip();
-
 }
 
 
@@ -1866,13 +1810,13 @@ void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
 
     wxMenu menu;
 
-    menu.Append(ID_HORIZONTAL_SPLIT, "Horizontal Split");
+    menu.Append(ID_HORIZONTAL_SPLIT, TranslationHelper::Tr("horizontalSplit"));
 
-    menu.Append(ID_VERTICAL_SPLIT, "Vertical Split");
+    menu.Append(ID_VERTICAL_SPLIT, TranslationHelper::Tr("verticalSplit"));
 
     menu.AppendSeparator();
 
-    menu.Append(ID_CLOSE_PANEL, "Close Panel");
+    menu.Append(ID_CLOSE_PANEL, TranslationHelper::Tr("closePanel"));
 
     
 

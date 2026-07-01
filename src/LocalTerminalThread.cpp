@@ -21,14 +21,25 @@ static void LT_LOG(const std::string& msg) {
 
 LocalTerminalThread::LocalTerminalThread(EventProxyPtr event_proxy, int rows, int cols, const std::string& shell)
     : wxThread(wxTHREAD_JOINABLE),
+      m_terminalManager(),
       m_vtermManager(),
+      m_input_queue(),
+      m_input_mutex(),
+      m_input_cv(),
+      m_resize_request(),
+      m_resize_pending(false),
+      m_resize_mutex(),
+      m_shutting_down(false),
+      m_shutdown_mutex(),
       m_event_proxy(event_proxy),
+      m_front_buffer(),
+      m_back_buffer(),
+      m_buffer_mutex(),
       m_shell(shell),
       m_rows(rows),
       m_cols(cols),
-      m_resize_pending(false),
-      m_shutting_down(false),
-      m_has_damage(false) {
+      m_has_damage(false),
+      m_damage_rect() {
     LT_LOG("LocalTerminalThread constructor called");
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
@@ -111,7 +122,9 @@ void LocalTerminalThread::ScrollVTerm(int lines) {
     }
 
     SSH_LOG("  Cursor position: " << m_back_buffer.cursor_row << "," << m_back_buffer.cursor_col);
-    // SSH_LOG("  Sending damage event");
+    
+    // Swap buffers so front buffer contains the updated data
+    swap_buffers();
 
     bool cursor_visible = (m_vtermManager.get_scroll_offset() == 0);
     send_damage_event(cursor_visible);
@@ -119,7 +132,27 @@ void LocalTerminalThread::ScrollVTerm(int lines) {
 
 void LocalTerminalThread::ResetScrollToBottom() {
     m_vtermManager.scroll_to_bottom();
-    send_damage_event(false);
+    
+    // Refresh back buffer
+    for (int row = 0; row < m_rows; ++row) {
+        const auto& row_cells = m_vtermManager.get_screen_row(row);
+        for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
+            const auto& cell = row_cells[col];
+            CellInstance& inst = m_back_buffer.cells[row][col];
+            inst.cell_x = (float)col;
+            inst.cell_y = (float)row;
+            inst.uv_u = 0;
+            inst.uv_v = 0;
+            inst.uv_w = 0;
+            inst.uv_h = 0;
+            inst.char_code = cell.char_code;
+            inst.fg_color = cell.fg_color;
+            inst.bg_color = cell.bg_color;
+        }
+    }
+    
+    swap_buffers();
+    send_damage_event(true);
 }
 
 void LocalTerminalThread::SetEventProxy(EventProxyPtr event_proxy) {
@@ -159,12 +192,12 @@ void LocalTerminalThread::process_input_queue() {
 }
 
 void LocalTerminalThread::swap_buffers() {
-    // Copy from VTermManager cell buffer to back buffer
-    const auto& cell_buffer = m_vtermManager.get_cell_buffer();
+    // Copy from VTermManager screen row (supports scrollback history) to back buffer
     char32_t first_non_empty = 0;
-    for (int row = 0; row < m_rows && row < (int)cell_buffer.size(); ++row) {
-        for (int col = 0; col < m_cols && col < (int)cell_buffer[row].size(); ++col) {
-            const auto& cell = cell_buffer[row][col];
+    for (int row = 0; row < m_rows; ++row) {
+        const auto& row_cells = m_vtermManager.get_screen_row(row);
+        for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
+            const auto& cell = row_cells[col];
             CellInstance& inst = m_back_buffer.cells[row][col];
             inst.char_code = cell.char_code;
             inst.fg_color = cell.fg_color;
@@ -184,6 +217,8 @@ void LocalTerminalThread::swap_buffers() {
     LT_LOG("swap_buffers: first_nonempty=" + std::to_string((int)first_non_empty) +
            " cursor=" + std::to_string(cursor_pos.row) + "," + std::to_string(cursor_pos.col));
 
+    // Swap under lock
+    std::lock_guard<std::mutex> lock(m_buffer_mutex);
     std::swap(m_front_buffer, m_back_buffer);
 }
 
@@ -217,11 +252,12 @@ void LocalTerminalThread::process_resize() {
                " -> " + std::to_string(m_rows) + "x" + std::to_string(m_cols));
 
         // Resize buffers to match new terminal size
-        m_front_buffer.resize(m_rows, m_cols);
+        {
+            std::lock_guard<std::mutex> lock_buf(m_buffer_mutex);
+            m_front_buffer.resize(m_rows, m_cols);
+            m_front_buffer.clear();
+        }
         m_back_buffer.resize(m_rows, m_cols);
-        
-        // Clear buffers to remove stale data
-        m_front_buffer.clear();
         m_back_buffer.clear();
 
         m_vtermManager.resize(m_rows, m_cols);

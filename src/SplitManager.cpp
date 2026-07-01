@@ -18,7 +18,9 @@ wxDEFINE_EVENT(wxEVT_CLOSE_PANEL, wxCommandEvent);
 
 SplitManager::SplitManager(wxWindow* parent) 
     : m_parent(parent), m_tree(std::make_unique<SplitTree>()), m_alive(std::make_shared<bool>(true)) {
-    m_parent->Bind(wxEVT_CLOSE_PANEL, &SplitManager::OnClosePanelEvent, this);
+    if (m_parent) {
+        m_parent->Bind(wxEVT_CLOSE_PANEL, &SplitManager::OnClosePanelEvent, this);
+    }
 }
 
 SplitManager::~SplitManager() {
@@ -105,9 +107,20 @@ void SplitManager::Split(ISplitable* target, wxSplitMode mode) {
         return;
     }
     
+    // Check if parent is still valid before using it
+    if (!m_parent) {
+        SM_LOG("Split: parent is null, cannot create new panel");
+        Thaw();
+        return;
+    }
+    
     auto newContent = std::shared_ptr<TerminalPanel>(
-        new TerminalPanel(m_parent, std::make_unique<LocalTerminalContainer>(24, 80, "")),
-        [](TerminalPanel* p) { if (p) p->Destroy(); }
+        new TerminalPanel(m_parent.get(), std::make_unique<LocalTerminalContainer>(24, 80, "")),
+        [](TerminalPanel* p) { 
+            if (p && !p->IsBeingDeleted()) { 
+                p->Destroy(); 
+            }
+        }
     );
     
     auto newPanel = std::dynamic_pointer_cast<TerminalPanel>(newContent);
@@ -264,10 +277,14 @@ void SplitManager::Close(TerminalPanel* panel) {
         SM_LOG("Close: panel is null");
         return;
     }
+    if (!m_parent) {
+        SM_LOG("Close: parent is null, cannot post event");
+        return;
+    }
     SM_LOG("Close: posting close event for panel=" << panel);
     wxCommandEvent* evt = new wxCommandEvent(wxEVT_CLOSE_PANEL);
     evt->SetClientData(panel);
-    wxQueueEvent(m_parent, evt);
+    wxQueueEvent(m_parent.get(), evt);
 }
 
 void SplitManager::OnClosePanelEvent(wxCommandEvent& event) {
@@ -284,7 +301,7 @@ void SplitManager::DoClose(TerminalPanel* panel) {
     
     // Find the correct notebook page index before doing any changes
     m_lastClosePageIndex = -1;
-    wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent);
+    wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent.get());
     if (notebook) {
         wxWindow* current = panel;
         while (current) {
@@ -406,7 +423,7 @@ void SplitManager::DoClose(TerminalPanel* panel) {
         }
         
         // 从 notebook 移除
-        wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent);
+        wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent.get());
         if (notebook) {
             int pageIndex = notebook->FindPage(containerToDestroy);
             SM_LOG("DoClose: container page index=" << pageIndex << " page count before=" << notebook->GetPageCount());
@@ -428,13 +445,17 @@ void SplitManager::DoClose(TerminalPanel* panel) {
     
     // 延迟重建 UI，确保 Destroy 事件完成
     auto alive = m_alive; // 捕获 shared_ptr
-    m_parent->CallAfter([this, alive]() {
-        if (!*alive) return; // 检查是否已销毁
-        SM_LOG("DoClose: CallAfter executing RebuildUIFromTree");
-        RebuildUIFromTree();
-        m_parent->Layout();
-        SM_LOG("DoClose: CallAfter UI rebuild done");
-    });
+    if (m_parent) {
+        m_parent->CallAfter([this, alive]() {
+            if (!*alive) return; // 检查是否已销毁
+            SM_LOG("DoClose: CallAfter executing RebuildUIFromTree");
+            RebuildUIFromTree();
+            if (m_parent) {
+                m_parent->Layout();
+            }
+            SM_LOG("DoClose: CallAfter UI rebuild done");
+        });
+    }
 }
 
 void SplitManager::RebuildUIRecursive(SplitNode* node, wxWindow* parentWindow) {
@@ -507,7 +528,7 @@ void SplitManager::RebuildUIFromTree() {
         wxWindow* win = root->content->GetWindow();
         if (win) {
             SM_LOG("RebuildUIFromTree: leaf, win=" << win);
-            wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent);
+            wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent.get());
             if (notebook) {
                 int pageIndex = notebook->FindPage(win);
                 SM_LOG("RebuildUIFromTree: leaf, FindPage=" << pageIndex);
@@ -551,14 +572,16 @@ void SplitManager::RebuildUIFromTree() {
                         if (oldPage && oldPage != win) {
                             wxWindow* pageToDestroy = oldPage;
                             auto alive = m_alive;
-                            m_parent->CallAfter([pageToDestroy, alive]() {
-                                if (!*alive) return;
-                                SM_LOG("RebuildUIFromTree: CallAfter destroying oldPage=" << pageToDestroy);
-                                if (pageToDestroy) {
-                                    pageToDestroy->Destroy();
-                                    SM_LOG("RebuildUIFromTree: CallAfter oldPage destroyed");
-                                }
-                            });
+                            if (m_parent) {
+                                m_parent->CallAfter([pageToDestroy, alive]() {
+                                    if (!*alive) return;
+                                    SM_LOG("RebuildUIFromTree: CallAfter destroying oldPage=" << pageToDestroy);
+                                    if (pageToDestroy) {
+                                        pageToDestroy->Destroy();
+                                        SM_LOG("RebuildUIFromTree: CallAfter oldPage destroyed");
+                                    }
+                                });
+                            }
                         }
                     } else {
                         // notebook 为空，直接添加页面
@@ -598,7 +621,7 @@ void SplitManager::RebuildUIFromTree() {
                 return;
             }
             SM_LOG("RebuildUIFromTree: branch, container=" << container);
-            wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent);
+            wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent.get());
             if (notebook) {
                 int pageIndex = notebook->FindPage(container);
                 SM_LOG("RebuildUIFromTree: branch, FindPage=" << pageIndex);
@@ -629,10 +652,12 @@ void SplitManager::RebuildUIFromTree() {
                         if (oldPage && oldPage != container) {
                             wxWindow* pageToDestroy = oldPage;
                             auto alive = m_alive;
-                            m_parent->CallAfter([pageToDestroy, alive]() {
-                                if (!*alive) return;
-                                pageToDestroy->Destroy();
-                            });
+                            if (m_parent) {
+                                m_parent->CallAfter([pageToDestroy, alive]() {
+                                    if (!*alive) return;
+                                    pageToDestroy->Destroy();
+                                });
+                            }
                         }
                     } else {
                         // notebook 为空，直接添加页面
@@ -716,7 +741,7 @@ void SplitManager::RebuildUIFromTree() {
     }
     
     // 强制刷新 notebook
-    wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent);
+    wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent.get());
     if (notebook) {
         SM_LOG("RebuildUIFromTree: refreshing notebook");
         notebook->Layout();

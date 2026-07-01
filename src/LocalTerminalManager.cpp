@@ -228,8 +228,15 @@ bool LocalTerminalManager::Start(const std::string& shell) {
         // Set TERM environment variable
         setenv("TERM", "xterm-256color", 1);
 
-        // Execute shell
-        execl(actualShell.c_str(), actualShell.c_str(), nullptr);
+        // Execute shell as a login shell (argv[0] starting with '-') so profiles like .zshrc are loaded
+        std::string shellName = actualShell;
+        size_t lastSlash = shellName.find_last_of('/');
+        if (lastSlash != std::string::npos) {
+            shellName = shellName.substr(lastSlash + 1);
+        }
+        std::string loginShellName = "-" + shellName;
+
+        execl(actualShell.c_str(), loginShellName.c_str(), nullptr);
         _exit(1);
     }
 
@@ -274,11 +281,7 @@ void LocalTerminalManager::Stop() {
         m_hConPTY = nullptr;
     }
 #elif defined(__APPLE__) || defined(__linux__)
-    if (m_childPid > 0) {
-        kill(m_childPid, SIGTERM);
-        waitpid(m_childPid, nullptr, 0);
-        m_childPid = -1;
-    }
+    // Close master and slave first so child processes see EOF and SIGHUP and exit gracefully
     if (m_masterFd >= 0) {
         close(m_masterFd);
         m_masterFd = -1;
@@ -286,6 +289,25 @@ void LocalTerminalManager::Stop() {
     if (m_slaveFd >= 0) {
         close(m_slaveFd);
         m_slaveFd = -1;
+    }
+
+    if (m_childPid > 0) {
+        kill(m_childPid, SIGTERM);
+        
+        // Wait with a short timeout using WNOHANG to prevent blocking the UI thread
+        int status = 0;
+        pid_t res = waitpid(m_childPid, &status, WNOHANG);
+        if (res == 0) {
+            // Give it 50ms to exit gracefully
+            usleep(50000);
+            res = waitpid(m_childPid, &status, WNOHANG);
+            if (res == 0) {
+                // If still running, force kill
+                kill(m_childPid, SIGKILL);
+                waitpid(m_childPid, &status, 0);
+            }
+        }
+        m_childPid = -1;
     }
 #endif
 

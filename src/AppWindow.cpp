@@ -603,16 +603,19 @@ void AppWindow::OnDeviceShowRequest(wxCommandEvent& event) {
         // Convert the current local terminal panel to SSH
         panel->ConvertToSSH(newDevice);
         
-        // Update tab label to show the device
-        wxString newLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
-        // Find the ConnectInfo for this panel and update its label
-        for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
-            wxWindow* page = m_notebook->GetPage(i);
-            if (page == panel) {
-                // Update the corresponding tab label
-                // This would require finding the ConnectInfo, but for now just log
-                SSH_LOG("Would update tab label to: " << newLabel.ToStdString());
-                break;
+        // Find the ConnectInfo for this panel, update its label and internal thread pointers
+        if (m_titleBar) {
+            for (auto* tab : m_titleBar->GetTabs()) {
+                if (tab->GetContentPanel() == panel) {
+                    SSH_LOG("OnDeviceShowRequest: found ConnectInfo tab=" << tab << ", switching to SSH");
+                    tab->SwitchToSSH(panel->GetSSHThread(), newDevice);
+                    
+                    // Notify layout update to adjust tab sizes
+                    wxCommandEvent layoutEvent(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
+                    layoutEvent.SetInt(1); // Flag to indicate tab label changed
+                    wxPostEvent(this, layoutEvent);
+                    break;
+                }
             }
         }
     } else {
@@ -636,17 +639,23 @@ void AppWindow::OnFileTransferRequest(wxCommandEvent& event) {
             
             if (panel) {
                 SSH_LOG("AppWindow::OnFileTransferRequest: found TerminalPanel=" << panel);
-                // Find ConnectInfo in m_titleBar
-                if (m_titleBar) {
-                    for (auto* tab : m_titleBar->GetTabs()) {
-                        if (tab->GetContentPanel() == panel) {
-                            SSH_LOG("AppWindow::OnFileTransferRequest: found ConnectInfo=" << tab << ", showing dialog");
-                            tab->ShowFileTransferDialog();
-                            return;
-                        }
-                    }
-                    SSH_LOG("AppWindow::OnFileTransferRequest: ConnectInfo not found for panel=" << panel);
+                // Find the top-level notebook page that contains this panel
+                wxWindow* page = panel;
+                while (page && page->GetParent() != m_notebook) {
+                    page = page->GetParent();
                 }
+                
+                if (page && m_notebook && m_titleBar) {
+                    int pageIndex = m_notebook->FindPage(page);
+                    SSH_LOG("AppWindow::OnFileTransferRequest: found notebook page index=" << pageIndex);
+                    if (pageIndex != wxNOT_FOUND && pageIndex < (int)m_titleBar->GetTabs().size()) {
+                        ConnectInfo* tab = m_titleBar->GetTabs()[pageIndex];
+                        SSH_LOG("AppWindow::OnFileTransferRequest: found ConnectInfo=" << tab << ", showing dialog");
+                        tab->ShowFileTransferDialog();
+                        return;
+                    }
+                }
+                SSH_LOG("AppWindow::OnFileTransferRequest: ConnectInfo not found for panel=" << panel);
             } else {
                 SSH_LOG("AppWindow::OnFileTransferRequest: TerminalPanel not found in sender hierarchy");
             }

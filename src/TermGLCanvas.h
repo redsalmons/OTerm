@@ -183,6 +183,7 @@ public:
     int m_cursor_col;
 
     bool m_cursor_visible;
+    bool m_cursor_out_of_bounds;
 
     int m_scroll_offset;
 
@@ -197,6 +198,8 @@ public:
     SplitCallback split_callback_;
 
     CloseCallback close_callback_;
+
+    int m_wheelRotationAccumulator;
 
     bool m_glInitialized;
 

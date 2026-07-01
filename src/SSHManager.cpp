@@ -45,7 +45,9 @@ void SSHManager::init_log_file() {
 
     try {
         std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetLogPath());
+        std::cout << "SSH log directory: " << log_dir << std::endl;
         std::filesystem::create_directories(log_dir);
+        std::cout << "Log directory created or exists" << std::endl;
 
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
@@ -59,15 +61,19 @@ void SSHManager::init_log_file() {
         filename << "ssh_" << std::put_time(&tm, "%Y%m%d_%H%M%S") << ".log";
 
         std::filesystem::path log_path = log_dir / filename.str();
+        std::cout << "SSH log file path: " << log_path << std::endl;
         ssh_log_file.open(log_path, std::ios::out | std::ios::app);
 
         if (ssh_log_file.is_open()) {
             ssh_log_initialized = true;
             ssh_log_file << "=== SSH Log Session Started ===" << std::endl;
             ssh_log_file.flush();
+            std::cout << "SSH log file opened successfully" << std::endl;
+        } else {
+            std::cerr << "Failed to open SSH log file: " << log_path << std::endl;
         }
     } catch (const std::exception& e) {
-        // If log initialization fails, silently continue without logging
+        std::cerr << "SSH log initialization failed: " << e.what() << std::endl;
     }
 }
 
@@ -122,8 +128,17 @@ bool SSHManager::connect(const std::string& host, int port,
     password_ = password;
     auth_method_ = auth_method;
 
+    if (status_callback_) {
+        std::string msg = "Connecting to " + host + ":" + std::to_string(port) + "...\r\n";
+        status_callback_(msg.c_str(), (int)msg.size());
+    }
+
     if (uv_tcp_init(loop_, &tcp_handle_) != 0) {
         SSH_ERR("Failed to initialize TCP handle");
+        if (status_callback_) {
+            const char* msg = "Failed to initialize TCP handle.\r\n";
+            status_callback_(msg, (int)strlen(msg));
+        }
         return false;
     }
     
@@ -135,19 +150,31 @@ bool SSHManager::connect(const std::string& host, int port,
     SSH_LOG("Resolved address: " << host << ":" << port);
     
     connect_req_.data = this;
-    if (uv_tcp_connect(&connect_req_, &tcp_handle_, (struct sockaddr*)&addr, 
+    if (uv_tcp_connect(&connect_req_, &tcp_handle_, (struct sockaddr*)&addr,
                        [](uv_connect_t* req, int status) {
         SSHManager* mgr = static_cast<SSHManager*>(req->data);
         if (status < 0) {
             SSH_ERR("TCP connect failed: " << uv_strerror(status));
             mgr->ssh_state_ = SSH_DISCONNECTED;
+            if (mgr->status_callback_) {
+                std::string msg = "\r\nConnection failed: " + std::string(uv_strerror(status)) + "\r\n";
+                mgr->status_callback_(msg.c_str(), (int)msg.size());
+            }
         } else {
             SSH_LOG("TCP connection established -> " << state_name(SSH_CONNECTING));
             mgr->ssh_state_ = SSH_CONNECTING;
+            if (mgr->status_callback_) {
+                const char* msg = "TCP connection established. Starting SSH handshake...\r\n";
+                mgr->status_callback_(msg, (int)strlen(msg));
+            }
             mgr->continue_ssh_connection();
         }
     }) != 0) {
         SSH_ERR("Failed to initiate TCP connect");
+        if (status_callback_) {
+            const char* msg = "Failed to initiate TCP connect.\r\n";
+            status_callback_(msg, (int)strlen(msg));
+        }
         return false;
     }
     
@@ -161,6 +188,10 @@ void SSHManager::continue_ssh_connection() {
     uv_os_fd_t sockfd;
     if (uv_fileno((uv_handle_t*)&tcp_handle_, &sockfd) != 0) {
         SSH_ERR("Failed to get socket fd");
+        if (status_callback_) {
+            const char* msg = "\r\nFailed to get socket descriptor.\r\n";
+            status_callback_(msg, (int)strlen(msg));
+        }
         ssh_state_ = SSH_DISCONNECTED;
         return;
     }
@@ -168,6 +199,10 @@ void SSHManager::continue_ssh_connection() {
     ssh_session_ = libssh2_session_init();
     if (!ssh_session_) {
         SSH_ERR("Failed to create SSH session");
+        if (status_callback_) {
+            const char* msg = "\r\nFailed to initialize SSH session.\r\n";
+            status_callback_(msg, (int)strlen(msg));
+        }
         ssh_state_ = SSH_DISCONNECTED;
         return;
     }
@@ -183,6 +218,10 @@ void SSHManager::continue_ssh_connection() {
         return;
     } else if (rc != 0) {
         SSH_ERR("Handshake failed: " << rc);
+        if (status_callback_) {
+            std::string msg = "\r\nSSH handshake failed with error: " + std::to_string(rc) + "\r\n";
+            status_callback_(msg.c_str(), (int)msg.size());
+        }
         ssh_state_ = SSH_DISCONNECTED;
         return;
     }

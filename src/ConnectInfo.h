@@ -74,6 +74,8 @@ public:
 
     LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
 
+    void SwitchToSSH(TerminalThread* sshThread, const DeviceConfig& deviceConfig);
+
 
 
     void UpdateVTermSize(int rows, int cols);

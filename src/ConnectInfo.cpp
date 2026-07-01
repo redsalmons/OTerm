@@ -631,7 +631,8 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
 
     // Get the appropriate thread based on terminal type
 
-    const ScreenBuffer* buffer = nullptr;
+    ScreenBuffer local_buffer;
+    bool has_buffer = false;
 
     if (m_isLocalTerminal) {
 
@@ -643,7 +644,8 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
 
         }
 
-        buffer = m_localTerminalThread->GetFrontBuffer();
+        m_localTerminalThread->CopyFrontBuffer(local_buffer);
+        has_buffer = true;
 
     } else {
 
@@ -655,13 +657,14 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
 
         }
 
-        buffer = m_terminalThread->GetFrontBuffer();
+        m_terminalThread->CopyFrontBuffer(local_buffer);
+        has_buffer = true;
 
     }
 
 
 
-    if (!buffer) {
+    if (!has_buffer) {
 
         SSH_LOG("OnTerminalDamage: buffer is null");
 
@@ -671,7 +674,7 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
 
 
 
-    // SSH_LOG("OnTerminalDamage: buffer rows=" << buffer->rows << ", cols=" << buffer->cols << ", cursor=" << buffer->cursor_row << "," << buffer->cursor_col);
+    // SSH_LOG("OnTerminalDamage: buffer rows=" << local_buffer.rows << ", cols=" << local_buffer.cols << ", cursor=" << local_buffer.cursor_row << "," << local_buffer.cursor_col);
 
 
 
@@ -679,11 +682,11 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
 
     std::vector<CellInstance> instances;
 
-    for (int row = 0; row < buffer->rows; row++) {
+    for (int row = 0; row < local_buffer.rows; row++) {
 
-        for (int col = 0; col < buffer->cols; col++) {
+        for (int col = 0; col < local_buffer.cols; col++) {
 
-            CellInstance cell = buffer->cells[row][col];
+            CellInstance cell = local_buffer.cells[row][col];
 
             cell.cell_x = (float)col;
 
@@ -713,7 +716,7 @@ void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
 
     int scrollOffset = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->GetScrollOffset() : 0) : (m_terminalThread ? m_terminalThread->GetScrollOffset() : 0);
 
-    m_termCanvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, inAltScreen, scrollOffset);
+    m_termCanvas->SetCursorPosition(local_buffer.cursor_row, local_buffer.cursor_col, inAltScreen, scrollOffset);
 
     
 
@@ -1318,20 +1321,41 @@ void ConnectInfo::HandleSplit(wxSplitMode mode, TerminalPanel* sourcePanel) {
 
 
 
+void ConnectInfo::SwitchToSSH(TerminalThread* sshThread, const DeviceConfig& deviceConfig) {
+    SSH_LOG("ConnectInfo::SwitchToSSH called");
+    m_isLocalTerminal = false;
+    m_localTerminalThread = nullptr;
+    m_terminalThread = sshThread;
+    m_deviceConfig = deviceConfig;
+
+    // Update label to show the device username@address
+    wxString newLabel = wxString::FromUTF8(deviceConfig.username.c_str()) + "@" + wxString::FromUTF8(deviceConfig.address.c_str());
+    m_label->SetLabel(newLabel);
+
+    // Refresh the tab layout
+    Layout();
+}
+
+
+
 ConnectInfo::~ConnectInfo() {
 
     // Set shutdown flag before cleanup to prevent crash
-
-    if (m_terminalThread) {
-
-        m_terminalThread->SetShuttingDown();
-
+    // Only call SetShuttingDown if the thread is still running and valid
+    if (m_terminalThread && !m_terminalThread->IsShuttingDown()) {
+        try {
+            m_terminalThread->SetShuttingDown();
+        } catch (...) {
+            // Ignore any exceptions during shutdown
+        }
     }
 
-    if (m_localTerminalThread) {
-
-        m_localTerminalThread->SetShuttingDown();
-
+    if (m_localTerminalThread && !m_localTerminalThread->IsShuttingDown()) {
+        try {
+            m_localTerminalThread->SetShuttingDown();
+        } catch (...) {
+            // Ignore any exceptions during shutdown
+        }
     }
 
     // Clear raw pointers to prevent use-after-free during member destruction
@@ -1340,6 +1364,8 @@ ConnectInfo::~ConnectInfo() {
     m_contentPanel = nullptr;
     m_label = nullptr;
     m_closeButton = nullptr;
+    m_terminalThread = nullptr;
+    m_localTerminalThread = nullptr;
 
 }
 

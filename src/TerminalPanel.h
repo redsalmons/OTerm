@@ -30,6 +30,8 @@ public:
     void SetSSHThread(TerminalThread* thread) { m_sshThread = thread; }
     TerminalThread* GetSSHThread() const { return m_sshThread; }
     
+    void StopThreads();
+    
     void ShowContextMenu();
     bool HasTerminal() const { return m_terminalContainer != nullptr || m_sshThread != nullptr; }
     

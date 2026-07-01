@@ -193,18 +193,33 @@ std::vector<DeviceConfig> DeviceConfig::LoadFromFile() {
             DeviceConfig dev;
             dev.id = item.value("id", "");
             dev.name = item.value("name", "");
-            dev.username = item.value("username", "");
             dev.group = item.value("group", "");
-            dev.address = item.value("address", "");
-            dev.port = item.value("port", "22");
-            dev.auth_method = item.value("authType", "password");
-
-            // Decrypt password with master password
-            std::string encryptedPassword = item.value("password", "");
-            if (!encryptedPassword.empty() && !masterPassword.empty()) {
-                dev.password = decrypt_aes(encryptedPassword, masterPassword);
+            
+            // Handle both nested "config" structure and flat structure
+            if (item.contains("config") && item["config"].is_object()) {
+                auto& config = item["config"];
+                dev.username = config.value("username", "");
+                dev.address = config.value("address", "");
+                dev.port = config.value("port", "22");
+                dev.auth_method = config.value("authMethod", "password");
+                std::string encryptedPassword = config.value("password", "");
+                if (!encryptedPassword.empty() && !masterPassword.empty()) {
+                    dev.password = decrypt_aes(encryptedPassword, masterPassword);
+                } else {
+                    dev.password = encryptedPassword;
+                }
             } else {
-                dev.password = encryptedPassword;
+                // Flat structure (fallback)
+                dev.username = item.value("username", "");
+                dev.address = item.value("address", "");
+                dev.port = item.value("port", "22");
+                dev.auth_method = item.value("authType", "password");
+                std::string encryptedPassword = item.value("password", "");
+                if (!encryptedPassword.empty() && !masterPassword.empty()) {
+                    dev.password = decrypt_aes(encryptedPassword, masterPassword);
+                } else {
+                    dev.password = encryptedPassword;
+                }
             }
 
             devices.push_back(dev);

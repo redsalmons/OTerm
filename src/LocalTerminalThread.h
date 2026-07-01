@@ -22,6 +22,10 @@ public:
     
     // Get front buffer (read-only for UI thread)
     const ScreenBuffer* GetFrontBuffer() const { return &m_front_buffer; }
+    void CopyFrontBuffer(ScreenBuffer& dest) const {
+        std::lock_guard<std::mutex> lock(m_buffer_mutex);
+        dest = m_front_buffer;
+    }
     
     // Start local terminal
     void Start();
@@ -82,6 +86,7 @@ private:
     // Double buffering
     ScreenBuffer m_front_buffer;  // Read by UI thread
     ScreenBuffer m_back_buffer;   // Written by worker thread
+    mutable std::mutex m_buffer_mutex;
     
     // Configuration
     std::string m_shell;

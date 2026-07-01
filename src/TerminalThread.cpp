@@ -7,15 +7,32 @@ wxDEFINE_EVENT(wxEVT_TERMINAL_EXIT, wxThreadEvent);
 
 TerminalThread::TerminalThread(EventProxyPtr event_proxy, int rows, int cols, const DeviceConfig& config)
     : wxThread(wxTHREAD_JOINABLE),
+      m_loop(),
+      m_sshManager(),
+      m_vtermManager(),
+      m_input_queue(),
+      m_input_mutex(),
+      m_input_cv(),
+      m_ssh_data_queue(),
+      m_ssh_data_mutex(),
+      m_resize_request(),
+      m_resize_pending(false),
+      m_resize_mutex(),
+      m_shutting_down(false),
+      m_shutdown_mutex(),
       m_event_proxy(event_proxy),
+      m_front_buffer(),
+      m_back_buffer(),
+      m_buffer_mutex(),
       m_deviceConfig(config),
       m_rows(rows),
       m_cols(cols),
       m_has_damage(false),
-      m_shutting_down(false),
-      m_resize_pending(false),
+      m_damage_rect(),
+      m_last_ui_update(),
       m_heavy_streaming(false),
-      m_consecutive_updates(0) {
+      m_consecutive_updates(0),
+      m_pending_input() {
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
     m_damage_rect = {0, 0, 0, 0};
@@ -131,39 +148,53 @@ void TerminalThread::Connect() {
 
 wxThread::ExitCode TerminalThread::Entry() {
     std::cout << "TerminalThread started" << std::endl;
-    
+
     // Initialize libuv loop
+    std::cout << "Initializing libuv loop..." << std::endl;
     if (uv_loop_init(&m_loop) != 0) {
         std::cerr << "Failed to initialize libuv loop" << std::endl;
         return (ExitCode)1;
     }
-    
+    std::cout << "libuv loop initialized" << std::endl;
+
     // Initialize SSH Manager
+    std::cout << "Initializing SSH Manager..." << std::endl;
     if (!m_sshManager.initialize(&m_loop)) {
         std::cerr << "Failed to initialize SSH Manager" << std::endl;
         uv_loop_close(&m_loop);
         return (ExitCode)1;
     }
-    
+    std::cout << "SSH Manager initialized" << std::endl;
+
     // Initialize VTerm Manager
+    std::cout << "Initializing VTerm Manager..." << std::endl;
     if (!m_vtermManager.initialize(m_rows, m_cols)) {
         std::cerr << "Failed to initialize VTerm Manager" << std::endl;
         m_sshManager.cleanup();
         uv_loop_close(&m_loop);
         return (ExitCode)1;
     }
-    
+    std::cout << "VTerm Manager initialized" << std::endl;
+
     // Setup callbacks
+    std::cout << "Setting up callbacks..." << std::endl;
     setup_callbacks();
+    std::cout << "Callbacks set up" << std::endl;
 
     // Connect to SSH
+    std::cout << "Checking device config..." << std::endl;
+    std::cout << "  address: " << m_deviceConfig.address << std::endl;
+    std::cout << "  port: " << m_deviceConfig.port << std::endl;
+    std::cout << "  username: " << m_deviceConfig.username << std::endl;
     if (m_deviceConfig.port.empty()) {
-        SSH_LOG("TerminalThread: Port is empty, cannot connect");
+        std::cerr << "TerminalThread: Port is empty, cannot connect" << std::endl;
         return (ExitCode)1;
     }
+    std::cout << "Calling SSH connect..." << std::endl;
     m_sshManager.connect(m_deviceConfig.address, std::stoi(m_deviceConfig.port),
                          m_deviceConfig.username, m_deviceConfig.password,
                          m_deviceConfig.auth_method);
+    std::cout << "SSH connect called" << std::endl;
     
     // Main loop
     while (!TestDestroy() && !IsShuttingDown()) {
@@ -192,11 +223,12 @@ wxThread::ExitCode TerminalThread::Entry() {
                 m_vtermManager.resize(new_rows, new_cols);
                 
                 // Update buffer sizes
-                m_front_buffer.resize(new_rows, new_cols);
+                {
+                    std::lock_guard<std::mutex> lock_buf(m_buffer_mutex);
+                    m_front_buffer.resize(new_rows, new_cols);
+                    m_front_buffer.clear();
+                }
                 m_back_buffer.resize(new_rows, new_cols);
-                
-                // Clear both buffers to remove stale data
-                m_front_buffer.clear();
                 m_back_buffer.clear();
                 
                 // Update SSH terminal size
@@ -450,7 +482,8 @@ void TerminalThread::swap_buffers() {
     m_back_buffer.cursor_row = cursor_pos.row;
     m_back_buffer.cursor_col = cursor_pos.col;
 
-    // Swap front and back buffers
+    // Swap front and back buffers under lock
+    std::lock_guard<std::mutex> lock(m_buffer_mutex);
     std::swap(m_front_buffer, m_back_buffer);
 }
 

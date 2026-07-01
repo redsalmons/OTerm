@@ -238,6 +238,42 @@ void TerminalPanel::SetupCanvasConnection() {
         }
     });
     SPLIT_LOG("Key callback set");
+
+    // 设置 canvas 的 scroll 回调
+    m_canvas->SetScrollCallback([this](int lines) {
+        SPLIT_LOG("Scroll callback invoked: lines=" << lines);
+        if (m_sshThread) {
+            m_sshThread->ScrollVTerm(lines);
+        } else if (m_terminalContainer) {
+            LocalTerminalThread* thread = m_terminalContainer->GetThread();
+            if (thread) {
+                thread->ScrollVTerm(lines);
+            }
+        }
+    });
+    SPLIT_LOG("Scroll callback set");
+
+    // 设置 canvas 的 mouse 回调
+    m_canvas->SetMouseCallback([this](int row, int col, int button) {
+        bool inAltScreen = m_sshThread ? m_sshThread->IsInAlternateScreen() : (m_terminalContainer && m_terminalContainer->GetThread() ? m_terminalContainer->GetThread()->IsInAlternateScreen() : false);
+        SPLIT_LOG("Mouse callback invoked: row=" << row << " col=" << col << " button=" << button << " inAltScreen=" << inAltScreen);
+        if (inAltScreen) {
+            char seq[6];
+            seq[0] = '\x1b';
+            seq[1] = '[';
+            seq[2] = 'M';
+            seq[3] = (char)(32 + button);
+            seq[4] = (char)(33 + col);
+            seq[5] = (char)(33 + row);
+            std::string seq_str(seq, 6);
+            if (m_sshThread) {
+                m_sshThread->QueueInput(seq_str);
+            } else if (m_terminalContainer) {
+                m_terminalContainer->QueueInput(seq_str);
+            }
+        }
+    });
+    SPLIT_LOG("Mouse callback set");
     
     // 初始渲染
     UpdateCanvasFromTerminal();
@@ -458,43 +494,46 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
         return;
     }
     
-    const ScreenBuffer* buffer = nullptr;
+    ScreenBuffer local_buffer;
     bool in_alt_screen = false;
     int scroll_offset = 0;
+    bool has_buffer = false;
     
     if (m_sshThread) {
-        buffer = m_sshThread->GetFrontBuffer();
+        m_sshThread->CopyFrontBuffer(local_buffer);
         in_alt_screen = m_sshThread->IsInAlternateScreen();
         scroll_offset = m_sshThread->GetScrollOffset();
+        has_buffer = true;
     } else if (m_terminalContainer) {
         LocalTerminalThread* thread = m_terminalContainer->GetThread();
         if (!thread) {
             // Thread has been stopped/deleted (e.g. during panel close). Nothing to render.
             return;
         }
-        buffer = m_terminalContainer->GetFrontBuffer();
+        thread->CopyFrontBuffer(local_buffer);
         in_alt_screen = thread->IsInAlternateScreen();
         scroll_offset = thread->GetScrollOffset();
+        has_buffer = true;
     }
     
-    if (!buffer) {
+    if (!has_buffer) {
         return;
     }
     
     // 将 buffer 中的数据转换为 canvas 需要的格式
     std::vector<CellInstance> instances;
-    int rows = buffer->rows;
-    int cols = buffer->cols;
+    int rows = local_buffer.rows;
+    int cols = local_buffer.cols;
     
     // Safety check: ensure buffer.cells has the expected size
-    if ((int)buffer->cells.size() < rows) rows = (int)buffer->cells.size();
+    if ((int)local_buffer.cells.size() < rows) rows = (int)local_buffer.cells.size();
     
     for (int row = 0; row < rows; ++row) {
         int row_cols = cols;
-        if ((int)buffer->cells[row].size() < row_cols) row_cols = (int)buffer->cells[row].size();
+        if ((int)local_buffer.cells[row].size() < row_cols) row_cols = (int)local_buffer.cells[row].size();
         
         for (int col = 0; col < row_cols; ++col) {
-            CellInstance inst = buffer->cells[row][col];
+            CellInstance inst = local_buffer.cells[row][col];
             inst.cell_x = (float)col;
             inst.cell_y = (float)row;
             instances.push_back(inst);
@@ -507,8 +546,14 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
     }
     
     m_canvas->UpdateScreenData(instances);
-    m_canvas->SetCursorPosition(buffer->cursor_row, buffer->cursor_col, in_alt_screen, scroll_offset);
+    m_canvas->SetCursorPosition(local_buffer.cursor_row, local_buffer.cursor_col, in_alt_screen, scroll_offset);
     m_canvas->Refresh();
+}
+
+void TerminalPanel::StopThreads() {
+    if (m_canvas) {
+        m_canvas->StopThreads();
+    }
 }
 
 void TerminalPanel::Activate() {
@@ -571,10 +616,19 @@ void TerminalPanel::ConvertToSSH(const DeviceConfig& device) {
     SetupCanvasConnection();
     
     // Start the thread after connection is set up
-    m_sshThread->Create();
-    m_sshThread->Run();
+    wxThreadError createErr = m_sshThread->Create();
+    if (createErr != wxTHREAD_NO_ERROR) {
+        SPLIT_LOG("TerminalPanel::ConvertToSSH - Create() failed, err=" << createErr);
+        return;
+    }
     
-    SPLIT_LOG("TerminalPanel::ConvertToSSH completed");
+    wxThreadError runErr = m_sshThread->Run();
+    if (runErr != wxTHREAD_NO_ERROR) {
+        SPLIT_LOG("TerminalPanel::ConvertToSSH - Run() failed, err=" << runErr);
+        return;
+    }
+    
+    SPLIT_LOG("TerminalPanel::ConvertToSSH completed, thread started successfully");
 }
 
 void TerminalPanel::OnKeyDown(wxKeyEvent& event) {

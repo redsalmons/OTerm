@@ -1,5 +1,6 @@
 #pragma once
 
+#include <wx/weakref.h>
 #include "SplitTree.h"
 #include "SplitNode.h"
 #include "SplitContainer.h"
@@ -28,7 +29,7 @@ public:
     void SetCloseCallback(TermGLCanvas::CloseCallback callback) { m_closeCallback = callback; }
     
 private:
-    wxWindow* m_parent;
+    wxWeakRef<wxWindow> m_parent;
     std::unique_ptr<SplitTree> m_tree;
     TermGLCanvas::SplitCallback m_splitCallback;
     TermGLCanvas::CloseCallback m_closeCallback;
