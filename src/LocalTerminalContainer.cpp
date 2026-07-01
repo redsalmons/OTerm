@@ -61,8 +61,12 @@ void LocalTerminalContainer::StopTerminal() {
 }
 
 void LocalTerminalContainer::QueueInput(const std::string& input) {
+    CONTAINER_LOG("QueueInput called: length=" << input.length() << " first_char=" << (input.length() > 0 ? (int)(unsigned char)input[0] : 0));
     if (m_thread) {
         m_thread->QueueInput(input);
+        CONTAINER_LOG("QueueInput: queued to thread");
+    } else {
+        CONTAINER_LOG("QueueInput: thread is null, cannot queue");
     }
 }
 

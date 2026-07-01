@@ -117,6 +117,9 @@ void MyApp::OnAssertFailure(const wxChar* file, int line, const wxChar* func,
 }
 
 bool MyApp::OnInit() {
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[APP] MyApp::OnInit called" << std::endl;
+
     try {
 #ifdef __WXMSW__
         // Enable Per-Monitor v2 DPI awareness before creating any windows
@@ -280,20 +283,29 @@ int MyApp::OnRun() {
 }
 
 
+wxDEFINE_EVENT(wxEVT_SSH_DIRECT_CONNECT, wxCommandEvent);
+wxDEFINE_EVENT(wxEVT_DEVICE_SHOW_REQUEST, wxCommandEvent);
+
 wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_MENU(wxID_EXIT, AppWindow::OnQuit)
     EVT_CLOSE(AppWindow::OnClose)
     EVT_MENU(wxID_NEW, AppWindow::OnNewTab)
+    EVT_MENU(ID_NEW_TAB, AppWindow::OnNewLocalTerminal)
     EVT_IDLE(AppWindow::OnIdle)
     EVT_SIZE(AppWindow::OnSize)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_OPEN_REQUEST, AppWindow::OnDeviceOpenRequest)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_DELETE_REQUEST, AppWindow::OnDeviceDeleteRequest)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_LIST_UPDATE, AppWindow::OnDeviceListUpdate)
+    EVT_COMMAND(wxID_ANY, wxEVT_SSH_DIRECT_CONNECT, AppWindow::OnSSHDirectConnect)
+    EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_SHOW_REQUEST, AppWindow::OnDeviceShowRequest)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
     : wxFrame(nullptr, wxID_ANY, title, pos, size, wxCLIP_CHILDREN | wxRESIZE_BORDER)
 {
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[APPWINDOW] AppWindow constructor called" << std::endl;
+
     // Initialize locale to fix encoding issues
     static wxLocale locale;
     locale.Init();
@@ -318,7 +330,7 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     // Set focus to enable keyboard input
     SetFocus();
 
-    CreateDashboardTab();
+    // CreateLocalTerminalTab directly instead of starting with a homepage dashboard
     CreateLocalTerminalTab();
 
     Centre();
@@ -347,22 +359,16 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
     DeviceConfig newDevice = device;
     SSH_LOG("Device selected: " << newDevice.name);
 
-    // Create TerminalPanel with LocalTerminalContainer (will be converted to SSH later)
-    LocalTerminalContainer* container = new LocalTerminalContainer(24, 80, "");
-    TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, container);
+    // Create TerminalPanel without LocalTerminalContainer (will use SSH thread)
+    TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, nullptr);
     
     // Create TermGLCanvas and set it to the panel
     TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
     terminalPanel->SetCanvas(terminalCanvas);
     
-    // Create InfiniteSplitter and initialize it with the panel
-    InfiniteSplitter* splitter = new InfiniteSplitter(m_notebook);
-    splitter->SetMainWindow(this);
-    splitter->Initialize(terminalPanel);
-
     // Create tab label as "username@address"
     wxString tabLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
-    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, splitter, newDevice);
+    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, newDevice);
     SSH_LOG("Tab added to title bar");
 
     // Connect to SSH
@@ -384,24 +390,34 @@ void AppWindow::CreateLocalTerminalTab() {
     }
 
     // Create TerminalPanel with LocalTerminalContainer
-    LocalTerminalContainer* container = new LocalTerminalContainer(24, 80, "");
-    TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, container);
+    auto container = std::make_unique<LocalTerminalContainer>(24, 120, "");
+    {
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        if (f.is_open()) f << "[APP] LocalTerminalContainer created, thread=" << (container->GetThread() ? "yes" : "no") << std::endl;
+    }
+    
+    TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, std::move(container));
+    {
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        if (f.is_open()) f << "[APP] TerminalPanel created, IsLocalTerminal=" << terminalPanel->IsLocalTerminal() << std::endl;
+    }
     
     // Create TermGLCanvas and set it to the panel
     TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
     terminalPanel->SetCanvas(terminalCanvas);
+    {
+        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        if (f.is_open()) f << "[APP] TermGLCanvas created and set" << std::endl;
+    }
     
-    // Create InfiniteSplitter and initialize it with the panel
-    InfiniteSplitter* splitter = new InfiniteSplitter(m_notebook);
-    splitter->SetMainWindow(this);
-    splitter->Initialize(terminalPanel);
-
+    // Note: key callback is set by TerminalPanel::SetCanvas -> SetupCanvasConnection
+    
     DeviceConfig emptyConfig;
     wxString tabLabel = TranslationHelper::Tr("localTerminal");
     if (tabLabel.IsEmpty()) {
         tabLabel = "Local";
     }
-    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, splitter, emptyConfig, true, true);
+    ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, emptyConfig, true, true);
 
     {
         std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
@@ -412,7 +428,12 @@ void AppWindow::CreateLocalTerminalTab() {
         SSH_LOG("Calling Connect() on tab");
         newTab->Connect();
         SSH_LOG("Connect() returned");
-        terminalCanvas->ShowIMEInputBox();
+        CallAfter([terminalCanvas]() {
+            if (terminalCanvas) {
+                terminalCanvas->SetFocus();
+                terminalCanvas->ShowIMEInputBox();
+            }
+        });
     } else {
         SSH_LOG("ERROR: newTab is null");
     }
@@ -478,6 +499,123 @@ void AppWindow::OnNewTab(wxCommandEvent& WXUNUSED(event)) {
         DeviceConfig newDevice = dialog.GetSelectedDevice();
         SSH_LOG("Device selected: " << newDevice.name);
         CreateTerminalTab(newDevice);
+    }
+}
+
+void AppWindow::OnNewLocalTerminal(wxCommandEvent& WXUNUSED(event)) {
+    SSH_LOG("AppWindow::OnNewLocalTerminal called");
+    CreateLocalTerminalTab();
+}
+
+void AppWindow::OnSSHDirectConnect(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnSSHDirectConnect called");
+    TerminalPanel* panel = (TerminalPanel*)event.GetEventObject();
+    if (!panel) {
+        SSH_LOG("OnSSHDirectConnect: panel is null");
+        return;
+    }
+    
+    wxString cmd = event.GetString();
+    std::string cmdStr = cmd.ToStdString();
+    SSH_LOG("SSH direct connect command: " << cmdStr);
+
+    // Parse "oc ssh [user@]address[:port]"
+    // Remove "oc ssh" prefix
+    std::string target = cmdStr;
+    size_t sshPos = target.find("oc ssh");
+    if (sshPos == 0) {
+        target = target.substr(7); // skip "oc ssh"
+    }
+    // Trim whitespace
+    size_t start = target.find_first_not_of(" \t");
+    if (start == std::string::npos) {
+        SSH_LOG("No target specified after oc ssh");
+        return;
+    }
+    target = target.substr(start);
+
+    // Extract port if present (address:port)
+    std::string port = "22";
+    size_t colonPos = target.rfind(':');
+    if (colonPos != std::string::npos) {
+        port = target.substr(colonPos + 1);
+        target = target.substr(0, colonPos);
+    }
+
+    // Extract username if present (user@address)
+    std::string username = "root";
+    std::string address = target;
+    size_t atPos = target.find('@');
+    if (atPos != std::string::npos) {
+        username = target.substr(0, atPos);
+        address = target.substr(atPos + 1);
+    }
+
+    SSH_LOG("Parsed SSH: username=" << username << ", address=" << address << ", port=" << port);
+
+    // Validate that we have an address
+    if (address.empty()) {
+        SSH_LOG("No address specified for SSH connection");
+        // Don't return, just log and continue - the SSH connection will fail gracefully
+        // This allows the terminal to remain functional
+        return;
+    }
+
+    DeviceConfig device;
+    device.id = "direct_" + username + "@" + address;
+    device.name = username + "@" + address;
+    device.username = username;
+    device.address = address;
+    device.port = port;
+    device.auth_method = "password";
+
+    // Convert the current local terminal panel to SSH
+    panel->ConvertToSSH(device);
+    
+    // Update tab label to show the device
+    wxString newLabel = wxString::FromUTF8(device.username.c_str()) + "@" + wxString::FromUTF8(device.address.c_str());
+    // Find the ConnectInfo for this panel and update its label
+    for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+        wxWindow* page = m_notebook->GetPage(i);
+        if (page == panel) {
+            // Update the corresponding tab label
+            // This would require finding the ConnectInfo, but for now just log
+            SSH_LOG("Would update tab label to: " << newLabel.ToStdString());
+            break;
+        }
+    }
+}
+
+void AppWindow::OnDeviceShowRequest(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnDeviceShowRequest called");
+    TerminalPanel* panel = (TerminalPanel*)event.GetEventObject();
+    if (!panel) {
+        SSH_LOG("OnDeviceShowRequest: panel is null");
+        return;
+    }
+
+    ConnectionDialog dialog(this, TranslationHelper::Tr("deviceList"));
+    if (dialog.ShowModal() == wxID_OK) {
+        DeviceConfig newDevice = dialog.GetSelectedDevice();
+        SSH_LOG("Device selected: " << newDevice.name);
+        
+        // Convert the current local terminal panel to SSH
+        panel->ConvertToSSH(newDevice);
+        
+        // Update tab label to show the device
+        wxString newLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
+        // Find the ConnectInfo for this panel and update its label
+        for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+            wxWindow* page = m_notebook->GetPage(i);
+            if (page == panel) {
+                // Update the corresponding tab label
+                // This would require finding the ConnectInfo, but for now just log
+                SSH_LOG("Would update tab label to: " << newLabel.ToStdString());
+                break;
+            }
+        }
+    } else {
+        SSH_LOG("Device selection cancelled");
     }
 }
 

@@ -18,7 +18,9 @@ public:
     CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow = nullptr);
     ConnectInfo* AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton = true, bool isLocalTerminal = false);
     ConnectInfo* GetLastTab();
+    void CloseTab(wxWindow* contentPanel);
     void NotifyAllTabsResize();
+    int FindNotebookPage(wxWindow* contentPanel) const;
 
 private:
     void OnPaint(wxPaintEvent& event);

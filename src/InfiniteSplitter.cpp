@@ -94,15 +94,21 @@ void InfiniteSplitter::ReplaceChildWithSplitter(wxWindow* childToReplace, wxSpli
         EventProxyPtr proxy = originalContainer ? originalContainer->GetEventProxy() : nullptr;
         SPLIT_LOG("Proxy: " << proxy.get());
         
-        // 2. 清除原面板的container引用，避免共享
+        // 2. 停止原面板的线程，避免继续运行
+        if (originalContainer) {
+            originalContainer->StopTerminal();
+            SPLIT_LOG("Stopped original container thread");
+        }
+        
+        // 3. 清除原面板的container引用
         if (originalPanel) {
             originalPanel->SetTerminalContainer(nullptr);
             SPLIT_LOG("Cleared original panel container reference");
         }
         
-        // 3. 在新的Splitter下创建新的Panel/Canvas
+        // 4. 在新的Splitter下创建新的Panel/Canvas
         SPLIT_LOG("Creating new panel B with LocalTerminalContainer");
-        TerminalPanel* newPanelB = new TerminalPanel(this, new LocalTerminalContainer(24, 80, ""));
+        TerminalPanel* newPanelB = new TerminalPanel(this, std::make_unique<LocalTerminalContainer>(24, 80, ""));
         SPLIT_LOG("Created newPanelB: " << newPanelB);
         
         // 创建新的TermGLCanvas用于新panel
@@ -114,7 +120,7 @@ void InfiniteSplitter::ReplaceChildWithSplitter(wxWindow* childToReplace, wxSpli
         newPanelB->SetCanvas(newCanvasB);
         SPLIT_LOG("Set new canvas to panel B");
         
-        // 4. 直接split当前splitter，使用原面板和新面板
+        // 5. 直接split当前splitter，使用原面板和新面板
         SPLIT_LOG("Splitting current splitter with original panel and new panel");
         bool splitResult = false;
         if (mode == wxSPLIT_VERTICAL) {
@@ -136,7 +142,8 @@ void InfiniteSplitter::ReplaceChildWithSplitter(wxWindow* childToReplace, wxSpli
         return;
     }
     
-    SPLIT_LOG("Already split, nested split not supported for now");
+    SPLIT_LOG("Already split - nested split should be handled by SplitManager");
+    SPLIT_LOG("ERROR: InfiniteSplitter should not be used directly for nested splits");
     return;
 }
 

@@ -20,7 +20,7 @@ SplitterPanel::SplitterPanel(wxWindow* parent, TerminalPanel* originalPanel, boo
     m_panel1->Reparent(m_splitter);
 
     // Create a new panel for the other side
-    m_panel2 = new TerminalPanel(m_splitter, true);  // Create with thread
+    m_panel2 = new TerminalPanel(m_splitter, std::make_unique<LocalTerminalContainer>(24, 80, ""));
 
     // Split the window
     if (horizontal) {

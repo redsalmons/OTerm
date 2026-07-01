@@ -180,9 +180,13 @@ wxThread::ExitCode TerminalThread::Entry() {
         {
             std::lock_guard<std::mutex> lock(m_resize_mutex);
             if (m_resize_pending) {
+                int old_rows = m_rows;
+                int old_cols = m_cols;
                 int new_rows = m_resize_request.first;
                 int new_cols = m_resize_request.second;
                 m_resize_pending = false;
+                
+                SSH_LOG("TerminalThread process_resize: " << old_rows << "x" << old_cols << " -> " << new_rows << "x" << new_cols);
                 
                 // Update VTerm size
                 m_vtermManager.resize(new_rows, new_cols);
@@ -242,8 +246,12 @@ wxThread::ExitCode TerminalThread::Entry() {
                         inst.fg_color = cell.fg_color;
                         inst.bg_color = cell.bg_color;
                         inst.char_code = cell.char_code;
+                        inst.width = cell.width;
                     }
                 }
+                
+                // Swap buffers so front buffer contains the resized data
+                swap_buffers();
                 
                 // Mark as damaged to trigger refresh
                 m_has_damage = true;

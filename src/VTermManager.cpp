@@ -153,7 +153,7 @@ int VTermManager::write_input(const char* data, int length) {
 }
 
 void VTermManager::resize(int new_rows, int new_cols) {
-    SSH_LOG("VTermManager::resize called: " << new_rows << "x" << new_cols);
+    SSH_LOG("VTermManager::resize called: " << rows_ << "x" << cols_ << " -> " << new_rows << "x" << new_cols);
 
     if (!vt_) {
         SSH_LOG("VTermManager::resize: vt_ is null, returning");
@@ -167,36 +167,21 @@ void VTermManager::resize(int new_rows, int new_cols) {
 
     // 1. Tell libvterm internal state changed
     vterm_set_size(vt_, new_rows, new_cols);
-    SSH_LOG("VTermManager::resize: vterm_set_size completed");
+    SSH_LOG("VTermManager::resize: vterm_set_size (" << new_rows << "x" << new_cols << ") completed");
 
-    // 2. Note: vterm_screen_set_size doesn't exist in this version
-    // The screen size is automatically updated by vterm_set_size
-
-    // 3. Update rows_ and cols_ after vterm_set_size
+    // 2. Update rows_ and cols_
     rows_ = new_rows;
     cols_ = new_cols;
 
-    // 4. Reallocate cell_buffer_ size
+    // 3. Reallocate cell_buffer_ size
     cell_buffer_.resize(rows_);
     for (auto& row : cell_buffer_) {
         row.resize(cols_);
     }
-    SSH_LOG("VTermManager::resize: cell_buffer_ resized to " << rows_ << "x" << cols_ << ", actual size=" << cell_buffer_.size() << "x" << (cell_buffer_.empty() ? 0 : cell_buffer_[0].size()));
+    SSH_LOG("VTermManager::resize: cell_buffer_ resized. Internal state now: " << rows_ << "x" << cols_);
     
     // 4. Refresh cell_buffer_ from VTerm screen
     refresh_cell_buffer();
-
-    // 4. Note: For SSH connections, PTY resize is handled by SSH channel
-    // This would be used for local PTY connections
-    // TODO: Add SSH channel resize notification if needed
-    // if (pty_master_fd_ >= 0) {
-    //     struct winsize ws;
-    //     ws.ws_row = rows_;
-    //     ws.ws_col = cols_;
-    //     ws.ws_xpixel = 0;
-    //     ws.ws_ypixel = 0;
-    //     ioctl(pty_master_fd_, TIOCSWINSZ, &ws);
-    // }
 
     SSH_LOG("VTermManager::resize completed successfully");
 }

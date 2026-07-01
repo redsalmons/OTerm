@@ -208,16 +208,55 @@ void LocalTerminalThread::cleanup() {
 void LocalTerminalThread::process_resize() {
     std::lock_guard<std::mutex> lock(m_resize_mutex);
     if (m_resize_pending) {
+        int old_rows = m_rows;
+        int old_cols = m_cols;
         m_rows = m_resize_request.first;
         m_cols = m_resize_request.second;
+
+        LT_LOG("process_resize: " + std::to_string(old_rows) + "x" + std::to_string(old_cols) + 
+               " -> " + std::to_string(m_rows) + "x" + std::to_string(m_cols));
 
         // Resize buffers to match new terminal size
         m_front_buffer.resize(m_rows, m_cols);
         m_back_buffer.resize(m_rows, m_cols);
+        
+        // Clear buffers to remove stale data
+        m_front_buffer.clear();
+        m_back_buffer.clear();
 
         m_vtermManager.resize(m_rows, m_cols);
         m_terminalManager.Resize(m_rows, m_cols);
+        
+        // Refill back buffer from VTerm after resize
+        for (int row = 0; row < m_rows; ++row) {
+            const auto& row_cells = m_vtermManager.get_screen_row(row);
+            for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
+                const auto& cell = row_cells[col];
+                CellInstance& inst = m_back_buffer.cells[row][col];
+                inst.cell_x = (float)col;
+                inst.cell_y = (float)row;
+                inst.uv_u = 0;
+                inst.uv_v = 0;
+                inst.uv_w = 0;
+                inst.uv_h = 0;
+                inst.fg_color = cell.fg_color;
+                inst.bg_color = cell.bg_color;
+                inst.char_code = cell.char_code;
+                inst.width = cell.width;
+            }
+        }
+        
+        // Swap buffers to make resized data available
+        swap_buffers();
+        
         m_resize_pending = false;
+
+        // Trigger an immediate UI update
+        {
+            std::lock_guard<std::mutex> input_lock(m_input_mutex);
+            m_has_damage = true;
+            LT_LOG("process_resize: triggered damage for immediate UI update");
+        }
     }
 }
 

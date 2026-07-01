@@ -28,12 +28,11 @@ public:
     void DeleteDeviceById(const std::string& deviceId);
     void LoadDevices();
     void RefreshDeviceList(const std::string& filter = "");
+    void SetFocusToSearch();
 
 private:
     void OnSearch(wxCommandEvent& event);
     void OnAddDevice(wxCommandEvent& event);
-    void OnSearchFocus(wxFocusEvent& event);
-    void OnSearchKillFocus(wxFocusEvent& event);
 
     wxSearchCtrl* m_searchCtrl;
     wxButton* m_addButton;

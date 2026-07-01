@@ -37,6 +37,8 @@ public:
     static void SetDPIScaleFactor(double scale);
     static double GetDPIScaleFactor();
 
+    static int GetTerminalFontSize(double dpiScale = 1.0);
+
 private:
     static std::string s_workspacePath;
     static bool s_workspacePathSpecified;

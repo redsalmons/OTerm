@@ -130,14 +130,14 @@ bool FontAtlas::GenerateTextureAtlas() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_textureWidth, m_textureHeight, 
                  0, GL_RGBA, GL_UNSIGNED_BYTE, emptyData);
     
+    delete[] emptyData;
+    
     err = glGetError();
     if (err != GL_NO_ERROR) {
         SSH_LOG("FontAtlas: OpenGL error creating empty texture: " << err);
-        delete[] emptyData;
         return false;
     }
     
-    delete[] emptyData;
     SSH_LOG("FontAtlas: Empty texture atlas created successfully, ID=" << m_textureID);
     
     // Initialize free space tracking

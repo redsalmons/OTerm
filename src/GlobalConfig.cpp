@@ -249,3 +249,19 @@ double GlobalConfig::GetDPIScaleFactor() {
     }
     return s_dpiScaleFactor;
 }
+
+int GlobalConfig::GetTerminalFontSize(double dpiScale) {
+    int fontSize = GetFontSize();
+    if (fontSize <= 0) fontSize = 12;
+    
+    // Apply DPI scaling
+    if (dpiScale > 1.0f) {
+        fontSize = static_cast<int>(fontSize * 2);
+    }
+    
+    // Clamp to valid range
+    if (fontSize < 8) fontSize = 8;
+    if (fontSize > 72) fontSize = 72;
+    
+    return fontSize;
+}

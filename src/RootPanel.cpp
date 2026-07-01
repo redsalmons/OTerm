@@ -23,7 +23,7 @@ RootPanel::RootPanel(wxWindow* parent)
 
     // 放入全屏的第一个种子面板
     ROOT_LOG("Creating initial TerminalPanel");
-    TerminalPanel* initPanel = new TerminalPanel(m_rootSplitter, 24, 80, "");
+    TerminalPanel* initPanel = new TerminalPanel(m_rootSplitter, std::make_unique<LocalTerminalContainer>(24, 80, ""));
     ROOT_LOG("Initializing root splitter");
     m_rootSplitter->Initialize(initPanel);
     ROOT_LOG("RootPanel construction done");
@@ -43,8 +43,8 @@ void RootPanel::ReplaceChildWithSplitter(wxWindow* childToReplace, wxSplitMode m
         InfiniteSplitter* newNestedSplitter = new InfiniteSplitter(m_rootSplitter);
         
         // 创建两个新面板
-        TerminalPanel* newPanelA = new TerminalPanel(newNestedSplitter, 24, 80, "");
-        TerminalPanel* newPanelB = new TerminalPanel(newNestedSplitter, 24, 80, "");
+        TerminalPanel* newPanelA = new TerminalPanel(newNestedSplitter, std::make_unique<LocalTerminalContainer>(24, 80, ""));
+        TerminalPanel* newPanelB = new TerminalPanel(newNestedSplitter, std::make_unique<LocalTerminalContainer>(24, 80, ""));
         
         // 分割新的嵌套 splitter
         if (mode == wxSPLIT_VERTICAL) {

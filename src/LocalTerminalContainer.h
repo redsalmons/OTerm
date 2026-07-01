@@ -12,10 +12,10 @@ public:
 
     LocalTerminalThread* GetThread() const { return m_thread; }
     EventProxyPtr GetEventProxy() const { return m_event_proxy; }
-    
+
     // 获取渲染数据
     const ScreenBuffer* GetFrontBuffer() const;
-    
+
     // 设置UI处理器（用于切换渲染目标）
     void SetUIHandler(wxWindow* ui_handler);
     void ClearUIHandler();

@@ -5,6 +5,7 @@
 #include "TranslationHelper.h"
 #include "SettingsDialog.h"
 #include "GlobalConfig.h"
+#include "DeviceListPanel.h"
 #include <wx/simplebook.h>
 #include <wx/display.h>
 #include <algorithm>
@@ -242,7 +243,7 @@ ConnectInfo* CustomTitleBar::GetLastTab() {
 }
 
 ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPanel, const DeviceConfig& deviceConfig, bool showCloseButton, bool isLocalTerminal) {
-    m_notebook->AddPage(contentPanel, label, true);
+    m_notebook->AddPage(contentPanel, label, false);
     ConnectInfo* newTab = new ConnectInfo(this, label, contentPanel, deviceConfig, showCloseButton, isLocalTerminal);
 
     // Check if there is space for one more visible tab using accumulated preferred widths
@@ -294,6 +295,11 @@ ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPane
     LayoutTabs();
     Refresh();
 
+    int notebookIndex = FindNotebookPage(contentPanel);
+    if (notebookIndex != wxNOT_FOUND) {
+        m_notebook->SetSelection(notebookIndex);
+    }
+
     return newTab;
 }
 
@@ -314,7 +320,7 @@ void CustomTitleBar::OnSize(wxSizeEvent& event) {
 }
 
 void CustomTitleBar::OnNewTabClicked(wxCommandEvent& event) {
-    wxCommandEvent newTabEvent(wxEVT_MENU, wxID_NEW);
+    wxCommandEvent newTabEvent(wxEVT_MENU, ID_NEW_TAB);
     wxPostEvent(GetParent(), newTabEvent);
 }
 
@@ -382,15 +388,21 @@ void CustomTitleBar::OnOverflowTabClicked(wxCommandEvent& event) {
     selectedTab->SetActive(true);
 
     // Switch notebook to the selected tab's content panel
-    int notebookIndex = m_notebook->FindPage(selectedTab->GetContentPanel());
+    int notebookIndex = FindNotebookPage(selectedTab->GetContentPanel());
     if (notebookIndex != wxNOT_FOUND) {
         m_notebook->SetSelection(notebookIndex);
     }
 
-    // Show IME input box for new active tab
+    // Show IME input box for new active tab (terminal tabs)
     TermGLCanvas* canvas = selectedTab->GetCanvas();
     if (canvas) {
         canvas->ShowIMEInputBox();
+    }
+
+    // Set focus to search control for DeviceListPanel
+    DeviceListPanel* deviceListPanel = dynamic_cast<DeviceListPanel*>(selectedTab->GetContentPanel());
+    if (deviceListPanel) {
+        deviceListPanel->SetFocusToSearch();
     }
 
     LayoutTabs();
@@ -412,6 +424,91 @@ void CustomTitleBar::OnNewTerminal(wxCommandEvent& event) {
     wxPostEvent(GetParent(), newTabEvent);
 }
 
+void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
+    int tabIndex = -1;
+    int currentActiveIndex = -1;
+
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        if (m_tabs[i]->GetContentPanel() == contentPanel) {
+            tabIndex = (int)i;
+        }
+        if (m_tabs[i]->IsActive()) {
+            currentActiveIndex = (int)i;
+        }
+    }
+
+    if (tabIndex != -1) {
+        int notebookPage = FindNotebookPage(contentPanel);
+
+        bool closingActiveTab = (tabIndex == currentActiveIndex);
+
+        int nextTabIndex = -1;
+        if (closingActiveTab && m_tabs.size() > 1) {
+            if (tabIndex < (int)m_tabs.size() - 1) {
+                nextTabIndex = tabIndex;
+            } else if (tabIndex > 0) {
+                nextTabIndex = tabIndex - 1;
+            }
+        }
+
+        if (closingActiveTab) {
+            if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
+                wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
+                int nextNotebookPage = FindNotebookPage(nextContentPanel);
+                if (nextNotebookPage != wxNOT_FOUND) {
+                    m_notebook->SetSelection(nextNotebookPage);
+                }
+            } else if (m_tabs.size() > 0) {
+                wxWindow* homeContentPanel = m_tabs[0]->GetContentPanel();
+                int homeNotebookPage = FindNotebookPage(homeContentPanel);
+                if (homeNotebookPage != wxNOT_FOUND) {
+                    m_notebook->SetSelection(homeNotebookPage);
+                }
+            } else {
+                if (m_notebook->GetPageCount() > 0) {
+                    m_notebook->SetSelection(0);
+                }
+            }
+        }
+
+        if (notebookPage != wxNOT_FOUND) {
+            m_notebook->RemovePage(notebookPage);
+        }
+
+        ConnectInfo* tab = m_tabs[tabIndex];
+        m_tabs.erase(m_tabs.begin() + tabIndex);
+        m_tabContainer->Detach(tab);
+        tab->Destroy();
+
+        if (closingActiveTab) {
+            if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
+                for (size_t i = 0; i < m_tabs.size(); ++i) {
+                    m_tabs[i]->SetActive(i == (size_t)nextTabIndex);
+                }
+            } else if (m_tabs.size() > 0) {
+                m_tabs[0]->SetActive(true);
+            }
+        } else {
+            if (currentActiveIndex != -1 && currentActiveIndex < (int)m_tabs.size()) {
+                for (size_t i = 0; i < m_tabs.size(); ++i) {
+                    m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
+                }
+            } else if (m_tabs.size() > 0) {
+                if (currentActiveIndex > tabIndex) {
+                    currentActiveIndex--;
+                }
+                if (currentActiveIndex >= 0 && currentActiveIndex < (int)m_tabs.size()) {
+                    for (size_t i = 0; i < m_tabs.size(); ++i) {
+                        m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
+                    }
+                }
+            }
+        }
+
+        LayoutTabs();
+    }
+}
+
 void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
     ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
     int tabIndex = -1;
@@ -428,7 +525,7 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
 
     if (tabIndex != -1) {
         wxWindow* contentPanel = m_tabs[tabIndex]->GetContentPanel();
-        int notebookPage = m_notebook->FindPage(contentPanel);
+        int notebookPage = FindNotebookPage(contentPanel);
 
         // Check if we're closing the currently active tab
         bool closingActiveTab = (tabIndex == currentActiveIndex);
@@ -448,14 +545,14 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
         if (closingActiveTab) {
             if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
                 wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
-                int nextNotebookPage = m_notebook->FindPage(nextContentPanel);
+                int nextNotebookPage = FindNotebookPage(nextContentPanel);
                 if (nextNotebookPage != wxNOT_FOUND) {
                     m_notebook->SetSelection(nextNotebookPage);
                 }
             } else if (m_tabs.size() > 0) {
                 // Only homepage tab remains, switch to it
                 wxWindow* homeContentPanel = m_tabs[0]->GetContentPanel();
-                int homeNotebookPage = m_notebook->FindPage(homeContentPanel);
+                int homeNotebookPage = FindNotebookPage(homeContentPanel);
                 if (homeNotebookPage != wxNOT_FOUND) {
                     m_notebook->SetSelection(homeNotebookPage);
                 }
@@ -513,7 +610,7 @@ void CustomTitleBar::OnTabSelected(wxCommandEvent& event) {
     for (size_t i = 0; i < m_tabs.size(); ++i) {
         if (m_tabs[i] == tab) {
             // Find the notebook page index for this tab's content panel
-            int notebookIndex = m_notebook->FindPage(m_tabs[i]->GetContentPanel());
+            int notebookIndex = FindNotebookPage(m_tabs[i]->GetContentPanel());
             if (notebookIndex != wxNOT_FOUND) {
                 m_notebook->SetSelection(notebookIndex);
             }
@@ -546,7 +643,7 @@ void CustomTitleBar::NotifyAllTabsResize() {
             TermGLCanvas* canvas = tab->GetCanvas();
             if (canvas) {
                 // 临时切换到这个tab以获取正确的size
-                int pageIndex = m_notebook->FindPage(canvas);
+                int pageIndex = FindNotebookPage(canvas);
                 if (pageIndex != wxNOT_FOUND) {
                     m_notebook->SetSelection(pageIndex);
                     m_notebook->Layout();
@@ -666,4 +763,18 @@ void CustomTitleBar::OnMouseMove(wxMouseEvent& event) {
         wxPoint newWindowPos = currentMousePos - m_delta;
         GetParent()->Move(newWindowPos);
     }
+}
+
+int CustomTitleBar::FindNotebookPage(wxWindow* contentPanel) const {
+    if (!contentPanel || !m_notebook) return wxNOT_FOUND;
+    wxWindow* current = contentPanel;
+    while (current) {
+        int index = m_notebook->FindPage(current);
+        if (index != wxNOT_FOUND) {
+            return index;
+        }
+        current = current->GetParent();
+        if (current == m_notebook) break;
+    }
+    return wxNOT_FOUND;
 }

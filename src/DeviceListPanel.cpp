@@ -111,7 +111,10 @@ void DeviceRowPanel::OnDeleteButton(wxCommandEvent& event) {
 }
 
 DeviceListPanel::DeviceListPanel(wxWindow* parent)
-    : wxPanel(parent, wxID_ANY), m_dpiScale(1.0f) {
+    : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL | wxWANTS_CHARS), m_dpiScale(1.0f) {
+
+    // Enable keyboard input focus
+    SetCanFocus(true);
 
     // Get DPI scale factor
 #ifndef __WXMAC__
@@ -146,10 +149,11 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     int controlHeight = dc.GetCharHeight()+4; // Add some padding
 
     // Create a centered panel with DPI-scaled width
-    wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, -1));
+    wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, -1), wxTAB_TRAVERSAL);
     centerPanel->SetBackgroundColour(wxColour(10, 10, 10));
     centerPanel->SetMinSize(wxSize(panelWidth, -1));
     centerPanel->SetMaxSize(wxSize(panelWidth, -1));
+    centerPanel->SetCanFocus(true);
     wxBoxSizer* centerSizer = new wxBoxSizer(wxVERTICAL);
 
     // Horizontal sizer for search box and add button
@@ -158,9 +162,10 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     // Search box with DPI-scaled dimensions
     m_searchCtrl = new wxSearchCtrl(centerPanel, ID_SEARCH_CTRL, wxEmptyString,
                                    wxDefaultPosition, wxSize(searchWidth, controlHeight),
-                                   wxTE_PROCESS_ENTER | wxBORDER_SIMPLE);
+                                   wxTE_PROCESS_ENTER | wxBORDER_SIMPLE | wxWANTS_CHARS);
     m_searchCtrl->ShowSearchButton(false); // Hide built-in search button to reduce left margin
-    m_searchCtrl->SetDescriptiveText(TranslationHelper::Tr("searchHint"));
+    m_searchCtrl->SetCanFocus(true);
+    // Don't set descriptive text as it may interfere with input
     m_searchCtrl->SetBackgroundColour(wxColour(0, 0, 0));
     m_searchCtrl->SetForegroundColour(wxColour(255, 255, 255));
     m_searchCtrl->SetFont(wxFont(static_cast<int>(12 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
@@ -206,8 +211,6 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     // Bind events
     m_searchCtrl->Bind(wxEVT_TEXT_ENTER, &DeviceListPanel::OnSearch, this);
     m_searchCtrl->Bind(wxEVT_TEXT, &DeviceListPanel::OnSearch, this);
-    m_searchCtrl->Bind(wxEVT_SET_FOCUS, &DeviceListPanel::OnSearchFocus, this);
-    m_searchCtrl->Bind(wxEVT_KILL_FOCUS, &DeviceListPanel::OnSearchKillFocus, this);
     m_addButton->Bind(wxEVT_BUTTON, &DeviceListPanel::OnAddDevice, this);
 
     // Load devices
@@ -322,27 +325,13 @@ void DeviceListPanel::RefreshDeviceList(const std::string& filter) {
 
 void DeviceListPanel::OnSearch(wxCommandEvent& event) {
     std::string filter = m_searchCtrl->GetValue().ToStdString();
-    // If filter is placeholder text, treat as empty
-    if (filter == TranslationHelper::Tr("searchHint").ToStdString()) {
-        filter.clear();
-    }
     RefreshDeviceList(filter);
 }
 
-void DeviceListPanel::OnSearchFocus(wxFocusEvent& event) {
-    wxString currentText = m_searchCtrl->GetValue();
-    if (currentText == TranslationHelper::Tr("searchHint")) {
-        m_searchCtrl->SetValue(wxEmptyString);
+void DeviceListPanel::SetFocusToSearch() {
+    if (m_searchCtrl) {
+        m_searchCtrl->SetFocus();
     }
-    event.Skip();
-}
-
-void DeviceListPanel::OnSearchKillFocus(wxFocusEvent& event) {
-    wxString currentText = m_searchCtrl->GetValue();
-    if (currentText.IsEmpty()) {
-        m_searchCtrl->SetValue(TranslationHelper::Tr("searchHint"));
-    }
-    event.Skip();
 }
 
 
