@@ -298,6 +298,7 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_LIST_UPDATE, AppWindow::OnDeviceListUpdate)
     EVT_COMMAND(wxID_ANY, wxEVT_SSH_DIRECT_CONNECT, AppWindow::OnSSHDirectConnect)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_SHOW_REQUEST, AppWindow::OnDeviceShowRequest)
+    EVT_MENU(wxID_ANY, AppWindow::OnFileTransferRequest)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
@@ -616,6 +617,42 @@ void AppWindow::OnDeviceShowRequest(wxCommandEvent& event) {
         }
     } else {
         SSH_LOG("Device selection cancelled");
+    }
+}
+
+void AppWindow::OnFileTransferRequest(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnFileTransferRequest called, GetInt()=" << event.GetInt());
+    if (event.GetInt() == 2) {
+        wxWindow* sender = dynamic_cast<wxWindow*>(event.GetEventObject());
+        if (sender) {
+            // Walk up to find TerminalPanel
+            TerminalPanel* panel = nullptr;
+            wxWindow* curr = sender;
+            while (curr) {
+                panel = dynamic_cast<TerminalPanel*>(curr);
+                if (panel) break;
+                curr = curr->GetParent();
+            }
+            
+            if (panel) {
+                SSH_LOG("AppWindow::OnFileTransferRequest: found TerminalPanel=" << panel);
+                // Find ConnectInfo in m_titleBar
+                if (m_titleBar) {
+                    for (auto* tab : m_titleBar->GetTabs()) {
+                        if (tab->GetContentPanel() == panel) {
+                            SSH_LOG("AppWindow::OnFileTransferRequest: found ConnectInfo=" << tab << ", showing dialog");
+                            tab->ShowFileTransferDialog();
+                            return;
+                        }
+                    }
+                    SSH_LOG("AppWindow::OnFileTransferRequest: ConnectInfo not found for panel=" << panel);
+                }
+            } else {
+                SSH_LOG("AppWindow::OnFileTransferRequest: TerminalPanel not found in sender hierarchy");
+            }
+        }
+    } else {
+        event.Skip();
     }
 }
 

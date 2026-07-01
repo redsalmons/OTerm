@@ -41,6 +41,7 @@ private:
     void OnDeviceListUpdate(wxCommandEvent& event);
     void OnSSHDirectConnect(wxCommandEvent& event);
     void OnDeviceShowRequest(wxCommandEvent& event);
+    void OnFileTransferRequest(wxCommandEvent& event);
     
     void CreateDashboardTab();
     void CreateTerminalTab(const DeviceConfig& device);

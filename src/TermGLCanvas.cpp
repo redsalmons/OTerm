@@ -1171,7 +1171,12 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
         }
 
-        // If no selection, fall through to send Ctrl+C to terminal
+        // If no selection, clear SSH input buffer and let it fall through to send Ctrl+C to terminal
+        TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+        if (panel && !panel->IsLocalTerminal()) {
+            m_sshInputBuffer.clear();
+            SSH_LOG("OnKeyDown: Ctrl+C pressed on SSH terminal, clearing m_sshInputBuffer");
+        }
 
     }
 
@@ -1209,12 +1214,17 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
                         SSH_LOG("Pasted " << strlen(utf8_buf.data()) << " characters from clipboard");
 
-                        // Update input buffer for local terminals for command interception
+                        // Update input buffer for local/SSH terminals for command interception
                         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-                        if (panel && panel->IsLocalTerminal()) {
+                        if (panel) {
                             std::string pasted_str(utf8_buf.data(), strlen(utf8_buf.data()));
-                            panel->AppendToInputBuffer(pasted_str);
-                            SSH_LOG("Pasted to input buffer: '" << pasted_str << "', buffer now='" << panel->GetInputBuffer() << "'");
+                            if (panel->IsLocalTerminal()) {
+                                panel->AppendToInputBuffer(pasted_str);
+                                SSH_LOG("Pasted to input buffer: '" << pasted_str << "', buffer now='" << panel->GetInputBuffer() << "'");
+                            } else {
+                                m_sshInputBuffer += pasted_str;
+                                SSH_LOG("Pasted to SSH input buffer: '" << pasted_str << "', m_sshInputBuffer now='" << m_sshInputBuffer << "'");
+                            }
                         }
 
                     }
@@ -1294,8 +1304,33 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                             panel->ClearInputBuffer();
                         }
                     } else {
-                        SSH_LOG("OnKeyDown: Not a local terminal, sending Enter");
-                        sequence = "\r";
+                        SSH_LOG("OnKeyDown: Not a local terminal (SSH), checking m_sshInputBuffer: '" << m_sshInputBuffer << "'");
+                        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+                        if (f.is_open()) f << "[SSH_KEYDOWN] Enter pressed, m_sshInputBuffer: '" << m_sshInputBuffer << "'" << std::endl;
+                        
+                        if (!m_sshInputBuffer.empty()) {
+                            std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
+                            SSH_LOG("OnKeyDown SSH: Extracted command='" << command << "'");
+                            if (f.is_open()) f << "[SSH_KEYDOWN] Extracted command: '" << command << "'" << std::endl;
+                            
+                            if (command == "download" || command == "upload") {
+                                SSH_LOG("OnKeyDown SSH: command is upload/download, intercepting!");
+                                if (f.is_open()) f << "[SSH_KEYDOWN] Intercepting upload/download, triggering file transfer" << std::endl;
+                                
+                                sequence = "\x03"; // Send Ctrl+C to cancel command line on remote shell
+                                
+                                wxCommandEvent evt(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
+                                evt.SetInt(2); // Flag to indicate file transfer request
+                                evt.SetString(wxString::FromUTF8(m_sshInputBuffer.c_str()));
+                                evt.SetEventObject(this);
+                                wxQueueEvent(panel, evt.Clone());
+                            } else {
+                                sequence = "\r";
+                            }
+                            m_sshInputBuffer.clear();
+                        } else {
+                            sequence = "\r";
+                        }
                     }
                 }
 
@@ -1328,24 +1363,36 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
             case WXK_BACK:
                 {
                     sequence = "\x7f"; // Backspace
-                    // Update input buffer for local terminals
+                    // Update input buffer for local/SSH terminals
                     TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-                    if (panel && panel->IsLocalTerminal()) {
-                        const std::string& buffer = panel->GetInputBuffer();
-                        if (!buffer.empty()) {
-                            panel->AppendToInputBuffer("\x7f"); // Mark backspace
-                            // Actually remove last character from buffer
-                            std::string newBuffer = buffer;
-                            if (!newBuffer.empty() && newBuffer.back() == '\x7f') {
-                                newBuffer.pop_back(); // Remove the backspace marker
+                    if (panel) {
+                        if (panel->IsLocalTerminal()) {
+                            const std::string& buffer = panel->GetInputBuffer();
+                            if (!buffer.empty()) {
+                                panel->AppendToInputBuffer("\x7f"); // Mark backspace
+                                // Actually remove last character from buffer
+                                std::string newBuffer = buffer;
+                                if (!newBuffer.empty() && newBuffer.back() == '\x7f') {
+                                    newBuffer.pop_back(); // Remove the backspace marker
+                                }
+                                if (!newBuffer.empty()) {
+                                    newBuffer.pop_back(); // Remove last character
+                                }
+                                // Clear and set new buffer
+                                panel->ClearInputBuffer();
+                                if (!newBuffer.empty()) {
+                                    panel->AppendToInputBuffer(newBuffer);
+                                }
                             }
-                            if (!newBuffer.empty()) {
-                                newBuffer.pop_back(); // Remove last character
-                            }
-                            // Clear and set new buffer
-                            panel->ClearInputBuffer();
-                            if (!newBuffer.empty()) {
-                                panel->AppendToInputBuffer(newBuffer);
+                        } else {
+                            // SSH terminal: handle backspace for m_sshInputBuffer
+                            if (!m_sshInputBuffer.empty()) {
+                                // Remove one UTF-8 character (which could be multi-byte)
+                                do {
+                                    m_sshInputBuffer.pop_back();
+                                } while (!m_sshInputBuffer.empty() && 
+                                         ((unsigned char)m_sshInputBuffer.back() & 0xC0) == 0x80);
+                                SSH_LOG("OnKeyDown SSH backspace: m_sshInputBuffer now='" << m_sshInputBuffer << "'");
                             }
                         }
                     }
@@ -1451,6 +1498,35 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
                     return;
                 }
             }
+        } else if (panel && !panel->IsLocalTerminal()) {
+            std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+            if (f.is_open()) f << "[SSH_ONCHAR] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
+            SSH_LOG("OnChar SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
+            
+            if (!m_sshInputBuffer.empty()) {
+                std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
+                SSH_LOG("OnChar SSH: Extracted command='" << command << "'");
+                if (f.is_open()) f << "[SSH_ONCHAR] Extracted command: '" << command << "'" << std::endl;
+                
+                if (command == "download" || command == "upload") {
+                    SSH_LOG("OnChar SSH: command is upload/download, intercepting!");
+                    if (f.is_open()) f << "[SSH_ONCHAR] Intercepting upload/download, sending Ctrl+C" << std::endl;
+                    
+                    if (key_callback_) {
+                        key_callback_("\x03", 1);
+                    }
+                    
+                    wxCommandEvent evt(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
+                    evt.SetInt(2); // Flag to indicate file transfer request
+                    evt.SetString(wxString::FromUTF8(m_sshInputBuffer.c_str()));
+                    evt.SetEventObject(this);
+                    wxQueueEvent(panel, evt.Clone());
+                    
+                    m_sshInputBuffer.clear();
+                    return;
+                }
+                m_sshInputBuffer.clear();
+            }
         }
     }
 
@@ -1482,11 +1558,22 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
                 key_callback_(buffer.data(), len);
 
-                // Update input buffer for local terminals for command interception
+                // Update input buffer for local/SSH terminals for command interception
                 TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-                if (panel && panel->IsLocalTerminal()) {
-                    std::string utf8_str(buffer.data(), len);
-                    panel->AppendToInputBuffer(utf8_str);
+                if (panel) {
+                    if (panel->IsLocalTerminal()) {
+                        std::string utf8_str(buffer.data(), len);
+                        panel->AppendToInputBuffer(utf8_str);
+                    } else {
+                        // SSH terminal: track in m_sshInputBuffer
+                        // Only track printable characters (first byte >= 32 and != 127) or multi-byte leading bytes (> 127)
+                        unsigned char first_char = (unsigned char)buffer.data()[0];
+                        if ((first_char >= 32 && first_char != 127) || first_char > 127) {
+                            std::string utf8_str(buffer.data(), len);
+                            m_sshInputBuffer += utf8_str;
+                            SSH_LOG("OnChar SSH input appended: '" << utf8_str << "', m_sshInputBuffer now='" << m_sshInputBuffer << "'");
+                        }
+                    }
                 }
             }
 
@@ -1545,6 +1632,36 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
                     panel->ClearInputBuffer();
                     return;
                 }
+            }
+        } else if (panel && !panel->IsLocalTerminal()) {
+            // SSH terminal: check for upload/download commands
+            std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+            if (f.is_open()) f << "[SSH_CHARHOOK] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
+            SSH_LOG("OnCharHook SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
+            
+            if (!m_sshInputBuffer.empty()) {
+                std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
+                SSH_LOG("OnCharHook SSH: Extracted command='" << command << "'");
+                if (f.is_open()) f << "[SSH_CHARHOOK] Extracted command: '" << command << "'" << std::endl;
+                
+                if (command == "download" || command == "upload") {
+                    SSH_LOG("OnCharHook SSH: command is upload/download, intercepting!");
+                    if (f.is_open()) f << "[SSH_CHARHOOK] Intercepting upload/download, sending Ctrl+C" << std::endl;
+                    
+                    if (key_callback_) {
+                        key_callback_("\x03", 1);
+                    }
+                    
+                    wxCommandEvent evt(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
+                    evt.SetInt(2); // Flag to indicate file transfer request
+                    evt.SetString(wxString::FromUTF8(m_sshInputBuffer.c_str()));
+                    evt.SetEventObject(this);
+                    wxQueueEvent(panel, evt.Clone());
+                    
+                    m_sshInputBuffer.clear();
+                    return; // Return without skipping to intercept
+                }
+                m_sshInputBuffer.clear();
             }
         }
     }
@@ -2091,11 +2208,83 @@ void TermGLCanvas::ShowIMEInputBox() {
     // Set callback to send text to terminal
 
     m_imeCallback = [this](const char* data, int length) {
-
-        if (key_callback_) {
-
-            key_callback_(data, length);
-
+        // Track input for SSH terminal upload/download command detection
+        std::string modified_data;
+        
+        TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+        bool isSSH = panel && !panel->IsLocalTerminal();
+        
+        if (isSSH) {
+            for (int i = 0; i < length; i++) {
+                if (data[i] == '\r' || data[i] == '\n') {
+                    // Enter key pressed - check if command is download or upload (SSH only)
+                    if (!m_sshInputBuffer.empty()) {
+                        // Debug log to alert file
+                        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+                        if (f.is_open()) f << "[SSH_INPUT] SSH command entered: " << m_sshInputBuffer << std::endl;
+                        
+                        SSH_LOG("SSH command entered: " << m_sshInputBuffer);
+                        
+                        // Extract the actual command (handle whitespace)
+                        std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
+                        
+                        // Debug log to alert file
+                        if (f.is_open()) f << "[SSH_INPUT] Extracted command: '" << command << "'" << std::endl;
+                        
+                        SSH_LOG("Extracted command: '" << command << "'");
+                        
+                        if (command == "download" || command == "upload") {
+                            // Debug log to alert file
+                            if (f.is_open()) f << "[SSH_INPUT] Command matches download/upload, triggering file transfer" << std::endl;
+                            
+                            SSH_LOG("Command matches download/upload, triggering file transfer");
+                            modified_data += '\x03';
+                            SSH_LOG("Detected upload/download command, showing file transfer dialog");
+                            
+                            // Send event to TerminalPanel which will forward it to find ConnectInfo
+                            TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+                            if (panel) {
+                                SSH_LOG("Found TerminalPanel, sending file transfer request");
+                                wxCommandEvent evt(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
+                                evt.SetInt(2); // Flag to indicate file transfer request
+                                evt.SetString(m_sshInputBuffer);
+                                evt.SetEventObject(this);
+                                wxQueueEvent(panel, evt.Clone());
+                            } else {
+                                SSH_LOG("ERROR: Could not find TerminalPanel parent");
+                            }
+                        } else {
+                            // Not upload/download, pass through normally
+                            modified_data += data[i];
+                        }
+                        m_sshInputBuffer.clear();
+                    } else {
+                        modified_data += data[i];
+                    }
+                } else if (data[i] == 127 || data[i] == 8) {
+                    // Backspace - remove last character
+                    if (!m_sshInputBuffer.empty()) {
+                        m_sshInputBuffer.pop_back();
+                    }
+                    modified_data += data[i];
+                } else if (data[i] >= 32 && data[i] < 127) {
+                    // Printable character
+                    m_sshInputBuffer += data[i];
+                    modified_data += data[i];
+                } else {
+                    // Other control characters
+                    modified_data += data[i];
+                }
+            }
+            
+            if (key_callback_) {
+                key_callback_(modified_data.c_str(), modified_data.length());
+            }
+        } else {
+            // Local terminal: pass through directly
+            if (key_callback_) {
+                key_callback_(data, length);
+            }
         }
 
     };

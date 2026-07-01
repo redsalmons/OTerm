@@ -208,6 +208,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
     Bind(wxEVT_SIZE, &ConnectInfo::OnSize, this);
 
+    Bind(wxEVT_COMMAND_MENU_SELECTED, &ConnectInfo::OnFileTransferRequest, this);
     Bind(wxEVT_FILE_TRANSFER_REQUEST, &ConnectInfo::OnFileTransferRequest, this);
 
     Bind(wxEVT_FILE_TRANSFER_PROGRESS, &ConnectInfo::OnFileTransferProgress, this);
@@ -547,144 +548,15 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
         SSH_LOG("ConnectInfo: TerminalThread created");
 
-
-
-        // Set keyboard callback to send input to thread
-
-        if (m_termCanvas) {
-
-            m_termCanvas->SetKeyCallback([this](const char* data, int length) {
-
-                if (m_terminalThread) {
-
-                    if (length >= 2 && data[0] == '\x1b') {
-
-                        m_terminalThread->QueueInput(std::string(data, length));
-
-                        return;
-
-                    }
-
-
-
-                    // Process keyboard input
-
-                    std::string modified_data;
-
-
-
-                    for (int i = 0; i < length; i++) {
-
-                        if (data[i] == '\r' || data[i] == '\n') {
-
-                            // Enter key pressed - check if command is download or upload
-
-                            if (!m_currentInput.empty()) {
-
-                                SSH_LOG("Command entered: " << m_currentInput);
-
-
-
-                                // If command is "download" or "upload", show file transfer dialog
-
-                                if (m_currentInput == "download" || m_currentInput == "upload") {
-
-                                    modified_data += '\x03';
-
-                                    SSH_LOG("Detected download/upload command, showing file transfer dialog");
-
-
-
-                                    // Show file transfer dialog (non-modal)
-
-                                    if (!m_fileTransferDialog) {
-
-                                        m_fileTransferDialog = new FileTransferDialog(this,
-
-                                            TranslationHelper::Tr("fileTransfer"),
-
-                                            m_deviceConfig);
-
-                                    } else {
-
-                                        m_fileTransferDialog->Show();
-
-                                        m_fileTransferDialog->Raise();
-
-                                    }
-
-                                } else {
-
-                                    modified_data += data[i];
-
-                                }
-
-
-
-                                m_currentInput.clear();
-
-                            } else {
-
-                                modified_data += data[i];
-
-                            }
-
-                        } else if (data[i] == 127 || data[i] == 8) {
-
-                            // Backspace - remove last character
-
-                            if (!m_currentInput.empty()) {
-
-                                m_currentInput.pop_back();
-
-                            }
-
-                            modified_data += data[i];
-
-                        } else if (data[i] >= 32 && data[i] < 127) {
-
-                            // Printable character
-
-                            m_currentInput += data[i];
-
-                            modified_data += data[i];
-
-                        } else {
-
-                            // Other control characters
-
-                            modified_data += data[i];
-
-                        }
-
-                    }
-
-
-
-                    // Send to SSH
-
-                    if (!modified_data.empty()) {
-
-                        m_terminalThread->QueueInput(modified_data);
-
-                    }
-
-                }
-
-            });
-
+        // Note: Key callback is now set in TerminalPanel::SetupCanvasConnection
+        // which includes upload/download command detection
             
-
-            // Set split callback
-
+        // Set split callback
+        if (m_termCanvas) {
             m_termCanvas->SetSplitCallback([this](wxSplitMode mode, TerminalPanel* sourcePanel) {
-
                 SSH_LOG("ConnectInfo: split_callback called with mode=" << mode << " sourcePanel=" << sourcePanel);
-
                 HandleSplit(mode, sourcePanel);
-
             });
-
         }
 
     }
@@ -700,6 +572,34 @@ void ConnectInfo::HandleClosePanel(TerminalPanel* sourcePanel) {
     }
     
     m_splitManager->Close(sourcePanel);
+}
+
+void ConnectInfo::ShowFileTransferDialog() {
+    SSH_LOG("ConnectInfo::ShowFileTransferDialog called");
+    
+    // Find the active TerminalThread (including for converted sessions)
+    TerminalThread* activeThread = m_terminalThread;
+    if (!activeThread && m_contentPanel) {
+        TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+        if (panel) {
+            activeThread = panel->GetSSHThread();
+        }
+    }
+    
+    // Update our device config from the active thread (critical for direct connections / oc ssh)
+    if (activeThread) {
+        m_deviceConfig = activeThread->GetDeviceConfig();
+        SSH_LOG("ConnectInfo::ShowFileTransferDialog: updated m_deviceConfig from active TerminalThread (username=" << m_deviceConfig.username << ", address=" << m_deviceConfig.address << ")");
+    }
+    
+    if (!m_fileTransferDialog) {
+        m_fileTransferDialog = new FileTransferDialog(this,
+            TranslationHelper::Tr("fileTransfer"),
+            m_deviceConfig);
+    } else {
+        m_fileTransferDialog->Show();
+        m_fileTransferDialog->Raise();
+    }
 }
 
 
@@ -858,6 +758,18 @@ void ConnectInfo::OnTerminalExit(wxThreadEvent& event) {
 
 
 void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
+    // Debug log
+    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    if (f.is_open()) f << "[CONNECTINFO] OnFileTransferRequest called, event.GetInt()=" << event.GetInt() << std::endl;
+    
+    // Handle upload/download command detection from SSH terminal
+    if (event.GetInt() == 2) {
+        wxString command = event.GetString();
+        SSH_LOG("File transfer request for command: " << command.ToStdString());
+        if (f.is_open()) f << "[CONNECTINFO] Calling ShowFileTransferDialog for command: " << command.ToStdString() << std::endl;
+        ShowFileTransferDialog();
+        return;
+    }
 
     wxString json = event.GetString();
 

@@ -21,6 +21,7 @@ public:
     void CloseTab(wxWindow* contentPanel);
     void NotifyAllTabsResize();
     int FindNotebookPage(wxWindow* contentPanel) const;
+    const std::vector<ConnectInfo*>& GetTabs() const { return m_tabs; }
 
 private:
     void OnPaint(wxPaintEvent& event);

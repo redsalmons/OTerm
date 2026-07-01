@@ -23,6 +23,7 @@
 
 
 #include "ConnectInfo.h"
+#include "CommandInterceptor.h"
 
 
 
@@ -242,8 +243,9 @@ public:
     bool m_imeInputBoxVisible;
 
     std::function<void(const char*, int)> m_imeCallback;
-
-
+    
+    std::string m_sshInputBuffer;  // Track input for SSH terminal command detection
+    CommandInterceptor m_commandInterceptor;  // Command interceptor for SSH terminal
 
     // IME input box event handlers
 

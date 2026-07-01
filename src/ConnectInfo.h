@@ -86,6 +86,8 @@ public:
 
     void HandleClosePanel(TerminalPanel* sourcePanel);
 
+    void ShowFileTransferDialog();
+
     
 
     ~ConnectInfo();

@@ -425,6 +425,7 @@ void TerminalThread::process_input_queue() {
             for (char c : input) {
                 if (c == '\r' || c == '\n') {
                     m_vtermManager.write_input("\r\n", 2);
+                    m_deviceConfig.password = m_pending_input;
                     m_sshManager.provide_password(m_pending_input);
                     m_pending_input.clear();
                 } else if (c == '\x7f' || c == '\x08') {

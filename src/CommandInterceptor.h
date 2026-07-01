@@ -22,6 +22,11 @@ public:
     // Returns InterceptionResult indicating whether to intercept
     InterceptionResult ShouldIntercept(const std::string& command);
 
+    // Extract the first word (command) from a command line
+    // commandLine: The full command line input by user
+    // Returns the first word (command) with leading/trailing whitespace removed
+    std::string ExtractCommand(const std::string& commandLine);
+
     // Get the list of intercepted command prefixes
     const std::vector<std::string>& GetInterceptedPrefixes() const;
 
@@ -32,9 +37,6 @@ public:
     void RemoveInterceptedPrefix(const std::string& prefix);
 
 private:
-    // Parse command line to extract the actual command (first word)
-    std::string ExtractCommand(const std::string& commandLine);
-
     // Check if a command starts with any intercepted prefix
     bool IsInterceptedCommand(const std::string& command);
 

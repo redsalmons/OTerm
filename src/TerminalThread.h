@@ -71,6 +71,8 @@ public:
     
     // Get front buffer (read-only for UI thread)
     const ScreenBuffer* GetFrontBuffer() const { return &m_front_buffer; }
+    std::string GetPassword() const { return m_deviceConfig.password; }
+    DeviceConfig GetDeviceConfig() const { return m_deviceConfig; }
     
     // Start SSH connection
     void Connect();

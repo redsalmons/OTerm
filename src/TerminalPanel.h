@@ -47,6 +47,9 @@ public:
     // Setup canvas connection (public for SplitManager)
     void SetupCanvasConnection();
 
+    // File transfer request handler
+    void OnFileTransferRequest(wxCommandEvent& event);
+
     // Input buffer for command interception
     void AppendToInputBuffer(const std::string& text);
     void ClearInputBuffer();

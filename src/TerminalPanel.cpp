@@ -37,6 +37,7 @@ TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<LocalTerminalCont
     Bind(wxEVT_TERMINAL_DAMAGE, &TerminalPanel::OnTerminalDamage, this);
     Bind(wxEVT_SIZE, &TerminalPanel::OnSize, this);
     Bind(wxEVT_KEY_DOWN, &TerminalPanel::OnKeyDown, this);
+    Bind(wxEVT_COMMAND_MENU_SELECTED, &TerminalPanel::OnFileTransferRequest, this);
     
     // Don't bind menu events - TermGLCanvas will handle split
     // Bind(wxEVT_MENU, &TerminalPanel::OnHorizontalSplit, this, ID_HORIZONTAL_SPLIT);
@@ -260,6 +261,21 @@ void TerminalPanel::DoSplit(wxSplitMode mode) {
         SPLIT_LOG("ERROR: Parent is not InfiniteSplitter");
     }
     SPLIT_LOG("DoSplit done");
+}
+
+void TerminalPanel::OnFileTransferRequest(wxCommandEvent& event) {
+    SPLIT_LOG("TerminalPanel::OnFileTransferRequest called");
+    if (event.GetInt() == 2) {
+        wxString command = event.GetString();
+        SPLIT_LOG("File transfer request for command: " << command.ToStdString());
+        
+        // Forward the event to parent to find ConnectInfo
+        wxWindow* parent = GetParent();
+        while (parent) {
+            wxQueueEvent(parent, event.Clone());
+            parent = parent->GetParent();
+        }
+    }
 }
 
 void TerminalPanel::OnClosePanel(wxCommandEvent& event) {

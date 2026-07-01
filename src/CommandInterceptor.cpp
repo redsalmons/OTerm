@@ -11,7 +11,7 @@
     } while(0)
 
 CommandInterceptor::CommandInterceptor() {
-    // Initialize with default intercepted prefixes
+    // Initialize with default intercepted prefixes (for local terminal)
     m_interceptedPrefixes = {"oc ssh", "oc device"};
     INTERCEPTOR_LOG("CommandInterceptor initialized with prefixes: oc ssh, oc device");
 }
