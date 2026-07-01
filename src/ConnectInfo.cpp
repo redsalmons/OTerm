@@ -1,5 +1,7 @@
 ﻿#include "ConnectInfo.h"
 
+#include <wx/simplebook.h>
+
 #include "TermGLCanvas.h"
 
 #include "TerminalPanel.h"
@@ -42,7 +44,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
       m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr), m_prevRows(0), m_prevCols(0), m_cachedWidth(0)
 
-    , m_splitManager(std::make_unique<SplitManager>(contentPanel->GetParent())) {
+    , m_splitManager(std::make_unique<SplitManager>(contentPanel->GetParent())), m_labelEditor(nullptr) {
 
     // Calculate DPI scale
 
@@ -201,6 +203,8 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     Bind(wxEVT_LEFT_DOWN, &ConnectInfo::OnSelected, this);
 
     m_label->Bind(wxEVT_LEFT_DOWN, &ConnectInfo::OnSelected, this);
+
+    m_label->Bind(wxEVT_LEFT_DCLICK, &ConnectInfo::OnLabelDoubleClick, this);
 
     Bind(wxEVT_SIZE, &ConnectInfo::OnSize, this);
 
@@ -1221,6 +1225,102 @@ void ConnectInfo::OnSelected(wxMouseEvent& event) {
 
     wxPostEvent(GetParent(), selectedEvent);
 
+}
+
+void ConnectInfo::OnLabelDoubleClick(wxMouseEvent& event) {
+    event.Skip();
+    
+    // Store current label for rollback if empty
+    wxString currentLabel = m_label->GetLabel();
+    
+    // Get label position and size
+    wxRect labelRect = m_label->GetRect();
+    
+    // Create text editor
+    m_labelEditor = new wxTextCtrl(this, wxID_ANY, currentLabel, 
+                                   labelRect.GetPosition(), labelRect.GetSize(),
+                                   wxTE_PROCESS_ENTER | wxBORDER_NONE);
+    
+    // Match label appearance
+    m_labelEditor->SetForegroundColour(*wxWHITE);
+    m_labelEditor->SetBackgroundColour(m_isActive ? wxColour(45, 45, 45) : wxColour(30, 30, 30));
+    wxFont labelFont = m_label->GetFont();
+    m_labelEditor->SetFont(labelFont);
+    
+    // Hide label and show editor
+    m_label->Hide();
+    m_labelEditor->Show();
+    m_labelEditor->SetFocus();
+    m_labelEditor->SelectAll();
+    
+    // Bind events
+    m_labelEditor->Bind(wxEVT_TEXT_ENTER, &ConnectInfo::OnLabelTextEnter, this);
+    m_labelEditor->Bind(wxEVT_KILL_FOCUS, &ConnectInfo::OnLabelTextKillFocus, this);
+}
+
+void ConnectInfo::OnLabelTextEnter(wxCommandEvent& event) {
+    if (m_labelEditor) {
+        wxString newLabel = m_labelEditor->GetValue().Trim();
+        wxString oldLabel = m_label->GetLabel();
+        
+        // If empty, use old label
+        if (newLabel.IsEmpty()) {
+            newLabel = oldLabel;
+        }
+        
+        // Update label
+        m_label->SetLabel(newLabel);
+        
+        // Cleanup editor
+        m_labelEditor->Unbind(wxEVT_TEXT_ENTER, &ConnectInfo::OnLabelTextEnter, this);
+        m_labelEditor->Unbind(wxEVT_KILL_FOCUS, &ConnectInfo::OnLabelTextKillFocus, this);
+        m_labelEditor->Destroy();
+        m_labelEditor = nullptr;
+        
+        // Show label
+        m_label->Show();
+        
+        // Update notebook page text directly to avoid deadlock
+        wxWindow* parent = GetParent();
+        if (parent) {
+            wxSimplebook* notebook = nullptr;
+            
+            // Find the notebook by walking up the parent chain
+            wxWindow* current = parent;
+            while (current) {
+                notebook = dynamic_cast<wxSimplebook*>(current);
+                if (notebook) break;
+                current = current->GetParent();
+            }
+            
+            if (notebook && m_contentPanel) {
+                // Find the notebook page index for this content panel
+                int pageIndex = wxNOT_FOUND;
+                for (size_t i = 0; i < notebook->GetPageCount(); ++i) {
+                    if (notebook->GetPage(i) == m_contentPanel) {
+                        pageIndex = i;
+                        break;
+                    }
+                }
+                
+                if (pageIndex != wxNOT_FOUND) {
+                    notebook->SetPageText(pageIndex, newLabel);
+                }
+            }
+            
+            // Notify parent to relayout tabs
+            wxCommandEvent layoutEvent(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
+            layoutEvent.SetInt(1); // Flag to indicate tab label changed
+            wxPostEvent(parent, layoutEvent);
+        }
+    }
+}
+
+void ConnectInfo::OnLabelTextKillFocus(wxFocusEvent& event) {
+    // Treat focus loss same as Enter
+    wxCommandEvent cmdEvent;
+    OnLabelTextEnter(cmdEvent);
+    event.Skip();
 }
 
 

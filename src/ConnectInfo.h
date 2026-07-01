@@ -104,6 +104,12 @@ private:
 
     void OnSelected(wxMouseEvent& event);
 
+    void OnLabelDoubleClick(wxMouseEvent& event);
+
+    void OnLabelTextEnter(wxCommandEvent& event);
+
+    void OnLabelTextKillFocus(wxFocusEvent& event);
+
     void OnSize(wxSizeEvent& event);
 
     void OnTerminalDamage(wxThreadEvent& event);
@@ -119,6 +125,8 @@ private:
 
 
     wxStaticText* m_label;
+
+    wxTextCtrl* m_labelEditor;
 
     wxButton* m_closeButton;
 

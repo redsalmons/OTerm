@@ -104,6 +104,8 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     m_drawerButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnDrawerClicked, this);
     Bind(wxEVT_TAB_CLOSE, &CustomTitleBar::OnTabClose, this);
     Bind(wxEVT_TAB_SELECTED, &CustomTitleBar::OnTabSelected, this);
+    Bind(wxEVT_COMMAND_TEXT_UPDATED, &CustomTitleBar::OnTabLabelChanged, this);
+    Bind(wxEVT_COMMAND_MENU_SELECTED, &CustomTitleBar::OnTabLayoutRequest, this);
 
     // Initialize max tab container width
     UpdateMaxTabContainerWidth();
@@ -692,6 +694,31 @@ void CustomTitleBar::NotifyAllTabsResize() {
     // 恢复原来的选中页面
     if (currentSelection != wxNOT_FOUND) {
         m_notebook->SetSelection(currentSelection);
+    }
+}
+
+void CustomTitleBar::OnTabLabelChanged(wxCommandEvent& event) {
+    ConnectInfo* tab = dynamic_cast<ConnectInfo*>(event.GetEventObject());
+    if (!tab) return;
+    
+    wxString newLabel = event.GetString();
+    wxWindow* contentPanel = tab->GetContentPanel();
+    if (!contentPanel) return;
+    
+    // Find the notebook page index for this content panel
+    int pageIndex = FindNotebookPage(contentPanel);
+    if (pageIndex != wxNOT_FOUND) {
+        m_notebook->SetPageText(pageIndex, newLabel);
+    }
+    
+    // Relayout tabs to accommodate new label width
+    LayoutTabs();
+}
+
+void CustomTitleBar::OnTabLayoutRequest(wxCommandEvent& event) {
+    if (event.GetInt() == 1) {
+        // Tab label changed, relayout tabs
+        LayoutTabs();
     }
 }
 

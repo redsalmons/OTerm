@@ -40,6 +40,10 @@ private:
     void OnTabClose(wxCommandEvent& event);
     void OnTabSelected(wxCommandEvent& event);
 
+    void OnTabLabelChanged(wxCommandEvent& event);
+
+    void OnTabLayoutRequest(wxCommandEvent& event);
+
     void LayoutTabs();
     void UpdateMaxTabContainerWidth();
 
