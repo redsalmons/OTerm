@@ -4,11 +4,7 @@
 #include <fstream>
 #include <filesystem>
 
-#define INTERCEPTOR_LOG(msg) \
-    do { \
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app); \
-        if (f.is_open()) f << "[INTERCEPTOR] " << msg << std::endl; \
-    } while(0)
+#define INTERCEPTOR_LOG(msg) ((void)0)
 
 CommandInterceptor::CommandInterceptor() {
     // Initialize with default intercepted prefixes (for local terminal)

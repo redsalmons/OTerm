@@ -399,10 +399,10 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
     has_new_output_ = true;
 
     SSH_LOG("update_cell_buffer: rect={" << rect.start_row << "," << rect.start_col << " -> " << rect.end_row << "," << rect.end_col << "}");
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[VTERM] update_cell_buffer rect={" << rect.start_row << "," << rect.start_col << " -> " << rect.end_row << "," << rect.end_col << "}" << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[VTERM] update_cell_buffer rect={" << rect.start_row << "," << rect.start_col << " -> " << rect.end_row << "," << rect.end_col << "}" << std::endl;
+    // }
 
     // Obtain VTerm state once outside the loop to avoid repeated calls
     VTermState* state = vterm_obtain_state(vt_);
@@ -514,10 +514,10 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
         if (first_char != 0) break;
     }
     SSH_LOG("update_cell_buffer: done, cell[0][0] char_code=" << (cell_buffer_.size() > 0 && cell_buffer_[0].size() > 0 ? cell_buffer_[0][0].char_code : 0));
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[VTERM] update_cell_buffer done first_nonempty_char=" << static_cast<int>(first_char) << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[VTERM] update_cell_buffer done first_nonempty_char=" << static_cast<int>(first_char) << std::endl;
+    // }
 }
 
 void VTermManager::refresh_cell_buffer() {

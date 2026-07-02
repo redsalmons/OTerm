@@ -11,11 +11,12 @@
 #endif
 
 static void DELEGATE_LOG(const std::string& msg) {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) {
-        f << "[DELEGATE] " << msg << std::endl;
-        f.flush();
-    }
+    (void)msg; // Suppress unused parameter warning
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) {
+    //     f << "[DELEGATE] " << msg << std::endl;
+    //     f.flush();
+    // }
 }
 
 LocalTerminalDelegate::LocalTerminalDelegate(int rows, int cols, const std::string& shell)

@@ -2,11 +2,7 @@
 #include <fstream>
 #include <filesystem>
 
-#define CONTAINER_LOG(msg) \
-    do { \
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app); \
-        if (f.is_open()) f << "[CONTAINER] " << msg << std::endl; \
-    } while(0)
+#define CONTAINER_LOG(msg) ((void)0)
 
 LocalTerminalContainer::LocalTerminalContainer(int rows, int cols, const std::string& shell)
     : m_thread(nullptr), m_event_proxy(std::make_shared<EventProxy>()) {

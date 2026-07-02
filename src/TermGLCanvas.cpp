@@ -134,9 +134,8 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
     Bind(wxEVT_MOTION, &TermGLCanvas::OnMouseMove, this);
 
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-
-    if (f.is_open()) f << "[CANVAS] Binding events, ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[CANVAS] Binding events, ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
 
     
 
@@ -156,7 +155,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
     
 
-    if (f.is_open()) f << "[CANVAS] Events bound successfully" << std::endl;
+    // if (f.is_open()) f << "[CANVAS] Events bound successfully" << std::endl;
 
 
 
@@ -1021,21 +1020,14 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
     if (paintCount == 0 || paintCount % 30 == 0) {
 
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-
-        if (f.is_open()) {
-
-            wxSize size = GetSize();
-
-            f << "[CANVAS] OnPaint count=" << paintCount
-
-              << " size=" << size.GetWidth() << "x" << size.GetHeight()
-
-              << " cells=" << m_screen_cells.size()
-
-              << " first_char=" << (m_screen_cells.empty() ? 0 : m_screen_cells[0].char_code) << std::endl;
-
-        }
+        // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+        // if (f.is_open()) {
+        //     wxSize size = GetSize();
+        //     f << "[CANVAS] OnPaint count=" << paintCount
+        //       << " size=" << size.GetWidth() << "x" << size.GetHeight()
+        //       << " cells=" << m_screen_cells.size()
+        //       << " first_char=" << (m_screen_cells.empty() ? 0 : m_screen_cells[0].char_code) << std::endl;
+        // }
 
     }
 
@@ -1263,17 +1255,17 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                         }
                     } else {
                         SSH_LOG("OnKeyDown: Not a local terminal (SSH), checking m_sshInputBuffer: '" << m_sshInputBuffer << "'");
-                        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-                        if (f.is_open()) f << "[SSH_KEYDOWN] Enter pressed, m_sshInputBuffer: '" << m_sshInputBuffer << "'" << std::endl;
+                        // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+                        // if (f.is_open()) f << "[SSH_KEYDOWN] Enter pressed, m_sshInputBuffer: '" << m_sshInputBuffer << "'" << std::endl;
                         
                         if (!m_sshInputBuffer.empty()) {
                             std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
                             SSH_LOG("OnKeyDown SSH: Extracted command='" << command << "'");
-                            if (f.is_open()) f << "[SSH_KEYDOWN] Extracted command: '" << command << "'" << std::endl;
+                            // if (f.is_open()) f << "[SSH_KEYDOWN] Extracted command: '" << command << "'" << std::endl;
                             
                             if (command == "download" || command == "upload") {
                                 SSH_LOG("OnKeyDown SSH: command is upload/download, intercepting!");
-                                if (f.is_open()) f << "[SSH_KEYDOWN] Intercepting upload/download, triggering file transfer" << std::endl;
+                                // if (f.is_open()) f << "[SSH_KEYDOWN] Intercepting upload/download, triggering file transfer" << std::endl;
                                 
                                 sequence = "\x03"; // Send Ctrl+C to cancel command line on remote shell
                                 
@@ -1457,18 +1449,18 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
                 }
             }
         } else if (panel && !panel->IsLocalTerminal()) {
-            std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-            if (f.is_open()) f << "[SSH_ONCHAR] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
+            // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+            // if (f.is_open()) f << "[SSH_ONCHAR] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
             SSH_LOG("OnChar SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
             
             if (!m_sshInputBuffer.empty()) {
                 std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
                 SSH_LOG("OnChar SSH: Extracted command='" << command << "'");
-                if (f.is_open()) f << "[SSH_ONCHAR] Extracted command: '" << command << "'" << std::endl;
+                // if (f.is_open()) f << "[SSH_ONCHAR] Extracted command: '" << command << "'" << std::endl;
                 
                 if (command == "download" || command == "upload") {
                     SSH_LOG("OnChar SSH: command is upload/download, intercepting!");
-                    if (f.is_open()) f << "[SSH_ONCHAR] Intercepting upload/download, sending Ctrl+C" << std::endl;
+                    // if (f.is_open()) f << "[SSH_ONCHAR] Intercepting upload/download, sending Ctrl+C" << std::endl;
                     
                     if (key_callback_) {
                         key_callback_("\x03", 1);
@@ -1593,18 +1585,18 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
             }
         } else if (panel && !panel->IsLocalTerminal()) {
             // SSH terminal: check for upload/download commands
-            std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-            if (f.is_open()) f << "[SSH_CHARHOOK] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
+            // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+            // if (f.is_open()) f << "[SSH_CHARHOOK] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
             SSH_LOG("OnCharHook SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
             
             if (!m_sshInputBuffer.empty()) {
                 std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
                 SSH_LOG("OnCharHook SSH: Extracted command='" << command << "'");
-                if (f.is_open()) f << "[SSH_CHARHOOK] Extracted command: '" << command << "'" << std::endl;
+                // if (f.is_open()) f << "[SSH_CHARHOOK] Extracted command: '" << command << "'" << std::endl;
                 
                 if (command == "download" || command == "upload") {
                     SSH_LOG("OnCharHook SSH: command is upload/download, intercepting!");
-                    if (f.is_open()) f << "[SSH_CHARHOOK] Intercepting upload/download, sending Ctrl+C" << std::endl;
+                    // if (f.is_open()) f << "[SSH_CHARHOOK] Intercepting upload/download, sending Ctrl+C" << std::endl;
                     
                     if (key_callback_) {
                         key_callback_("\x03", 1);
@@ -1794,12 +1786,9 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
 
 void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
 
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-
-    if (f.is_open()) f << "[CANVAS] OnMouseRightDown called" << std::endl;
-
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[CANVAS] OnMouseRightDown called" << std::endl;
     
-
     // Copy selection to clipboard on right click
 
     CopySelectionToClipboard();
@@ -1820,13 +1809,13 @@ void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
 
     
 
-    if (f.is_open()) f << "[CANVAS] Showing context menu at position: " << event.GetPosition().x << "," << event.GetPosition().y << std::endl;
+    // if (f.is_open()) f << "[CANVAS] Showing context menu at position: " << event.GetPosition().x << "," << event.GetPosition().y << std::endl;
 
-    if (f.is_open()) f << "[CANVAS] ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
+    // if (f.is_open()) f << "[CANVAS] ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
 
     int result = PopupMenu(&menu, event.GetPosition());
 
-    if (f.is_open()) f << "[CANVAS] PopupMenu returned with result: " << result << std::endl;
+    // if (f.is_open()) f << "[CANVAS] PopupMenu returned with result: " << result << std::endl;
 
     
 
@@ -1840,17 +1829,12 @@ void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
 
 void TermGLCanvas::OnHorizontalSplit(wxCommandEvent& event) {
 
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-
-    if (f.is_open()) f << "[CANVAS] OnHorizontalSplit called" << std::endl;
-
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[CANVAS] OnHorizontalSplit called" << std::endl;
     
-
     if (split_callback_) {
-
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-
-        if (f.is_open()) f << "[CANVAS] Using split_callback with wxSPLIT_HORIZONTAL, panel=" << panel << std::endl;
+        // if (f.is_open()) f << "[CANVAS] Using split_callback with wxSPLIT_HORIZONTAL, panel=" << panel << std::endl;
 
         split_callback_(wxSPLIT_HORIZONTAL, panel);
 
@@ -1859,15 +1843,12 @@ void TermGLCanvas::OnHorizontalSplit(wxCommandEvent& event) {
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
 
         if (panel) {
-
-            if (f.is_open()) f << "[CANVAS] Calling TerminalPanel::DoSplit with wxSPLIT_HORIZONTAL" << std::endl;
+            // if (f.is_open()) f << "[CANVAS] Calling TerminalPanel::DoSplit with wxSPLIT_HORIZONTAL" << std::endl;
 
             panel->DoSplit(wxSPLIT_HORIZONTAL);
 
         } else {
-
-            if (f.is_open()) f << "[CANVAS] ERROR: Parent is not TerminalPanel" << std::endl;
-
+            // if (f.is_open()) f << "[CANVAS] ERROR: Parent is not TerminalPanel" << std::endl;
         }
 
     }
@@ -1878,47 +1859,32 @@ void TermGLCanvas::OnHorizontalSplit(wxCommandEvent& event) {
 
 void TermGLCanvas::OnVerticalSplit(wxCommandEvent& event) {
 
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-
-    if (f.is_open()) f << "[CANVAS] OnVerticalSplit called" << std::endl;
-
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[CANVAS] OnVerticalSplit called" << std::endl;
     
-
     if (split_callback_) {
-
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-
-        if (f.is_open()) f << "[CANVAS] Using split_callback with wxSPLIT_VERTICAL, panel=" << panel << std::endl;
-
+        // if (f.is_open()) f << "[CANVAS] Using split_callback with wxSPLIT_VERTICAL, panel=" << panel << std::endl;
         split_callback_(wxSPLIT_VERTICAL, panel);
-
     } else {
-
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-
         if (panel) {
-
-            if (f.is_open()) f << "[CANVAS] Calling TerminalPanel::DoSplit with wxSPLIT_VERTICAL" << std::endl;
-
+            // if (f.is_open()) f << "[CANVAS] Calling TerminalPanel::DoSplit with wxSPLIT_VERTICAL" << std::endl;
             panel->DoSplit(wxSPLIT_VERTICAL);
-
         } else {
-
-            if (f.is_open()) f << "[CANVAS] ERROR: Parent is not TerminalPanel" << std::endl;
-
+            // if (f.is_open()) f << "[CANVAS] ERROR: Parent is not TerminalPanel" << std::endl;
         }
-
     }
 
 }
 
 void TermGLCanvas::OnClosePanel(wxCommandEvent& event) {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) f << "[CANVAS] OnClosePanel called" << std::endl;
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[CANVAS] OnClosePanel called" << std::endl;
     
     if (close_callback_) {
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-        if (f.is_open()) f << "[CANVAS] Using close_callback, panel=" << panel << std::endl;
+        // if (f.is_open()) f << "[CANVAS] Using close_callback, panel=" << panel << std::endl;
         close_callback_(panel);
     }
 }
@@ -2164,8 +2130,8 @@ void TermGLCanvas::ShowIMEInputBox() {
                     // Enter key pressed - check if command is download or upload (SSH only)
                     if (!m_sshInputBuffer.empty()) {
                         // Debug log to alert file
-                        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-                        if (f.is_open()) f << "[SSH_INPUT] SSH command entered: " << m_sshInputBuffer << std::endl;
+                        // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+                        // if (f.is_open()) f << "[SSH_INPUT] SSH command entered: " << m_sshInputBuffer << std::endl;
                         
                         SSH_LOG("SSH command entered: " << m_sshInputBuffer);
                         
@@ -2173,13 +2139,13 @@ void TermGLCanvas::ShowIMEInputBox() {
                         std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
                         
                         // Debug log to alert file
-                        if (f.is_open()) f << "[SSH_INPUT] Extracted command: '" << command << "'" << std::endl;
+                        // if (f.is_open()) f << "[SSH_INPUT] Extracted command: '" << command << "'" << std::endl;
                         
                         SSH_LOG("Extracted command: '" << command << "'");
                         
                         if (command == "download" || command == "upload") {
                             // Debug log to alert file
-                            if (f.is_open()) f << "[SSH_INPUT] Command matches download/upload, triggering file transfer" << std::endl;
+                            // if (f.is_open()) f << "[SSH_INPUT] Command matches download/upload, triggering file transfer" << std::endl;
                             
                             SSH_LOG("Command matches download/upload, triggering file transfer");
                             modified_data += '\x03';

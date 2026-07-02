@@ -761,15 +761,15 @@ void ConnectInfo::OnTerminalExit(wxThreadEvent& event) {
 
 
 void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
-    // Debug log
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) f << "[CONNECTINFO] OnFileTransferRequest called, event.GetInt()=" << event.GetInt() << std::endl;
+    // Debug log (disabled)
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[CONNECTINFO] OnFileTransferRequest called, event.GetInt()=" << event.GetInt() << std::endl;
     
     // Handle upload/download command detection from SSH terminal
     if (event.GetInt() == 2) {
         wxString command = event.GetString();
         SSH_LOG("File transfer request for command: " << command.ToStdString());
-        if (f.is_open()) f << "[CONNECTINFO] Calling ShowFileTransferDialog for command: " << command.ToStdString() << std::endl;
+        // if (f.is_open()) f << "[CONNECTINFO] Calling ShowFileTransferDialog for command: " << command.ToStdString() << std::endl;
         ShowFileTransferDialog();
         return;
     }
@@ -978,21 +978,21 @@ int ConnectInfo::GetPreferredWidth() const {
 
     if (m_closeButton && m_closeButton->IsShown()) {
 
-        int baseCloseButtonSize = 20;
-
+        // Use actual button size instead of hardcoded value
+        int closeButtonWidth = m_closeButton->GetSize().GetWidth();
+        if (closeButtonWidth <= 0) {
+            // Fallback to hardcoded size if button size is not available
+            int baseCloseButtonSize = 20;
 #ifdef __APPLE__
-
-        int scaledCloseButtonSize = baseCloseButtonSize;
-
+            closeButtonWidth = baseCloseButtonSize;
 #else
-
-        int scaledCloseButtonSize = static_cast<int>(baseCloseButtonSize * dpiScale);
-
+            closeButtonWidth = static_cast<int>(baseCloseButtonSize * dpiScale);
 #endif
+        }
 
         // Left slant + Left padding + text + middle spacing (e.g. 15px minimum) + close btn + Right padding + Right slant
 
-        m_cachedWidth = slant + padding + textSize.GetWidth() + 15 + scaledCloseButtonSize + padding + slant;
+        m_cachedWidth = slant + padding + textSize.GetWidth() + 15 + closeButtonWidth + padding + slant;
 
     } else {
 
@@ -1340,26 +1340,9 @@ void ConnectInfo::SwitchToSSH(TerminalThread* sshThread, const DeviceConfig& dev
 
 ConnectInfo::~ConnectInfo() {
 
-    // Set shutdown flag before cleanup to prevent crash
-    // Only call SetShuttingDown if the thread is still running and valid
-    if (m_terminalThread && !m_terminalThread->IsShuttingDown()) {
-        try {
-            m_terminalThread->SetShuttingDown();
-        } catch (...) {
-            // Ignore any exceptions during shutdown
-        }
-    }
-
-    if (m_localTerminalThread && !m_localTerminalThread->IsShuttingDown()) {
-        try {
-            m_localTerminalThread->SetShuttingDown();
-        } catch (...) {
-            // Ignore any exceptions during shutdown
-        }
-    }
-
     // Clear raw pointers to prevent use-after-free during member destruction
     // These are owned by wxWidgets and will be destroyed automatically
+    // Do NOT call any methods on them as they may already be deleted
     m_termCanvas = nullptr;
     m_contentPanel = nullptr;
     m_label = nullptr;

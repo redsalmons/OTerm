@@ -10,11 +10,7 @@
 
 wxDEFINE_EVENT(wxEVT_CLOSE_PANEL, wxCommandEvent);
 
-#define SM_LOG(msg) \
-    do { \
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app); \
-        if (f.is_open()) f << "[SPLITMGR] " << msg << std::endl; \
-    } while(0)
+#define SM_LOG(msg) ((void)0)
 
 SplitManager::SplitManager(wxWindow* parent) 
     : m_parent(parent), m_tree(std::make_unique<SplitTree>()), m_alive(std::make_shared<bool>(true)) {
@@ -117,9 +113,9 @@ void SplitManager::Split(ISplitable* target, wxSplitMode mode) {
     auto newContent = std::shared_ptr<TerminalPanel>(
         new TerminalPanel(m_parent.get(), std::make_unique<LocalTerminalContainer>(24, 80, "")),
         [](TerminalPanel* p) { 
-            if (p && !p->IsBeingDeleted()) { 
-                p->Destroy(); 
-            }
+            // No-op deleter - wxWidgets manages window lifetime through Destroy()
+            // The window will be destroyed by wxWidgets when the parent is destroyed
+            (void)p;
         }
     );
     

@@ -57,23 +57,23 @@ private:
 
 static void CustomAssertHandler(const wxString& file, int line, const wxString& func,
                                 const wxString& cond, const wxString& msg) {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) {
-        auto now = std::chrono::system_clock::now();
-        auto t = std::chrono::system_clock::to_time_t(now);
-        std::tm tm;
-#ifdef _WIN32
-        localtime_s(&tm, &t);
-#else
-        localtime_r(&t, &tm);
-#endif
-        f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [ASSERT] ";
-        f << "File: " << file.ToStdString() << ":" << line;
-        if (!func.IsEmpty()) f << " Func: " << func.ToStdString();
-        if (!cond.IsEmpty()) f << " Condition: " << cond.ToStdString();
-        if (!msg.IsEmpty()) f << " Message: " << msg.ToStdString();
-        f << std::endl;
-    }
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) {
+    //     auto now = std::chrono::system_clock::now();
+    //     auto t = std::chrono::system_clock::to_time_t(now);
+    //     std::tm tm;
+    // #ifdef _WIN32
+    //     localtime_s(&tm, &t);
+    // #else
+    //     localtime_r(&t, &tm);
+    // #endif
+    //     f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [ASSERT] ";
+    //     f << "File: " << file.ToStdString() << ":" << line;
+    //     if (!func.IsEmpty()) f << " Func: " << func.ToStdString();
+    //     if (!cond.IsEmpty()) f << " Condition: " << cond.ToStdString();
+    //     if (!msg.IsEmpty()) f << " Message: " << msg.ToStdString();
+    //     f << std::endl;
+    // }
     // Also write to stderr so it shows up in console if attached
     std::cerr << "ASSERT in " << file.ToStdString() << ":" << line;
     if (!cond.IsEmpty()) std::cerr << " condition '" << cond.ToStdString() << "'";
@@ -93,23 +93,23 @@ wxIMPLEMENT_APP(MyApp);
 
 void MyApp::OnAssertFailure(const wxChar* file, int line, const wxChar* func,
                             const wxChar* cond, const wxChar* msg) {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) {
-        auto now = std::chrono::system_clock::now();
-        auto t = std::chrono::system_clock::to_time_t(now);
-        std::tm tm;
-#ifdef _WIN32
-        localtime_s(&tm, &t);
-#else
-        localtime_r(&t, &tm);
-#endif
-        f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [ASSERT] ";
-        if (file) f << "File: " << wxString(file).ToStdString() << ":" << line;
-        if (func && wxString(func).Len() > 0) f << " Func: " << wxString(func).ToStdString();
-        if (cond && wxString(cond).Len() > 0) f << " Condition: " << wxString(cond).ToStdString();
-        if (msg && wxString(msg).Len() > 0) f << " Message: " << wxString(msg).ToStdString();
-        f << std::endl;
-    }
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) {
+    //     auto now = std::chrono::system_clock::now();
+    //     auto t = std::chrono::system_clock::to_time_t(now);
+    //     std::tm tm;
+    // #ifdef _WIN32
+    //     localtime_s(&tm, &t);
+    // #else
+    //     localtime_r(&t, &tm);
+    // #endif
+    //     f << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << " [ASSERT] ";
+    //     if (file) f << "File: " << wxString(file).ToStdString() << ":" << line;
+    //     if (func && wxString(func).Len() > 0) f << " Func: " << wxString(func).ToStdString();
+    //     if (cond && wxString(cond).Len() > 0) f << " Condition: " << wxString(cond).ToStdString();
+    //     if (msg && wxString(msg).Len() > 0) f << " Message: " << wxString(msg).ToStdString();
+    //     f << std::endl;
+    // }
     std::cerr << "ASSERT in " << (file ? wxString(file).ToStdString() : "?") << ":" << line;
     if (cond) std::cerr << " condition '" << wxString(cond).ToStdString() << "'";
     if (msg) std::cerr << " message '" << wxString(msg).ToStdString() << "'";
@@ -117,8 +117,8 @@ void MyApp::OnAssertFailure(const wxChar* file, int line, const wxChar* func,
 }
 
 bool MyApp::OnInit() {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) f << "[APP] MyApp::OnInit called" << std::endl;
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[APP] MyApp::OnInit called" << std::endl;
 
     try {
 #ifdef __WXMSW__
@@ -304,8 +304,8 @@ wxEND_EVENT_TABLE()
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
     : wxFrame(nullptr, wxID_ANY, title, pos, size, wxCLIP_CHILDREN | wxRESIZE_BORDER)
 {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    if (f.is_open()) f << "[APPWINDOW] AppWindow constructor called" << std::endl;
+    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    // if (f.is_open()) f << "[APPWINDOW] AppWindow constructor called" << std::endl;
 
     // Initialize locale to fix encoding issues
     static wxLocale locale;
@@ -385,31 +385,31 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
 }
 
 void AppWindow::CreateLocalTerminalTab() {
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[APP] CreateLocalTerminalTab entered" << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[APP] CreateLocalTerminalTab entered" << std::endl;
+    // }
 
     // Create TerminalPanel with LocalTerminalContainer
     auto container = std::make_unique<LocalTerminalContainer>(24, 120, "");
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[APP] LocalTerminalContainer created, thread=" << (container->GetThread() ? "yes" : "no") << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[APP] LocalTerminalContainer created, thread=" << (container->GetThread() ? "yes" : "no") << std::endl;
+    // }
     
     TerminalPanel* terminalPanel = new TerminalPanel(m_notebook, std::move(container));
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[APP] TerminalPanel created, IsLocalTerminal=" << terminalPanel->IsLocalTerminal() << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[APP] TerminalPanel created, IsLocalTerminal=" << terminalPanel->IsLocalTerminal() << std::endl;
+    // }
     
     // Create TermGLCanvas and set it to the panel
     TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
     terminalPanel->SetCanvas(terminalCanvas);
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[APP] TermGLCanvas created and set" << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[APP] TermGLCanvas created and set" << std::endl;
+    // }
     
     // Note: key callback is set by TerminalPanel::SetCanvas -> SetupCanvasConnection
     
@@ -420,10 +420,10 @@ void AppWindow::CreateLocalTerminalTab() {
     }
     ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, emptyConfig, true, true);
 
-    {
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        if (f.is_open()) f << "[APP] AddTab returned newTab=" << (newTab ? "yes" : "no") << std::endl;
-    }
+    // {
+    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
+    //     if (f.is_open()) f << "[APP] AddTab returned newTab=" << (newTab ? "yes" : "no") << std::endl;
+    // }
 
     if (newTab) {
         SSH_LOG("Calling Connect() on tab");

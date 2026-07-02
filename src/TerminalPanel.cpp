@@ -8,11 +8,7 @@
 #include <fstream>
 #include <filesystem>
 
-#define SPLIT_LOG(msg) \
-    do { \
-        std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app); \
-        if (f.is_open()) f << "[TERMINAL] " << msg << std::endl; \
-    } while(0)
+#define SPLIT_LOG(msg) ((void)0)
 
 TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<LocalTerminalContainer> container)
     : wxPanel(parent, wxID_ANY),

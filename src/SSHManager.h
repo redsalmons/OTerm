@@ -31,19 +31,9 @@ static std::string timestamp() {
 extern std::ofstream ssh_log_file;
 extern bool ssh_log_initialized;
 
-#define SSH_LOG(msg) do { \
-    if (ssh_log_file.is_open()) { \
-        ssh_log_file << "[" << timestamp() << "] [SSH] " << msg << std::endl; \
-        ssh_log_file.flush(); \
-    } \
-} while(0)
+#define SSH_LOG(msg) ((void)0)
 
-#define SSH_ERR(msg) do { \
-    if (ssh_log_file.is_open()) { \
-        ssh_log_file << "[" << timestamp() << "] [SSH] ERROR: " << msg << std::endl; \
-        ssh_log_file.flush(); \
-    } \
-} while(0)
+#define SSH_ERR(msg) ((void)0)
 
 class SSHManager {
 public:
