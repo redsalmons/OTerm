@@ -12,7 +12,12 @@
 
 CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow)
     : wxPanel(parent, wxID_ANY), m_notebook(notebook), m_tabContainer(nullptr), m_appWindow(appWindow) {
+#ifdef __WXMSW__
     SetBackgroundColour(wxColour(30, 30, 30));
+#else
+    // Mac: Use lighter color to blend with title bar
+    SetBackgroundColour(wxColour(45, 45, 45));
+#endif
     
     // Calculate title bar height based on DPI scale
     double dpiScale = 1.0;
@@ -44,6 +49,8 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     int baseNewTabWidth = 40;
     int scaledNewTabWidth = static_cast<int>(baseNewTabWidth * dpiScale);
 
+#ifdef __WXMSW__
+    // Windows: Create window control buttons (native frame is hidden)
     m_drawerButton = new wxButton(this, wxID_ANY, wxString::FromUTF8("\u2630"), wxDefaultPosition, wxSize(scaledButtonSize, scaledButtonSize), wxBORDER_NONE);
     m_minimizeButton = new wxButton(this, wxID_ANY, "_", wxDefaultPosition, wxSize(scaledButtonSize, scaledButtonSize), wxBORDER_NONE);
     m_maximizeButton = new wxButton(this, wxID_ANY, "[]", wxDefaultPosition, wxSize(scaledButtonSize, scaledButtonSize), wxBORDER_NONE);
@@ -63,16 +70,43 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     wxFont font = m_newTabButton->GetFont();
     font.SetWeight(wxFONTWEIGHT_BOLD);
     m_newTabButton->SetFont(font);
+#else
+    // Mac: Native frame has window controls, so don't create custom ones
+    m_drawerButton = new wxButton(this, wxID_ANY, wxString::FromUTF8("\u2630"), wxDefaultPosition, wxSize(scaledButtonSize, scaledButtonSize), wxBORDER_NONE);
+    m_minimizeButton = nullptr;
+    m_maximizeButton = nullptr;
+    m_closeButton = nullptr;
+    m_newTabButton = new wxButton(this, wxID_ANY, "+", wxDefaultPosition, wxSize(scaledNewTabWidth, scaledButtonSize), wxBORDER_NONE);
 
+    m_drawerButton->SetBackgroundColour(wxColour(60, 60, 60));
+    m_drawerButton->SetForegroundColour(wxColour(255, 255, 255));
+    m_newTabButton->SetBackgroundColour(wxColour(0, 0, 0, 0));
+    m_newTabButton->SetForegroundColour(wxColour(255, 255, 255));
+    wxFont font = m_newTabButton->GetFont();
+    font.SetWeight(wxFONTWEIGHT_BOLD);
+    m_newTabButton->SetFont(font);
+#endif
+
+#ifdef __WXMSW__
+    // Windows: Show title text in custom title bar
     m_titleText = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("oceanTerm"));
     m_titleText->SetForegroundColour(wxColour(255, 255, 255));
     wxFont titleFont = m_titleText->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     titleFont.SetStyle(wxFONTSTYLE_ITALIC);
     m_titleText->SetFont(titleFont);
+#else
+    // Mac: No title text (native frame shows window title)
+    m_titleText = nullptr;
+#endif
 
     wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
+#ifdef __WXMSW__
     sizer->Add(m_titleText, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 20);
+#else
+    // Mac: Add left margin to avoid overlapping with traffic light buttons
+    sizer->Add(65, 0, 0, wxLEFT, 0);
+#endif
 
     // Tab container sizer (for tabs to be inserted here)
     m_tabContainer = new wxBoxSizer(wxHORIZONTAL);
@@ -83,12 +117,20 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     newTabSizer->Add(m_newTabButton, 0, wxALIGN_CENTER_HORIZONTAL);
     sizer->Add(newTabSizer, 0, wxALIGN_BOTTOM | wxLEFT, 8);
     sizer->AddStretchSpacer();
+
+#ifdef __WXMSW__
+    // Windows: Add window control buttons
     wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
     buttonSizer->Add(m_drawerButton, 0, wxALIGN_CENTER_VERTICAL);
     buttonSizer->Add(m_minimizeButton, 0, wxALIGN_CENTER_VERTICAL);
     buttonSizer->Add(m_maximizeButton, 0, wxALIGN_CENTER_VERTICAL);
     buttonSizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL);
     sizer->Add(buttonSizer, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+#else
+    // Mac: Only add drawer button (native frame has window controls)
+    sizer->Add(m_drawerButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 20);
+#endif
+
     SetSizer(sizer);
 
     Bind(wxEVT_PAINT, &CustomTitleBar::OnPaint, this);
@@ -97,9 +139,13 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     Bind(wxEVT_LEFT_UP, &CustomTitleBar::OnLeftUp, this);
     Bind(wxEVT_MOTION, &CustomTitleBar::OnMouseMove, this);
     Bind(wxEVT_SIZE, &CustomTitleBar::OnSize, this);
+
+#ifdef __WXMSW__
+    // Windows: Bind window control button events
     m_minimizeButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnMinimize, this);
     m_maximizeButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnMaximize, this);
     m_closeButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnClose, this);
+#endif
     m_newTabButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnNewTabClicked, this);
     m_drawerButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnDrawerClicked, this);
     Bind(wxEVT_TAB_CLOSE, &CustomTitleBar::OnTabClose, this);
@@ -113,14 +159,28 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 
 void CustomTitleBar::UpdateMaxTabContainerWidth() {
     int totalWidth = GetClientSize().GetWidth();
-    int titleWidth = m_titleText->GetSize().GetWidth() + 40;
+    int titleWidth = 0;
+#ifdef __WXMSW__
+    // Windows: Include title text width
+    titleWidth = m_titleText->GetSize().GetWidth() + 40;
+#endif
     int newTabWidth = m_newTabButton->GetSize().GetWidth();
     int drawerWidth = m_drawerButton->GetSize().GetWidth();
+    int buttonGap = 5;
+    int rightButtonsWidth = drawerWidth + buttonGap;
+
+#ifdef __WXMSW__
+    // Windows: Include window control buttons
     int minBtnWidth = m_minimizeButton->GetSize().GetWidth();
     int maxBtnWidth = m_maximizeButton->GetSize().GetWidth();
     int closeBtnWidth = m_closeButton->GetSize().GetWidth();
-    int buttonGap = 5;
-    int rightButtonsWidth = drawerWidth + minBtnWidth + maxBtnWidth + closeBtnWidth + buttonGap * 4;
+    rightButtonsWidth = drawerWidth + minBtnWidth + maxBtnWidth + closeBtnWidth + buttonGap * 4;
+#else
+    // Mac: Include traffic light buttons (left side) in total width calculation
+    // Traffic light buttons typically occupy ~70-80px
+    int trafficLightWidth = 70;
+    totalWidth -= trafficLightWidth;
+#endif
 
     // Tab container max width = total width - title - new tab button - right buttons - margins
     m_maxTabContainerWidth = totalWidth - titleWidth - newTabWidth - rightButtonsWidth - 20;
@@ -150,7 +210,7 @@ void CustomTitleBar::LayoutTabs() {
                 m_tabContainer->Detach(tab);
             }
             for (auto tab : m_tabs) {
-                m_tabContainer->Add(tab, 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 3);
+                m_tabContainer->Add(tab, 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 0);
             }
         }
     }
@@ -161,7 +221,7 @@ void CustomTitleBar::LayoutTabs() {
     // Minimum tab width
     int minTabWidth = 80;
 
-    int tabMargin = 6; // 3px left + 3px right margin on each tab sizer item
+    int tabMargin = 0; // No margin to allow tabs to overlap
     
     // Refresh each tab's cached width, then accumulate to find how many fit
     std::vector<int> preferredWidths;
@@ -313,9 +373,12 @@ void CustomTitleBar::OnSize(wxSizeEvent& event) {
 
     // Explicitly refresh all buttons to ensure they are drawn
     m_drawerButton->Refresh();
+#ifdef __WXMSW__
+    // Windows: Refresh window control buttons
     m_minimizeButton->Refresh();
     m_maximizeButton->Refresh();
     m_closeButton->Refresh();
+#endif
     m_newTabButton->Refresh();
 
     event.Skip();
@@ -427,6 +490,11 @@ void CustomTitleBar::OnNewTerminal(wxCommandEvent& event) {
 }
 
 void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
+    // Prevent closing the last tab
+    if (m_tabs.size() <= 1) {
+        return;
+    }
+
     int tabIndex = -1;
     int currentActiveIndex = -1;
 
@@ -475,6 +543,11 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
 
         if (notebookPage != wxNOT_FOUND) {
             m_notebook->RemovePage(notebookPage);
+        }
+
+        // Destroy the content panel
+        if (contentPanel) {
+            contentPanel->Destroy();
         }
 
         ConnectInfo* tab = m_tabs[tabIndex];
@@ -742,14 +815,19 @@ void CustomTitleBar::OnClose(wxCommandEvent& event) {
 
 void CustomTitleBar::OnPaint(wxPaintEvent& event) {
     wxPaintDC dc(this);
-    
-    // Get current window size dynamically
+
+#ifdef __WXMSW__
+    // Windows: Draw background
     wxSize clientSize = GetClientSize();
-    
-    // Draw background to fill the entire area
     dc.SetBackground(wxBrush(wxColour(30, 30, 30)));
     dc.Clear();
-    
+#else
+    // Mac: Draw background color
+    wxSize clientSize = GetClientSize();
+    dc.SetBackground(wxBrush(wxColour(45, 45, 45)));
+    dc.Clear();
+#endif
+
     event.Skip();
 }
 
@@ -762,15 +840,24 @@ void CustomTitleBar::OnLeftDown(wxMouseEvent& event) {
     // Only capture if not clicking on a button
     wxWindow* clickedWindow = wxDynamicCast(event.GetEventObject(), wxWindow);
     if (clickedWindow && (clickedWindow == m_drawerButton ||
-                          clickedWindow == m_minimizeButton ||
+                          clickedWindow == m_newTabButton
+#ifdef __WXMSW__
+                          || clickedWindow == m_minimizeButton ||
                           clickedWindow == m_maximizeButton ||
-                          clickedWindow == m_closeButton ||
-                          clickedWindow == m_newTabButton)) {
+                          clickedWindow == m_closeButton
+#endif
+                          )) {
         event.Skip();
         return;
     }
 
-    // Capture mouse for dragging
+    // On Mac, don't capture mouse for dragging since native frame handles it
+#ifndef __WXMSW__
+    event.Skip();
+    return;
+#endif
+
+    // Capture mouse for dragging (Windows only)
     CaptureMouse();
     // Calculate offset: mouse position relative to window top-left corner
     wxPoint mouseScreenPos = wxGetMousePosition();

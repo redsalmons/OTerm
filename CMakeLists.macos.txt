@@ -43,6 +43,8 @@ add_executable(OceanTerm
     src/ConnectInfo.cpp
     src/ConnectionDialog.cpp
     src/DeviceConfig.cpp
+    src/DeviceListPanel.cpp
+    src/AddDeviceDialog.cpp
     src/SSHManager.cpp
     src/VTermManager.cpp
     src/TermGLCanvas.cpp
@@ -55,12 +57,24 @@ add_executable(OceanTerm
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
     src/MasterPasswordDialog.cpp
+    src/MonospaceFontDialog.cpp
     src/LocalTerminalManager.cpp
     src/LocalTerminalThread.cpp
-    src/MonospaceFontDialog.cpp
-    src/DeviceListPanel.cpp
-    src/AddDeviceDialog.cpp
+    src/LocalTerminalDelegate.cpp
+    src/LocalTerminalContainer.cpp
+    src/TerminalPanel.cpp
+    src/InfiniteSplitter.cpp
+    src/RootPanel.cpp
+    src/SplitManager.cpp
+    src/SplitTree.cpp
+    src/SplitContainer.cpp
+    src/SplitterPanel.cpp
+    src/EventProxy.cpp
+    src/CommandInterceptor.cpp
+    src/MacTitleBar.mm
 )
+
+set_source_files_properties(src/MacTitleBar.mm PROPERTIES COMPILE_FLAGS "-x objective-c++")
 
 target_include_directories(OceanTerm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -80,12 +94,17 @@ target_link_libraries(OceanTerm PRIVATE
     OpenSSL::Crypto
 )
 
+target_link_libraries(OceanTerm PRIVATE
+    "-lutil"
+)
+
 target_link_options(OceanTerm PRIVATE
     "SHELL:${WX_LIBS}"
     "LINKER:-framework,Foundation"
     "LINKER:-framework,Cocoa"
     "LINKER:-framework,IOKit"
     "LINKER:-framework,CoreFoundation"
+    "LINKER:-framework,AppKit"
 )
 
 if(nlohmann_json_FOUND)

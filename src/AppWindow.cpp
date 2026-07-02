@@ -27,6 +27,11 @@
 #include <Windows.h>
 #endif
 
+#if defined(__WXMAC__)
+#include "MacTitleBar.h"
+#include <wx/osx/core/cfstring.h>
+#endif
+
 // Custom logger that writes to both stderr and a fixed log file
 class wxLogFileAndStderr : public wxLog {
 public:
@@ -302,7 +307,12 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
+#ifdef __WXMSW__
     : wxFrame(nullptr, wxID_ANY, title, pos, size, wxCLIP_CHILDREN | wxRESIZE_BORDER)
+#else
+    // Mac: Use default frame style to show native title bar with traffic lights
+    : wxFrame(nullptr, wxID_ANY, title, pos, size, wxDEFAULT_FRAME_STYLE)
+#endif
 {
     // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     // if (f.is_open()) f << "[APPWINDOW] AppWindow constructor called" << std::endl;
@@ -319,6 +329,8 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     this->SetThemeEnabled(false);
     m_notebook = new wxSimplebook(this, wxID_ANY);
     m_notebook->SetBackgroundColour(wxColour(10, 10, 10));
+
+    // Both Windows and Mac use custom title bar
     m_titleBar = new CustomTitleBar(this, m_notebook, this);
 
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
@@ -326,6 +338,7 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     sizer->Add(m_notebook, 1, wxEXPAND);
 
     SetSizer(sizer);
+
     Layout();
 
     // Set focus to enable keyboard input
@@ -338,6 +351,14 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
 
 #ifdef __WXMSW__
     ::SetWindowPos(GetHWND(), NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+#endif
+
+#if defined(__WXMAC__)
+    // macOS: Extend content area to title bar for native tab bar appearance
+    // Delay until after window is shown
+    CallAfter([this]() {
+        SetupMacTitleBar(GetHandle());
+    });
 #endif
 }
 
