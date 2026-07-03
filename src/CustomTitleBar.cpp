@@ -508,20 +508,19 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
     }
 
     if (tabIndex != -1) {
-        int notebookPage = FindNotebookPage(contentPanel);
-
         bool closingActiveTab = (tabIndex == currentActiveIndex);
 
-        int nextTabIndex = -1;
-        if (closingActiveTab && m_tabs.size() > 1) {
-            if (tabIndex < (int)m_tabs.size() - 1) {
-                nextTabIndex = tabIndex;
-            } else if (tabIndex > 0) {
-                nextTabIndex = tabIndex - 1;
-            }
-        }
-
+        // If closing the active tab, switch to another tab first
         if (closingActiveTab) {
+            int nextTabIndex = -1;
+            if (m_tabs.size() > 1) {
+                if (tabIndex < (int)m_tabs.size() - 1) {
+                    nextTabIndex = tabIndex;
+                } else if (tabIndex > 0) {
+                    nextTabIndex = tabIndex - 1;
+                }
+            }
+
             if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
                 wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
                 int nextNotebookPage = FindNotebookPage(nextContentPanel);
@@ -534,20 +533,15 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
                 if (homeNotebookPage != wxNOT_FOUND) {
                     m_notebook->SetSelection(homeNotebookPage);
                 }
-            } else {
-                if (m_notebook->GetPageCount() > 0) {
-                    m_notebook->SetSelection(0);
-                }
             }
         }
 
-        if (notebookPage != wxNOT_FOUND) {
-            m_notebook->RemovePage(notebookPage);
-        }
-
-        // Destroy the content panel
-        if (contentPanel) {
-            contentPanel->Destroy();
+        // Remove the page by finding it directly in the notebook
+        for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+            if (m_notebook->GetPage(i) == contentPanel) {
+                m_notebook->RemovePage(i);
+                break;
+            }
         }
 
         ConnectInfo* tab = m_tabs[tabIndex];
@@ -555,36 +549,20 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
         m_tabContainer->Detach(tab);
         tab->Destroy();
 
-        if (closingActiveTab) {
-            if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
-                for (size_t i = 0; i < m_tabs.size(); ++i) {
-                    m_tabs[i]->SetActive(i == (size_t)nextTabIndex);
-                }
-            } else if (m_tabs.size() > 0) {
-                m_tabs[0]->SetActive(true);
-            }
-        } else {
-            if (currentActiveIndex != -1 && currentActiveIndex < (int)m_tabs.size()) {
-                for (size_t i = 0; i < m_tabs.size(); ++i) {
-                    m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
-                }
-            } else if (m_tabs.size() > 0) {
-                if (currentActiveIndex > tabIndex) {
-                    currentActiveIndex--;
-                }
-                if (currentActiveIndex >= 0 && currentActiveIndex < (int)m_tabs.size()) {
-                    for (size_t i = 0; i < m_tabs.size(); ++i) {
-                        m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
-                    }
-                }
-            }
-        }
+        // Force layout refresh to prevent white screen
+        Layout();
+        Refresh();
 
         LayoutTabs();
     }
 }
 
 void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
+    // Prevent closing the last tab
+    if (m_tabs.size() <= 1) {
+        return;
+    }
+
     ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
     int tabIndex = -1;
     int currentActiveIndex = -1;
@@ -600,24 +578,22 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
 
     if (tabIndex != -1) {
         wxWindow* contentPanel = m_tabs[tabIndex]->GetContentPanel();
-        int notebookPage = FindNotebookPage(contentPanel);
 
         // Check if we're closing the currently active tab
         bool closingActiveTab = (tabIndex == currentActiveIndex);
 
-        // Determine which tab to switch to next if closing the active tab
-        int nextTabIndex = -1;
-        if (closingActiveTab && m_tabs.size() > 1) {
-            // Try to switch to the next tab, or the previous tab if this is the last one
-            if (tabIndex < (int)m_tabs.size() - 1) {
-                nextTabIndex = tabIndex; // Next tab will be at same index after erase
-            } else if (tabIndex > 0) {
-                nextTabIndex = tabIndex - 1; // Previous tab
-            }
-        }
-
-        // Switch to next tab BEFORE removing the current page (only if closing active tab)
+        // If closing the active tab, switch to another tab first
         if (closingActiveTab) {
+            int nextTabIndex = -1;
+            if (m_tabs.size() > 1) {
+                // Try to switch to the next tab, or the previous tab if this is the last one
+                if (tabIndex < (int)m_tabs.size() - 1) {
+                    nextTabIndex = tabIndex; // Next tab will be at same index after erase
+                } else if (tabIndex > 0) {
+                    nextTabIndex = tabIndex - 1; // Previous tab
+                }
+            }
+
             if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
                 wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
                 int nextNotebookPage = FindNotebookPage(nextContentPanel);
@@ -625,56 +601,29 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
                     m_notebook->SetSelection(nextNotebookPage);
                 }
             } else if (m_tabs.size() > 0) {
-                // Only homepage tab remains, switch to it
                 wxWindow* homeContentPanel = m_tabs[0]->GetContentPanel();
                 int homeNotebookPage = FindNotebookPage(homeContentPanel);
                 if (homeNotebookPage != wxNOT_FOUND) {
                     m_notebook->SetSelection(homeNotebookPage);
                 }
-            } else {
-                // No tabs at all, show first page in notebook (should be homepage)
-                if (m_notebook->GetPageCount() > 0) {
-                    m_notebook->SetSelection(0);
-                }
             }
         }
 
-        // Remove the page
-        if (notebookPage != wxNOT_FOUND) {
-            m_notebook->RemovePage(notebookPage);
+        // Remove the page by finding it directly in the notebook
+        for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+            if (m_notebook->GetPage(i) == contentPanel) {
+                m_notebook->RemovePage(i);
+                break;
+            }
         }
 
         m_tabs.erase(m_tabs.begin() + tabIndex);
         m_tabContainer->Detach(tab);
         tab->Destroy();
 
-        // Update tab activation states
-        if (closingActiveTab) {
-            if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
-                for (size_t i = 0; i < m_tabs.size(); ++i) {
-                    m_tabs[i]->SetActive(i == (size_t)nextTabIndex);
-                }
-            } else if (m_tabs.size() > 0) {
-                m_tabs[0]->SetActive(true);
-            }
-        } else {
-            // Keep the current active tab active, adjust its index if needed
-            if (currentActiveIndex != -1 && currentActiveIndex < (int)m_tabs.size()) {
-                for (size_t i = 0; i < m_tabs.size(); ++i) {
-                    m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
-                }
-            } else if (m_tabs.size() > 0) {
-                // If the active tab was after the closed tab, its index decreased
-                if (currentActiveIndex > tabIndex) {
-                    currentActiveIndex--;
-                }
-                if (currentActiveIndex >= 0 && currentActiveIndex < (int)m_tabs.size()) {
-                    for (size_t i = 0; i < m_tabs.size(); ++i) {
-                        m_tabs[i]->SetActive(i == (size_t)currentActiveIndex);
-                    }
-                }
-            }
-        }
+        // Force layout refresh to prevent white screen
+        Layout();
+        Refresh();
 
         LayoutTabs();
     }
