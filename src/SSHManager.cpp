@@ -122,6 +122,26 @@ bool SSHManager::connect(const std::string& host, int port,
     SSH_LOG("  Username: " << username);
     SSH_LOG("  Auth method: " << auth_method);
 
+    // Reset state for new connection
+    auth_retry_count_ = 0;
+    ssh_state_ = SSH_CONNECTING;
+
+    // Free existing SSH session and channel if they exist
+    if (ssh_channel_) {
+        SSH_LOG("Freeing existing SSH channel");
+        libssh2_channel_free(ssh_channel_);
+        ssh_channel_ = nullptr;
+    }
+
+    if (ssh_session_) {
+        SSH_LOG("Freeing existing SSH session");
+        libssh2_session_free(ssh_session_);
+        ssh_session_ = nullptr;
+    }
+
+    // Stop polling if active
+    stop_polling();
+
     host_ = host;
     port_ = port;
     username_ = username;
@@ -133,6 +153,28 @@ bool SSHManager::connect(const std::string& host, int port,
         status_callback_(msg.c_str(), (int)msg.size());
     }
 
+    // Check if TCP handle is already active (reconnecting)
+    if (uv_is_active((uv_handle_t*)&tcp_handle_)) {
+        SSH_LOG("Reusing existing TCP connection for reconnect");
+        // Create new SSH session on existing TCP connection
+        ssh_session_ = libssh2_session_init();
+        if (!ssh_session_) {
+            SSH_ERR("Failed to create SSH session");
+            if (status_callback_) {
+                const char* msg = "Failed to create SSH session.\r\n";
+                status_callback_(msg, (int)strlen(msg));
+            }
+            return false;
+        }
+        libssh2_session_set_blocking(ssh_session_, 0);
+
+        // Start handshake immediately
+        ssh_state_ = SSH_HANDSHAKING;
+        start_polling();
+        return true;
+    }
+
+    // Initialize new TCP handle for fresh connection
     if (uv_tcp_init(loop_, &tcp_handle_) != 0) {
         SSH_ERR("Failed to initialize TCP handle");
         if (status_callback_) {

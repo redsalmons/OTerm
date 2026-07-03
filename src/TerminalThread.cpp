@@ -20,6 +20,8 @@ TerminalThread::TerminalThread(EventProxyPtr event_proxy, int rows, int cols, co
       m_resize_mutex(),
       m_shutting_down(false),
       m_shutdown_mutex(),
+      m_reconnect_requested(false),
+      m_reconnect_mutex(),
       m_event_proxy(event_proxy),
       m_front_buffer(),
       m_back_buffer(),
@@ -58,6 +60,10 @@ void TerminalThread::ResizeVTerm(int rows, int cols) {
 void TerminalThread::SetEventProxy(EventProxyPtr event_proxy) {
     std::lock_guard<std::mutex> lock(m_input_mutex);
     m_event_proxy = event_proxy;
+}
+
+bool TerminalThread::IsDisconnected() const {
+    return m_sshManager.get_state() == SSHManager::SSH_DISCONNECTED;
 }
 
 void TerminalThread::ScrollVTerm(int lines) {
@@ -143,7 +149,9 @@ void TerminalThread::ResetScrollToBottom() {
 }
 
 void TerminalThread::Connect() {
-    // Connection will be started in Entry() thread
+    // Set reconnect request flag for the main loop to process
+    std::lock_guard<std::mutex> lock(m_reconnect_mutex);
+    m_reconnect_requested = true;
 }
 
 wxThread::ExitCode TerminalThread::Entry() {
@@ -198,15 +206,35 @@ wxThread::ExitCode TerminalThread::Entry() {
     
     // Main loop
     while (!TestDestroy() && !IsShuttingDown()) {
+        // Check for reconnect request
+        {
+            std::lock_guard<std::mutex> lock(m_reconnect_mutex);
+            if (m_reconnect_requested) {
+                SSH_LOG("Reconnect request detected, triggering SSH reconnect");
+                m_reconnect_requested = false;
+                int port = 22; // default SSH port
+                if (!m_deviceConfig.port.empty()) {
+                    try {
+                        port = std::stoi(m_deviceConfig.port);
+                    } catch (...) {
+                        SSH_ERR("Invalid port number, using default 22");
+                    }
+                }
+                m_sshManager.connect(m_deviceConfig.address, port,
+                                     m_deviceConfig.username, m_deviceConfig.password,
+                                     m_deviceConfig.auth_method);
+            }
+        }
+
         // Run libuv event loop - non-blocking, returns immediately if no events
         uv_run(&m_loop, UV_RUN_NOWAIT);
-        
+
         // Batch process all queued SSH data, flush damage only once
         bool had_data = process_ssh_data_queue();
-        
+
         // Process input queue
         process_input_queue();
-        
+
         // Process resize request
         {
             std::lock_guard<std::mutex> lock(m_resize_mutex);

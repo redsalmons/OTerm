@@ -80,7 +80,10 @@ public:
     
     // Start SSH connection
     void Connect();
-    
+
+    // Check if SSH is disconnected
+    bool IsDisconnected() const;
+
     // Resize vterm (thread-safe, called from UI thread)
     void ResizeVTerm(int rows, int cols);
     
@@ -135,7 +138,11 @@ private:
     // Shutdown flag (thread-safe)
     bool m_shutting_down;
     mutable std::mutex m_shutdown_mutex;
-    
+
+    // Reconnect request flag (thread-safe)
+    bool m_reconnect_requested;
+    mutable std::mutex m_reconnect_mutex;
+
     // UI thread communication via EventProxy
     EventProxyPtr m_event_proxy;
     

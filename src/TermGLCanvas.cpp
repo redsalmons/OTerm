@@ -1452,26 +1452,35 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
             // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
             // if (f.is_open()) f << "[SSH_ONCHAR] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
             SSH_LOG("OnChar SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
-            
+
+            // Check if SSH is disconnected and trigger reconnect
+            TerminalThread* sshThread = panel->GetSSHThread();
+            if (sshThread && sshThread->IsDisconnected()) {
+                SSH_LOG("OnChar SSH: SSH is disconnected, triggering reconnect");
+                sshThread->Connect();
+                m_sshInputBuffer.clear();
+                return;
+            }
+
             if (!m_sshInputBuffer.empty()) {
                 std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
                 SSH_LOG("OnChar SSH: Extracted command='" << command << "'");
                 // if (f.is_open()) f << "[SSH_ONCHAR] Extracted command: '" << command << "'" << std::endl;
-                
+
                 if (command == "download" || command == "upload") {
                     SSH_LOG("OnChar SSH: command is upload/download, intercepting!");
                     // if (f.is_open()) f << "[SSH_ONCHAR] Intercepting upload/download, sending Ctrl+C" << std::endl;
-                    
+
                     if (key_callback_) {
                         key_callback_("\x03", 1);
                     }
-                    
+
                     wxCommandEvent evt(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
                     evt.SetInt(2); // Flag to indicate file transfer request
                     evt.SetString(wxString::FromUTF8(m_sshInputBuffer.c_str()));
                     evt.SetEventObject(this);
                     wxQueueEvent(panel, evt.Clone());
-                    
+
                     m_sshInputBuffer.clear();
                     return;
                 }
@@ -1588,26 +1597,35 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
             // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
             // if (f.is_open()) f << "[SSH_CHARHOOK] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
             SSH_LOG("OnCharHook SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
-            
+
+            // Check if SSH is disconnected and trigger reconnect
+            TerminalThread* sshThread = panel->GetSSHThread();
+            if (sshThread && sshThread->IsDisconnected()) {
+                SSH_LOG("OnCharHook SSH: SSH is disconnected, triggering reconnect");
+                sshThread->Connect();
+                m_sshInputBuffer.clear();
+                return;
+            }
+
             if (!m_sshInputBuffer.empty()) {
                 std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
                 SSH_LOG("OnCharHook SSH: Extracted command='" << command << "'");
                 // if (f.is_open()) f << "[SSH_CHARHOOK] Extracted command: '" << command << "'" << std::endl;
-                
+
                 if (command == "download" || command == "upload") {
                     SSH_LOG("OnCharHook SSH: command is upload/download, intercepting!");
                     // if (f.is_open()) f << "[SSH_CHARHOOK] Intercepting upload/download, sending Ctrl+C" << std::endl;
-                    
+
                     if (key_callback_) {
                         key_callback_("\x03", 1);
                     }
-                    
+
                     wxCommandEvent evt(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
                     evt.SetInt(2); // Flag to indicate file transfer request
                     evt.SetString(wxString::FromUTF8(m_sshInputBuffer.c_str()));
                     evt.SetEventObject(this);
                     wxQueueEvent(panel, evt.Clone());
-                    
+
                     m_sshInputBuffer.clear();
                     return; // Return without skipping to intercept
                 }
