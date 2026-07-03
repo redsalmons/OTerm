@@ -22,3 +22,24 @@ extern "C" void SetupMacTitleBar(void* windowHandle) {
         // Ignore exceptions to prevent crash
     }
 }
+
+extern "C" void SetMacTitleBarVisible(void* windowHandle, bool visible) {
+    @try {
+        NSView* view = (NSView*)windowHandle;
+        NSWindow* nsWindow = [view window];
+        
+        if (nsWindow) {
+            if (visible) {
+                // Show native window title in fullscreen
+                [nsWindow setTitleVisibility:NSWindowTitleVisible];
+                [nsWindow setTitle:@"OceanTerm"];
+            } else {
+                // Hide native window title in normal mode
+                [nsWindow setTitleVisibility:NSWindowTitleHidden];
+                [nsWindow setTitle:@""];
+            }
+        }
+    } @catch (NSException *exception) {
+        // Ignore exceptions to prevent crash
+    }
+}

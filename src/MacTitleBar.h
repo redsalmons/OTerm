@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 void SetupMacTitleBar(void* windowHandle);
+void SetMacTitleBarVisible(void* windowHandle, bool visible);
 
 #ifdef __cplusplus
 }

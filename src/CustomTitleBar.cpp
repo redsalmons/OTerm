@@ -6,12 +6,15 @@
 #include "SettingsDialog.h"
 #include "GlobalConfig.h"
 #include "DeviceListPanel.h"
+#ifdef __WXMAC__
+#include "MacTitleBar.h"
+#endif
 #include <wx/simplebook.h>
 #include <wx/display.h>
 #include <algorithm>
 
 CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow)
-    : wxPanel(parent, wxID_ANY), m_notebook(notebook), m_tabContainer(nullptr), m_appWindow(appWindow) {
+    : wxPanel(parent, wxID_ANY), m_notebook(notebook), m_tabContainer(nullptr), m_appWindow(appWindow), m_isFullScreen(false) {
 #ifdef __WXMSW__
     SetBackgroundColour(wxColour(30, 30, 30));
 #else
@@ -96,27 +99,35 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     titleFont.SetStyle(wxFONTSTYLE_ITALIC);
     m_titleText->SetFont(titleFont);
 #else
-    // Mac: No title text (native frame shows window title)
-    m_titleText = nullptr;
+    // Mac: Create title text but hide it by default (show in fullscreen)
+    m_titleText = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("oceanTerm"));
+    m_titleText->SetForegroundColour(wxColour(255, 255, 255));
+    wxFont titleFont = m_titleText->GetFont();
+    titleFont.SetWeight(wxFONTWEIGHT_BOLD);
+    titleFont.SetStyle(wxFONTSTYLE_ITALIC);
+    m_titleText->SetFont(titleFont);
+    m_titleText->Hide();
 #endif
 
-    wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
+    m_sizer = new wxBoxSizer(wxHORIZONTAL);
 #ifdef __WXMSW__
-    sizer->Add(m_titleText, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 20);
+    m_sizer->Add(m_titleText, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 20);
 #else
-    // Mac: Add left margin to avoid overlapping with traffic light buttons
-    sizer->Add(65, 0, 0, wxLEFT, 0);
+    // Mac: Add title text (hidden by default, shown in fullscreen)
+    m_sizer->Add(m_titleText, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 20);
+    // Add left margin spacer to avoid overlapping with traffic light buttons
+    m_leftMarginSpacer = m_sizer->Add(65, 0, 0, wxLEFT, 0);
 #endif
 
     // Tab container sizer (for tabs to be inserted here)
     m_tabContainer = new wxBoxSizer(wxHORIZONTAL);
-    sizer->Add(m_tabContainer, 0, wxALIGN_BOTTOM);
+    m_sizer->Add(m_tabContainer, 0, wxALIGN_BOTTOM);
 
     wxBoxSizer* newTabSizer = new wxBoxSizer(wxVERTICAL);
     newTabSizer->Add(0, 2, 0, wxEXPAND);
     newTabSizer->Add(m_newTabButton, 0, wxALIGN_CENTER_HORIZONTAL);
-    sizer->Add(newTabSizer, 0, wxALIGN_BOTTOM | wxLEFT, 8);
-    sizer->AddStretchSpacer();
+    m_sizer->Add(newTabSizer, 0, wxALIGN_BOTTOM | wxLEFT, 8);
+    m_sizer->AddStretchSpacer();
 
 #ifdef __WXMSW__
     // Windows: Add window control buttons
@@ -125,13 +136,13 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     buttonSizer->Add(m_minimizeButton, 0, wxALIGN_CENTER_VERTICAL);
     buttonSizer->Add(m_maximizeButton, 0, wxALIGN_CENTER_VERTICAL);
     buttonSizer->Add(m_closeButton, 0, wxALIGN_CENTER_VERTICAL);
-    sizer->Add(buttonSizer, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+    m_sizer->Add(buttonSizer, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 #else
     // Mac: Only add drawer button (native frame has window controls)
-    sizer->Add(m_drawerButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 20);
+    m_sizer->Add(m_drawerButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 20);
 #endif
 
-    SetSizer(sizer);
+    SetSizer(m_sizer);
 
     Bind(wxEVT_PAINT, &CustomTitleBar::OnPaint, this);
     Bind(wxEVT_ERASE_BACKGROUND, &CustomTitleBar::OnEraseBackground, this);
@@ -750,11 +761,35 @@ void CustomTitleBar::OnMinimize(wxCommandEvent& event) {
 
 void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
     wxFrame* frame = (wxFrame*)GetParent();
-    
+
     if (frame->IsFullScreen()) {
         frame->ShowFullScreen(false);
+        m_isFullScreen = false;
+#ifndef __WXMSW__
+        // Hide native title bar title and restore left margin for traffic lights
+        SetMacTitleBarVisible(GetParent()->GetHandle(), false);
+        if (m_leftMarginSpacer) {
+            m_leftMarginSpacer->Show(true);
+        }
+        Layout();
+        Refresh();
+#endif
     } else {
         frame->ShowFullScreen(true);
+        m_isFullScreen = true;
+#ifndef __WXMSW__
+        // Use CallAfter to ensure this happens after fullscreen transition
+        CallAfter([this]() {
+            // Show native title bar title in fullscreen (traffic lights are hidden)
+            SetMacTitleBarVisible(GetParent()->GetHandle(), true);
+            // Remove left margin since traffic lights are hidden
+            if (m_leftMarginSpacer) {
+                m_leftMarginSpacer->Show(false);
+            }
+            Layout();
+            Refresh();
+        });
+#endif
     }
 }
 
@@ -775,6 +810,20 @@ void CustomTitleBar::OnPaint(wxPaintEvent& event) {
     wxSize clientSize = GetClientSize();
     dc.SetBackground(wxBrush(wxColour(45, 45, 45)));
     dc.Clear();
+
+    // Mac: Draw title text in fullscreen mode (traffic lights are hidden)
+    if (m_isFullScreen) {
+        wxString titleText = TranslationHelper::Tr("oceanTerm");
+        wxFont titleFont = dc.GetFont();
+        titleFont.SetWeight(wxFONTWEIGHT_BOLD);
+        titleFont.SetStyle(wxFONTSTYLE_ITALIC);
+        dc.SetFont(titleFont);
+        dc.SetTextForeground(wxColour(255, 255, 255));
+        wxSize textSize = dc.GetTextExtent(titleText);
+        int x = 20;
+        int y = (clientSize.GetHeight() - textSize.GetHeight()) / 2;
+        dc.DrawText(titleText, x, y);
+    }
 #endif
 
     event.Skip();

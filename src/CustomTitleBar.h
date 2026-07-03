@@ -51,6 +51,8 @@ private:
     wxPoint m_delta;
     wxStaticText* m_titleText;
     wxSimplebook* m_notebook;
+    wxBoxSizer* m_sizer;
+    wxSizerItem* m_leftMarginSpacer;
     wxBoxSizer* m_tabContainer;
     wxButton* m_drawerButton;
     wxButton* m_minimizeButton;
@@ -61,4 +63,5 @@ private:
     std::vector<int> m_overflowIndices;
     int m_maxTabContainerWidth;
     wxWindow* m_appWindow;
+    bool m_isFullScreen;
 };
