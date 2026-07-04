@@ -152,6 +152,9 @@ msgstr "OTerm"
 msgid "home"
 msgstr "Home"
 
+msgid "tab"
+msgstr "Tab"
+
 # Task status
 msgid "pending"
 msgstr "Pending"
