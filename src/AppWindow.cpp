@@ -18,6 +18,8 @@
 #include <sstream>
 #include <fstream>
 #include "ConnectInfo.h"
+
+int AppWindow::s_globalTabCounter = 0;
 #include "TerminalPanel.h"
 #include "InfiniteSplitter.h"
 #include "LocalTerminalContainer.h"
@@ -290,6 +292,7 @@ int MyApp::OnRun() {
 
 wxDEFINE_EVENT(wxEVT_SSH_DIRECT_CONNECT, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_DEVICE_SHOW_REQUEST, wxCommandEvent);
+wxDEFINE_EVENT(wxEVT_CREATE_LOCAL_TAB, wxCommandEvent);
 
 wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_MENU(wxID_EXIT, AppWindow::OnQuit)
@@ -304,6 +307,7 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_COMMAND(wxID_ANY, wxEVT_SSH_DIRECT_CONNECT, AppWindow::OnSSHDirectConnect)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_SHOW_REQUEST, AppWindow::OnDeviceShowRequest)
     EVT_MENU(wxID_ANY, AppWindow::OnFileTransferRequest)
+    EVT_COMMAND(wxID_ANY, wxEVT_CREATE_LOCAL_TAB, AppWindow::OnCreateLocalTab)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
@@ -388,8 +392,8 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
     TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
     terminalPanel->SetCanvas(terminalCanvas);
     
-    // Create tab label as "username@address"
-    wxString tabLabel = wxString::FromUTF8(newDevice.username.c_str()) + "@" + wxString::FromUTF8(newDevice.address.c_str());
+    // Create tab label as "tab+index"
+    wxString tabLabel = wxString::Format("tab%d", ++s_globalTabCounter);
     ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, newDevice);
     SSH_LOG("Tab added to title bar");
 
@@ -435,10 +439,7 @@ void AppWindow::CreateLocalTerminalTab() {
     // Note: key callback is set by TerminalPanel::SetCanvas -> SetupCanvasConnection
     
     DeviceConfig emptyConfig;
-    wxString tabLabel = TranslationHelper::Tr("localTerminal");
-    if (tabLabel.IsEmpty()) {
-        tabLabel = "Local";
-    }
+    wxString tabLabel = wxString::Format("tab%d", ++s_globalTabCounter);
     ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, emptyConfig, true, true);
 
     // {
@@ -466,14 +467,19 @@ void AppWindow::OnQuit(wxCommandEvent& WXUNUSED(event)) {
 }
 
 void AppWindow::OnClose(wxCloseEvent& event) {
+    auto startTime = std::chrono::steady_clock::now();
     SSH_LOG("AppWindow::OnClose called");
     
     // Stop all terminal threads before closing
     // Iterate through all tabs and stop their threads
     if (m_notebook) {
+        auto notebookTime = std::chrono::steady_clock::now();
+        SSH_LOG("Found notebook with " << m_notebook->GetPageCount() << " pages");
         for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
+            auto pageTime = std::chrono::steady_clock::now();
             wxWindow* page = m_notebook->GetPage(i);
             if (page) {
+                SSH_LOG("Processing page " << i);
                 // Try to find TermGLCanvas and stop its threads
                 TermGLCanvas* canvas = dynamic_cast<TermGLCanvas*>(page);
                 if (!canvas) {
@@ -481,12 +487,14 @@ void AppWindow::OnClose(wxCloseEvent& event) {
                     TerminalPanel* panel = dynamic_cast<TerminalPanel*>(page);
                     if (panel) {
                         canvas = panel->GetCanvas();
+                        SSH_LOG("Found TerminalPanel, canvas=" << canvas);
                     }
                 }
                 if (!canvas) {
                     // Check if it's an InfiniteSplitter
                     InfiniteSplitter* splitter = dynamic_cast<InfiniteSplitter*>(page);
                     if (splitter) {
+                        SSH_LOG("Found InfiniteSplitter");
                         wxWindow* window1 = splitter->GetWindow1();
                         if (window1) {
                             TerminalPanel* panel = dynamic_cast<TerminalPanel*>(window1);
@@ -503,15 +511,26 @@ void AppWindow::OnClose(wxCloseEvent& event) {
                 }
                 
                 if (canvas) {
+                    auto stopTime = std::chrono::steady_clock::now();
                     SSH_LOG("Stopping threads for canvas at page " << i);
                     canvas->StopThreads();
+                    auto stopDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - stopTime).count();
+                    SSH_LOG("StopThreads took " << stopDuration << "ms for page " << i);
+                } else {
+                    SSH_LOG("No canvas found for page " << i);
                 }
             }
+            auto pageDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - pageTime).count();
+            SSH_LOG("Page " << i << " processing took " << pageDuration << "ms");
         }
+        auto notebookDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - notebookTime).count();
+        SSH_LOG("Notebook processing took " << notebookDuration << "ms");
     }
     
     SSH_LOG("All threads stopped, proceeding with close");
     event.Skip();
+    auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
+    SSH_LOG("AppWindow::OnClose completed, total time: " << totalDuration << "ms");
 }
 
 void AppWindow::OnNewTab(wxCommandEvent& WXUNUSED(event)) {
@@ -684,6 +703,11 @@ void AppWindow::OnFileTransferRequest(wxCommandEvent& event) {
     } else {
         event.Skip();
     }
+}
+
+void AppWindow::OnCreateLocalTab(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnCreateLocalTab called");
+    CreateLocalTerminalTab();
 }
 
 void AppWindow::OnDeviceOpenRequest(wxCommandEvent& event) {

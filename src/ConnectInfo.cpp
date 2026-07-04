@@ -1113,21 +1113,15 @@ void ConnectInfo::OnLeave(wxMouseEvent& event) {
 
 
 void ConnectInfo::OnClose(wxCommandEvent& event) {
+    std::cout << "ConnectInfo::OnClose called" << std::endl;
 
     // Stop event propagation to prevent parent from handling the button click
-
     event.StopPropagation();
 
-
-
-    // Send close event with this tab as the event object
-
+    // Send close event with this tab as the event object (synchronous)
     wxCommandEvent closeEvent(wxEVT_TAB_CLOSE, GetId());
-
     closeEvent.SetEventObject(this);
-
-    wxPostEvent(GetParent(), closeEvent);
-
+    GetParent()->GetEventHandler()->ProcessEvent(closeEvent);
 }
 
 
@@ -1186,14 +1180,20 @@ void ConnectInfo::OnLabelTextEnter(wxCommandEvent& event) {
         // Update label
         m_label->SetLabel(newLabel);
         
-        // Cleanup editor
-        m_labelEditor->Unbind(wxEVT_TEXT_ENTER, &ConnectInfo::OnLabelTextEnter, this);
-        m_labelEditor->Unbind(wxEVT_KILL_FOCUS, &ConnectInfo::OnLabelTextKillFocus, this);
-        m_labelEditor->Destroy();
-        m_labelEditor = nullptr;
+        // Cleanup editor - use CallAfter for delayed destruction to avoid re-entrancy crash
+        wxTextCtrl* editorToDestroy = m_labelEditor;
+        m_labelEditor = nullptr; // Immediately set to null to prevent re-entrancy
         
-        // Show label
-        m_label->Show();
+        editorToDestroy->Unbind(wxEVT_TEXT_ENTER, &ConnectInfo::OnLabelTextEnter, this);
+        editorToDestroy->Unbind(wxEVT_KILL_FOCUS, &ConnectInfo::OnLabelTextKillFocus, this);
+        
+        // Use CallAfter to safely destroy after event processing completes
+        CallAfter([editorToDestroy, this]() {
+            if (editorToDestroy) {
+                editorToDestroy->Destroy();
+                m_label->Show(); // Show label after editor is destroyed
+            }
+        });
         
         // Update notebook page text directly to avoid deadlock
         wxWindow* parent = GetParent();
@@ -1232,10 +1232,18 @@ void ConnectInfo::OnLabelTextEnter(wxCommandEvent& event) {
 }
 
 void ConnectInfo::OnLabelTextKillFocus(wxFocusEvent& event) {
+    // Re-entrancy guard - only process if editor still exists
+    if (!m_labelEditor) {
+        return;
+    }
+    
     // Treat focus loss same as Enter
     wxCommandEvent cmdEvent;
     OnLabelTextEnter(cmdEvent);
-    event.Skip();
+    
+    // Don't call event.Skip() - we've manually handled all cleanup
+    // Calling Skip() would pass the event to system-level focus handling,
+    // which conflicts with our manual destruction of the control
 }
 
 
@@ -1327,10 +1335,6 @@ void ConnectInfo::SwitchToSSH(TerminalThread* sshThread, const DeviceConfig& dev
     m_localTerminalThread = nullptr;
     m_terminalThread = sshThread;
     m_deviceConfig = deviceConfig;
-
-    // Update label to show the device username@address
-    wxString newLabel = wxString::FromUTF8(deviceConfig.username.c_str()) + "@" + wxString::FromUTF8(deviceConfig.address.c_str());
-    m_label->SetLabel(newLabel);
 
     // Refresh the tab layout
     Layout();

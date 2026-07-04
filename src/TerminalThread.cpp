@@ -527,17 +527,45 @@ void TerminalThread::send_damage_event(bool cursor_visible) {
 }
 
 void TerminalThread::cleanup() {
+    auto startTime = std::chrono::steady_clock::now();
+    SSH_LOG("TerminalThread::cleanup called");
+    
     // No need to notify UI thread via EventProxy for exit
     // The UI will detect thread termination through other means
     
     // Cleanup SSH Manager
+    auto sshStartTime = std::chrono::steady_clock::now();
     m_sshManager.cleanup();
+    auto sshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - sshStartTime).count();
+    SSH_LOG("SSH Manager cleanup took " << sshDuration << "ms");
     
     // Cleanup VTerm
+    auto vtermStartTime = std::chrono::steady_clock::now();
     m_vtermManager.cleanup();
+    auto vtermDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - vtermStartTime).count();
+    SSH_LOG("VTerm Manager cleanup took " << vtermDuration << "ms");
     
-    // Close libuv loop
-    while (uv_run(&m_loop, UV_RUN_NOWAIT) != 0) {
+    // Close all libuv handles before closing the loop
+    auto uvStartTime = std::chrono::steady_clock::now();
+    uv_walk(&m_loop, [](uv_handle_t* handle, void* arg) {
+        if (!uv_is_closing(handle)) {
+            uv_close(handle, nullptr);
+        }
+    }, nullptr);
+    
+    // Run the loop to process all close callbacks with a limit to prevent blocking
+    int iterations = 0;
+    const int max_iterations = 100;
+    while (uv_run(&m_loop, UV_RUN_NOWAIT) != 0 && iterations < max_iterations) {
+        iterations++;
     }
+    SSH_LOG("uv_run completed " << iterations << " iterations");
+    
+    // Force close the loop even if not all callbacks processed
     uv_loop_close(&m_loop);
+    auto uvDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - uvStartTime).count();
+    SSH_LOG("libuv cleanup took " << uvDuration << "ms");
+    
+    auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
+    SSH_LOG("TerminalThread::cleanup completed, total time: " << totalDuration << "ms");
 }

@@ -18,6 +18,7 @@ class wxSimplebook;
 
 wxDECLARE_EVENT(wxEVT_SSH_DIRECT_CONNECT, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_DEVICE_SHOW_REQUEST, wxCommandEvent);
+wxDECLARE_EVENT(wxEVT_CREATE_LOCAL_TAB, wxCommandEvent);
 
 class AppWindow : public wxFrame {
 public:
@@ -42,10 +43,13 @@ private:
     void OnSSHDirectConnect(wxCommandEvent& event);
     void OnDeviceShowRequest(wxCommandEvent& event);
     void OnFileTransferRequest(wxCommandEvent& event);
+    void OnCreateLocalTab(wxCommandEvent& event);
     
     void CreateDashboardTab();
     void CreateTerminalTab(const DeviceConfig& device);
     void CreateLocalTerminalTab();
+    
+    static int s_globalTabCounter;
     //std::vector<std::shared_ptr<TerminalTab>> terminal_tabs_;
     
     wxDECLARE_EVENT_TABLE();

@@ -173,6 +173,18 @@ void InfiniteSplitter::CloseChild(wxWindow* childToClose) {
         topLevel->Layout();
     }
     
+    // 强制刷新剩余的TermGLCanvas以修复渲染问题
+    TerminalPanel* remainingPanel = wxDynamicCast(remainingWindow, TerminalPanel);
+    if (remainingPanel) {
+        TermGLCanvas* canvas = remainingPanel->GetCanvas();
+        if (canvas) {
+            SPLIT_LOG("Forcing refresh of remaining canvas: " << canvas);
+            canvas->ReinitializeGLContext();
+            canvas->Refresh();
+            canvas->Update();
+        }
+    }
+    
     SPLIT_LOG("CloseChild done");
 }
 

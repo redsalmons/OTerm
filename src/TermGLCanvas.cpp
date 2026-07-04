@@ -88,6 +88,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
       m_localTerminalThread(nullptr),
       m_terminalThread(nullptr),
       m_ownsThreads(false),
+      m_threadsStopped(false),
       m_wheelRotationAccumulator(0) {
 
     // Calculate DPI scale
@@ -115,6 +116,8 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
     if (m_dpiScale <= 0.0f) m_dpiScale = 1.0f;
     
     SetBackgroundStyle(wxBG_STYLE_PAINT);
+
+    SSH_LOG("TermGLCanvas constructor called, this=" << this << ", ownsThreads=" << m_ownsThreads);
 
     Bind(wxEVT_PAINT, &TermGLCanvas::OnPaint, this);
 
@@ -226,15 +229,34 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
 
 void TermGLCanvas::StopThreads() {
+    auto startTime = std::chrono::steady_clock::now();
+    SSH_LOG("TermGLCanvas::StopThreads called");
+    
+    // Skip if already stopped
+    if (m_threadsStopped) {
+        SSH_LOG("Threads already stopped, skipping");
+        return;
+    }
+    
     if (m_ownsThreads) {
         if (m_localTerminalThread) {
+            auto localStartTime = std::chrono::steady_clock::now();
+            SSH_LOG("Stopping local terminal thread");
             m_localTerminalThread->SetShuttingDown();
+            SSH_LOG("Waiting for local terminal thread to exit");
             m_localTerminalThread->Wait();
+            auto localDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - localStartTime).count();
+            SSH_LOG("Local terminal thread exited after " << localDuration << "ms, deleting");
             delete m_localTerminalThread;
         }
         if (m_terminalThread) {
+            auto sshStartTime = std::chrono::steady_clock::now();
+            SSH_LOG("Stopping SSH terminal thread");
             m_terminalThread->SetShuttingDown();
+            SSH_LOG("Waiting for SSH terminal thread to exit");
             m_terminalThread->Wait();
+            auto sshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - sshStartTime).count();
+            SSH_LOG("SSH terminal thread exited after " << sshDuration << "ms, deleting");
             delete m_terminalThread;
         }
         m_ownsThreads = false;
@@ -242,6 +264,9 @@ void TermGLCanvas::StopThreads() {
     
     m_localTerminalThread = nullptr;
     m_terminalThread = nullptr;
+    m_threadsStopped = true;
+    auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
+    SSH_LOG("TermGLCanvas::StopThreads completed, total time: " << totalDuration << "ms");
 }
 
 
@@ -264,9 +289,14 @@ void TermGLCanvas::ReinitializeGLContext() {
 
 TermGLCanvas::~TermGLCanvas() {
 
-    SSH_LOG("TermGLCanvas destructor start");
+    SSH_LOG("TermGLCanvas destructor start, this=" << this << ", m_ownsThreads=" << m_ownsThreads << ", m_threadsStopped=" << m_threadsStopped << ", m_localTerminalThread=" << m_localTerminalThread << ", m_terminalThread=" << m_terminalThread);
 
-    StopThreads();
+    // Only call StopThreads if not already called
+    if (!m_threadsStopped) {
+        StopThreads();
+    } else {
+        SSH_LOG("Threads already stopped, skipping StopThreads in destructor");
+    }
 
     delete m_fontAtlas;
 
@@ -280,7 +310,7 @@ TermGLCanvas::~TermGLCanvas() {
 
     }
 
-    SSH_LOG("TermGLCanvas destructor end");
+    SSH_LOG("TermGLCanvas destructor end, this=" << this);
 
 }
 

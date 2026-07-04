@@ -322,6 +322,10 @@ void SSHManager::cleanup() {
     if (!uv_is_closing((uv_handle_t*)&tcp_handle_)) {
         SSH_LOG("Closing TCP handle");
         uv_close((uv_handle_t*)&tcp_handle_, nullptr);
+        // Run the event loop to process the close callback immediately
+        if (loop_) {
+            uv_run(loop_, UV_RUN_NOWAIT);
+        }
     }
 
     ssh_state_ = SSH_DISCONNECTED;
@@ -657,6 +661,10 @@ void SSHManager::stop_polling() {
         uv_close((uv_handle_t*)poll_handle_, [](uv_handle_t* handle) {
             delete reinterpret_cast<uv_poll_t*>(handle);
         });
+        // Run the event loop to process the close callback immediately
+        if (loop_) {
+            uv_run(loop_, UV_RUN_NOWAIT);
+        }
     }
     poll_handle_ = nullptr;
     poll_active_ = false;

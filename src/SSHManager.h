@@ -31,9 +31,28 @@ static std::string timestamp() {
 extern std::ofstream ssh_log_file;
 extern bool ssh_log_initialized;
 
-#define SSH_LOG(msg) ((void)0)
+// Logging enable/disable switch - set to 1 to enable, 0 to disable
+#define ENABLE_SSH_LOG 1
 
+#if ENABLE_SSH_LOG
+#define SSH_LOG(msg) do { \
+    if (ssh_log_initialized) { \
+        ssh_log_file << timestamp() << " " << msg << std::endl; \
+    } \
+} while(0)
+#else
+#define SSH_LOG(msg) ((void)0)
+#endif
+
+#if ENABLE_SSH_LOG
+#define SSH_ERR(msg) do { \
+    if (ssh_log_initialized) { \
+        ssh_log_file << timestamp() << " ERROR: " << msg << std::endl; \
+    } \
+} while(0)
+#else
 #define SSH_ERR(msg) ((void)0)
+#endif
 
 class SSHManager {
 public:

@@ -2,6 +2,7 @@
 #include "AppWindow.h"
 #include "TerminalThread.h"
 #include "TermGLCanvas.h"
+#include "TerminalPanel.h"
 #include "TranslationHelper.h"
 #include "SettingsDialog.h"
 #include "GlobalConfig.h"
@@ -501,9 +502,15 @@ void CustomTitleBar::OnNewTerminal(wxCommandEvent& event) {
 }
 
 void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
-    // Prevent closing the last tab
+    std::cout << "CustomTitleBar::CloseTab called, m_tabs.size()=" << m_tabs.size() << std::endl;
+    
+    // If closing the last tab, create a new local tab first
     if (m_tabs.size() <= 1) {
-        return;
+        std::cout << "Closing last tab, creating new local tab first" << std::endl;
+        // Send synchronous event to AppWindow to create a new local tab
+        wxCommandEvent createEvent(wxEVT_CREATE_LOCAL_TAB);
+        bool processed = GetParent()->GetEventHandler()->ProcessEvent(createEvent);
+        std::cout << "Create local tab event processed: " << processed << ", new m_tabs.size()=" << m_tabs.size() << std::endl;
     }
 
     int tabIndex = -1;
@@ -556,6 +563,19 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
         }
 
         ConnectInfo* tab = m_tabs[tabIndex];
+        
+        // Stop threads immediately before destruction to prevent delayed cleanup
+        wxWindow* contentPanel = tab->GetContentPanel();
+        if (contentPanel) {
+            TerminalPanel* terminalPanel = dynamic_cast<TerminalPanel*>(contentPanel);
+            if (terminalPanel) {
+                TermGLCanvas* canvas = terminalPanel->GetCanvas();
+                if (canvas) {
+                    canvas->StopThreads();
+                }
+            }
+        }
+        
         m_tabs.erase(m_tabs.begin() + tabIndex);
         m_tabContainer->Detach(tab);
         tab->Destroy();
@@ -569,9 +589,15 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
 }
 
 void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
-    // Prevent closing the last tab
+    std::cout << "CustomTitleBar::OnTabClose called, m_tabs.size()=" << m_tabs.size() << std::endl;
+    
+    // If closing the last tab, create a new local tab first
     if (m_tabs.size() <= 1) {
-        return;
+        std::cout << "Closing last tab, creating new local tab first" << std::endl;
+        // Send synchronous event to AppWindow to create a new local tab
+        wxCommandEvent createEvent(wxEVT_CREATE_LOCAL_TAB);
+        bool processed = GetParent()->GetEventHandler()->ProcessEvent(createEvent);
+        std::cout << "Create local tab event processed: " << processed << ", new m_tabs.size()=" << m_tabs.size() << std::endl;
     }
 
     ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
@@ -625,6 +651,18 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
             if (m_notebook->GetPage(i) == contentPanel) {
                 m_notebook->RemovePage(i);
                 break;
+            }
+        }
+
+        // Stop threads immediately before destruction to prevent delayed cleanup
+        wxWindow* tabContentPanel = tab->GetContentPanel();
+        if (tabContentPanel) {
+            TerminalPanel* terminalPanel = dynamic_cast<TerminalPanel*>(tabContentPanel);
+            if (terminalPanel) {
+                TermGLCanvas* canvas = terminalPanel->GetCanvas();
+                if (canvas) {
+                    canvas->StopThreads();
+                }
             }
         }
 
