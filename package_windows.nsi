@@ -2,6 +2,7 @@
 !define APP_VERSION "1.0.0"
 !define APP_PUBLISHER "OceanTerm"
 !define APP_EXE "OceanTerm.exe"
+!define APP_ARCH "ARM64"
 
 !define INSTALL_DIR "$PROGRAMFILES64\${APP_NAME}"
 !define STARTMENU_DIR "$SMPROGRAMS\${APP_NAME}"
@@ -14,7 +15,7 @@ RequestExecutionLevel admin
 
 ; General
 Name "${APP_NAME}"
-OutFile "OceanTerm-win-v${APP_VERSION}-setup.exe"
+OutFile "OceanTerm-win-${APP_ARCH}-v${APP_VERSION}-setup.exe"
 InstallDir "${INSTALL_DIR}"
 InstallDirRegKey HKLM "Software\${APP_NAME}" "InstallLocation"
 ShowInstDetails show
@@ -40,7 +41,15 @@ ShowUnInstDetails show
 
 ; Languages
 !insertmacro MUI_LANGUAGE "English"
-;!insertmacro MUI_LANGUAGE "SimpChinese"
+!insertmacro MUI_LANGUAGE "SimpChinese"
+
+; Auto-detect system language
+!define MUI_LANGDLL_WINDOWTITLE "Installer Language"
+!define MUI_LANGDLL_INFO "Please select the language of the installer"
+
+Function .onInit
+  !insertmacro MUI_LANGDLL_DISPLAY
+FunctionEnd
 
 ; Installer Sections
 Section "Main Application" SecMain
@@ -52,32 +61,18 @@ Section "Main Application" SecMain
     File "build\bin\Release\${APP_EXE}"
     
     ; Required DLLs from vcpkg
-    File "K:\vcpkg\installed\arm64-windows\bin\libcrypto-3-arm64.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libssl-3-arm64.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libssh2.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\uv.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\z.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\liblzma.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libexpat.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\pcre2-16.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libpng16.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\jpeg62.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\tiff.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libwebp.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libwebpdecoder.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libwebpdemux.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\libsharpyuv.dll"
+    File "vcpkg_installed\arm64-windows\bin\libcrypto-3-arm64.dll"
+    File "vcpkg_installed\arm64-windows\bin\libssl-3-arm64.dll"
+    File "vcpkg_installed\arm64-windows\bin\libssh2.dll"
+    File "vcpkg_installed\arm64-windows\bin\uv.dll"
+    File "vcpkg_installed\arm64-windows\bin\z.dll"
+    File "vcpkg_installed\arm64-windows\bin\legacy.dll"
     
     ; Icon file
     File "src\OceanTerm.ico"
     
     ; wxWidgets DLLs
-    File "K:\vcpkg\installed\arm64-windows\bin\wxbase331u_vc_x64_custom.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\wxmsw331u_core_vc_x64_custom.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\wxmsw331u_gl_vc_x64_custom.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\wxmsw331u_adv_vc_x64_custom.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\wxmsw331u_html_vc_x64_custom.dll"
-    File "K:\vcpkg\installed\arm64-windows\bin\wxmsw331u_xrc_vc_x64_custom.dll"
+    File "wxWidgets-3.3.1\build\lib\vc_arm64_dll\wxmsw331u_vc_arm64_custom.dll"
     
     ; Create uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
