@@ -6,9 +6,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build-macos"
+BUILD_DIR="${SCRIPT_DIR}/build_mac"
 APP_NAME="OceanTerm"
-APP_VERSION="1.0.2"
+APP_VERSION="1.0.3"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -22,7 +22,7 @@ echo "App bundle: ${APP_BUNDLE}"
 # Check if executable exists
 if [ ! -f "${EXECUTABLE}" ]; then
     echo "Error: Executable not found at ${EXECUTABLE}"
-    echo "Please build the project first: cd build-macos && cmake --build ."
+    echo "Please build the project first: cd build_mac && cmake --build ."
     exit 1
 fi
 
