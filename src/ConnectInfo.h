@@ -56,6 +56,8 @@ public:
 
     wxWindow* GetContentPanel() const;
 
+    void SetContentPanel(wxWindow* panel) { m_contentPanel = panel; }
+
     DeviceConfig GetDeviceConfig() const;
 
     TermGLCanvas* GetCanvas() const { return m_termCanvas; }
@@ -83,6 +85,8 @@ public:
     
 
     // Split functionality
+
+    SplitManager* GetSplitManager() const { return m_splitManager.get(); }
 
     void HandleSplit(wxSplitMode mode, TerminalPanel* sourcePanel = nullptr);
 

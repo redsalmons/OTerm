@@ -393,7 +393,7 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
     terminalPanel->SetCanvas(terminalCanvas);
     
     // Create tab label as "tab+index"
-    wxString tabLabel = wxString::Format("tab%d", ++s_globalTabCounter);
+    wxString tabLabel = wxString::Format("%s%d", TranslationHelper::Tr("tab"), ++s_globalTabCounter);
     ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, newDevice);
     SSH_LOG("Tab added to title bar");
 
@@ -439,7 +439,7 @@ void AppWindow::CreateLocalTerminalTab() {
     // Note: key callback is set by TerminalPanel::SetCanvas -> SetupCanvasConnection
     
     DeviceConfig emptyConfig;
-    wxString tabLabel = wxString::Format("tab%d", ++s_globalTabCounter);
+    wxString tabLabel = wxString::Format("%s%d", TranslationHelper::Tr("tab"), ++s_globalTabCounter);
     ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, emptyConfig, true, true);
 
     // {

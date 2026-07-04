@@ -502,15 +502,11 @@ void CustomTitleBar::OnNewTerminal(wxCommandEvent& event) {
 }
 
 void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
-    std::cout << "CustomTitleBar::CloseTab called, m_tabs.size()=" << m_tabs.size() << std::endl;
-    
     // If closing the last tab, create a new local tab first
     if (m_tabs.size() <= 1) {
-        std::cout << "Closing last tab, creating new local tab first" << std::endl;
         // Send synchronous event to AppWindow to create a new local tab
         wxCommandEvent createEvent(wxEVT_CREATE_LOCAL_TAB);
-        bool processed = GetParent()->GetEventHandler()->ProcessEvent(createEvent);
-        std::cout << "Create local tab event processed: " << processed << ", new m_tabs.size()=" << m_tabs.size() << std::endl;
+        GetParent()->GetEventHandler()->ProcessEvent(createEvent);
     }
 
     int tabIndex = -1;
@@ -533,7 +529,7 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
             int nextTabIndex = -1;
             if (m_tabs.size() > 1) {
                 if (tabIndex < (int)m_tabs.size() - 1) {
-                    nextTabIndex = tabIndex;
+                    nextTabIndex = tabIndex + 1;
                 } else if (tabIndex > 0) {
                     nextTabIndex = tabIndex - 1;
                 }
@@ -589,18 +585,15 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
 }
 
 void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
-    std::cout << "CustomTitleBar::OnTabClose called, m_tabs.size()=" << m_tabs.size() << std::endl;
-    
+    ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
+
     // If closing the last tab, create a new local tab first
     if (m_tabs.size() <= 1) {
-        std::cout << "Closing last tab, creating new local tab first" << std::endl;
         // Send synchronous event to AppWindow to create a new local tab
         wxCommandEvent createEvent(wxEVT_CREATE_LOCAL_TAB);
-        bool processed = GetParent()->GetEventHandler()->ProcessEvent(createEvent);
-        std::cout << "Create local tab event processed: " << processed << ", new m_tabs.size()=" << m_tabs.size() << std::endl;
+        GetParent()->GetEventHandler()->ProcessEvent(createEvent);
     }
 
-    ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
     int tabIndex = -1;
     int currentActiveIndex = -1;
 
@@ -689,14 +682,7 @@ void CustomTitleBar::OnTabSelected(wxCommandEvent& event) {
             }
             for (auto t : m_tabs) t->SetActive(false);
             tab->SetActive(true);
-            
-            // Show IME input box when tab is selected
-            if (m_appWindow) {
-                TermGLCanvas* canvas = tab->GetCanvas();
-                if (canvas) {
-                    canvas->ShowIMEInputBox();
-                }
-            }
+
             break;
         }
     }

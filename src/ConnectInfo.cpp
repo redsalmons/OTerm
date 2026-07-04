@@ -252,6 +252,10 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 HandleClosePanel(sourcePanel);
             });
 
+            m_splitManager->SetContentPanelChangedCallback([this](wxWindow* newPanel) {
+                m_contentPanel = newPanel;
+            });
+
             // 閲嶆柊璁剧疆 root panel 鐨?callbacks锛堝洜涓?Initialize 鏃?callbacks 杩樻病璁剧疆锛?
             m_splitManager->ApplySplitCallbackToPanel(panel);
             SSH_LOG("ConnectInfo: root panel callbacks reapplied after SetCloseCallback");
@@ -935,9 +939,13 @@ void ConnectInfo::SetActive(bool active) {
 
 
 wxWindow* ConnectInfo::GetContentPanel() const {
-
+    if (m_splitManager) {
+        wxWindow* leafWin = m_splitManager->GetFirstLeafWindow();
+        if (leafWin) {
+            return leafWin;
+        }
+    }
     return m_contentPanel;
-
 }
 
 
@@ -1113,15 +1121,13 @@ void ConnectInfo::OnLeave(wxMouseEvent& event) {
 
 
 void ConnectInfo::OnClose(wxCommandEvent& event) {
-    std::cout << "ConnectInfo::OnClose called" << std::endl;
-
     // Stop event propagation to prevent parent from handling the button click
     event.StopPropagation();
 
-    // Send close event with this tab as the event object (synchronous)
+    // Send close event with this tab as the event object (asynchronous to avoid use-after-free)
     wxCommandEvent closeEvent(wxEVT_TAB_CLOSE, GetId());
     closeEvent.SetEventObject(this);
-    GetParent()->GetEventHandler()->ProcessEvent(closeEvent);
+    wxPostEvent(GetParent(), closeEvent);
 }
 
 

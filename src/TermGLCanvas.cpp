@@ -2151,8 +2151,6 @@ void TermGLCanvas::ShowIMEInputBox() {
 
     }
 
-
-
     if (m_imeInputBoxVisible) {
 
         SSH_LOG("IME input box already visible, skipping");

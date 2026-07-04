@@ -3,6 +3,8 @@
 #include "TerminalPanel.h"
 #include "LocalTerminalContainer.h"
 #include "TermGLCanvas.h"
+#include "ConnectInfo.h"
+#include "CustomTitleBar.h"
 #include <wx/log.h>
 #include <wx/simplebook.h>
 #include <fstream>
@@ -82,10 +84,93 @@ wxWindow* SplitManager::GetRootWindow() const {
     
     SplitNode* root = m_tree->GetRoot();
     if (root->type == SplitNodeType::Leaf) {
-        return root->content->GetWindow();
+        return root->content ? root->content->GetWindow() : nullptr;
     } else {
         return root->container;
     }
+}
+
+wxWindow* SplitManager::GetFirstLeafWindow() const {
+    if (!m_tree || !m_tree->GetRoot()) {
+        return nullptr;
+    }
+    
+    std::function<ISplitable*(SplitNode*)> findLeaf = [&](SplitNode* node) -> ISplitable* {
+        if (!node) return nullptr;
+        if (node->type == SplitNodeType::Leaf) {
+            return node->content ? node->content.get() : nullptr;
+        }
+        ISplitable* found = findLeaf(node->left.get());
+        if (found) return found;
+        return findLeaf(node->right.get());
+    };
+    
+    ISplitable* leaf = findLeaf(m_tree->GetRoot());
+    return leaf ? leaf->GetWindow() : nullptr;
+}
+
+int SplitManager::FindMyNotebookPageIndex(wxSimplebook* notebook) const {
+    if (!notebook || !m_tree) return -1;
+    
+    // 1. Try to find any node from our tree in the notebook
+    std::function<int(SplitNode*)> findIndex = [&](SplitNode* node) -> int {
+        if (!node) return -1;
+        if (node->type == SplitNodeType::Leaf) {
+            if (node->content && node->content->GetWindow()) {
+                int idx = notebook->FindPage(node->content->GetWindow());
+                if (idx != wxNOT_FOUND) return idx;
+            }
+        } else {
+            if (node->container) {
+                int idx = notebook->FindPage(node->container);
+                if (idx != wxNOT_FOUND) return idx;
+            }
+        }
+        int leftIdx = findIndex(node->left.get());
+        if (leftIdx != -1) return leftIdx;
+        return findIndex(node->right.get());
+    };
+    
+    int idx = findIndex(m_tree->GetRoot());
+    if (idx != -1) return idx;
+    
+    // 2. Fallback: Find our ConnectInfo in CustomTitleBar to get the index
+    wxWindow* mainWin = notebook->GetParent();
+    if (mainWin) {
+        CustomTitleBar* titleBar = nullptr;
+        for (wxWindowList::compatibility_iterator node = mainWin->GetChildren().GetFirst(); node; node = node->GetNext()) {
+            wxWindow* child = node->GetData();
+            if (child->GetClassInfo()->GetClassName() == wxString("CustomTitleBar")) {
+                titleBar = dynamic_cast<CustomTitleBar*>(child);
+                break;
+            }
+        }
+        if (titleBar) {
+            const std::vector<ConnectInfo*>& tabs = titleBar->GetTabs();
+            for (size_t i = 0; i < tabs.size(); ++i) {
+                if (tabs[i] && tabs[i]->GetSplitManager() == this) {
+                    return (int)i;
+                }
+            }
+        }
+    }
+    
+    return -1;
+}
+
+bool SplitManager::IsWindowInTree(wxWindow* win) const {
+    if (!win || !m_tree) return false;
+    
+    std::function<bool(SplitNode*)> search = [&](SplitNode* node) -> bool {
+        if (!node) return false;
+        if (node->type == SplitNodeType::Leaf) {
+            return node->content && node->content->GetWindow() == win;
+        }
+        if (node->container == win) return true;
+        return search(node->left.get()) || search(node->right.get());
+    };
+    
+    return search(m_tree->GetRoot());
 }
 
 void SplitManager::Split(ISplitable* target, wxSplitMode mode) {
@@ -286,7 +371,11 @@ void SplitManager::Close(TerminalPanel* panel) {
 void SplitManager::OnClosePanelEvent(wxCommandEvent& event) {
     TerminalPanel* panel = static_cast<TerminalPanel*>(event.GetClientData());
     SM_LOG("OnClosePanelEvent: panel=" << panel);
-    DoClose(panel);
+    if (panel && m_tree && m_tree->FindNode(panel)) {
+        DoClose(panel);
+    } else {
+        event.Skip();
+    }
 }
 
 void SplitManager::DoClose(TerminalPanel* panel) {
@@ -417,20 +506,6 @@ void SplitManager::DoClose(TerminalPanel* panel) {
                 child->Hide();
             }
         }
-        
-        // 从 notebook 移除
-        wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(m_parent.get());
-        if (notebook) {
-            int pageIndex = notebook->FindPage(containerToDestroy);
-            SM_LOG("DoClose: container page index=" << pageIndex << " page count before=" << notebook->GetPageCount());
-            if (pageIndex != wxNOT_FOUND) {
-                notebook->RemovePage(pageIndex);
-                SM_LOG("DoClose: container removed from notebook, page count after=" << notebook->GetPageCount());
-            }
-        }
-        
-        containerToDestroy->Destroy();
-        SM_LOG("DoClose: old container destroyed");
     }
     
     // Don't do grandparent container destruction here - let RebuildUIFromTree handle it
@@ -533,7 +608,10 @@ void SplitManager::RebuildUIFromTree() {
                     SM_LOG("RebuildUIFromTree: leaf, page " << i << " ptr=" << notebook->GetPage(i));
                 }
                 if (pageIndex == wxNOT_FOUND) {
-                    int targetIndex = m_lastClosePageIndex;
+                    int targetIndex = FindMyNotebookPageIndex(notebook);
+                    if (targetIndex < 0 || targetIndex >= (int)notebook->GetPageCount()) {
+                        targetIndex = m_lastClosePageIndex;
+                    }
                     if (targetIndex < 0 || targetIndex >= (int)notebook->GetPageCount()) {
                         targetIndex = notebook->GetSelection();
                     }
@@ -545,27 +623,32 @@ void SplitManager::RebuildUIFromTree() {
                         wxString pageText = notebook->GetPageText(targetIndex);
                         wxWindow* oldPage = notebook->GetPage(targetIndex);
                         SM_LOG("RebuildUIFromTree: leaf, replacing oldPage=" << oldPage << " with win=" << win);
-                        
+
                         win->Reparent(notebook);
                         win->SetSize(notebook->GetClientSize());
                         win->Show(true);
-                        
+
                         // Reinitialize GL context after reparenting to avoid white screen on Windows
                         TerminalPanel* panel = dynamic_cast<TerminalPanel*>(win);
                         if (panel && panel->GetCanvas()) {
                             panel->GetCanvas()->ReinitializeGLContext();
                         }
-                        
+
                         notebook->RemovePage(targetIndex);
                         notebook->InsertPage(targetIndex, win, pageText, true);
                         notebook->SetSelection(targetIndex);
+
+                        // Notify that content panel has changed
+                        if (m_contentPanelChangedCallback) {
+                            m_contentPanelChangedCallback(win);
+                        }
                         
                         notebook->Layout();
                         notebook->Refresh();
                         notebook->Update();
                         notebook->SendSizeEvent();
                         
-                        if (oldPage && oldPage != win) {
+                        if (oldPage && oldPage != win && !oldPage->IsBeingDeleted() && !IsWindowInTree(oldPage)) {
                             wxWindow* pageToDestroy = oldPage;
                             auto alive = m_alive;
                             if (m_parent) {
@@ -623,7 +706,10 @@ void SplitManager::RebuildUIFromTree() {
                 SM_LOG("RebuildUIFromTree: branch, FindPage=" << pageIndex);
                 if (pageIndex == wxNOT_FOUND) {
                     // container 不在 notebook 中，可能刚被提升为 root
-                    int targetIndex = m_lastClosePageIndex;
+                    int targetIndex = FindMyNotebookPageIndex(notebook);
+                    if (targetIndex < 0 || targetIndex >= (int)notebook->GetPageCount()) {
+                        targetIndex = m_lastClosePageIndex;
+                    }
                     if (targetIndex < 0 || targetIndex >= (int)notebook->GetPageCount()) {
                         targetIndex = notebook->GetSelection();
                     }
@@ -645,7 +731,7 @@ void SplitManager::RebuildUIFromTree() {
                         notebook->InsertPage(targetIndex, container, pageText, true);
                         notebook->SetSelection(targetIndex);
                         
-                        if (oldPage && oldPage != container) {
+                        if (oldPage && oldPage != container && !oldPage->IsBeingDeleted() && !IsWindowInTree(oldPage)) {
                             wxWindow* pageToDestroy = oldPage;
                             auto alive = m_alive;
                             if (m_parent) {
