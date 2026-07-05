@@ -162,6 +162,7 @@ private:
     std::chrono::steady_clock::time_point m_last_ui_update;
     bool m_heavy_streaming;
     int m_consecutive_updates;
+    int m_idle_iterations;
 
     // Pending input buffer for interactive login prompts
     std::string m_pending_input;

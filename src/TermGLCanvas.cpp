@@ -1141,7 +1141,8 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
     // Check for Ctrl+C to copy selection (only if there's a selection)
 
-    if (event.ControlDown() && event.GetKeyCode() == 'C') {
+    if (event.GetKeyCode() == WXK_CONTROL_C || (event.ControlDown() && event.GetKeyCode() == 'C')) {
+        SSH_LOG("OnKeyDown: Ctrl+C detected, keycode=" << event.GetKeyCode());
 
         if (m_selection_start_row != m_selection_end_row || m_selection_start_col != m_selection_end_col) {
 
@@ -1244,6 +1245,16 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                     // Check if this is a local terminal and command should be intercepted
                     TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
                     SSH_LOG("OnKeyDown: RETURN pressed, panel=" << panel << ", IsLocalTerminal=" << (panel ? panel->IsLocalTerminal() : false));
+                    // If the session has ended, pressing Enter starts a new local terminal
+                    if (panel) {
+                        bool alive = panel->IsSessionAlive();
+                        SSH_LOG("OnKeyDown: IsSessionAlive=" << alive);
+                        if (!alive) {
+                            SSH_LOG("OnKeyDown: session not alive, restarting as local terminal");
+                            panel->RestartAsLocalTerminal();
+                            return;
+                        }
+                    }
                     if (panel && panel->IsLocalTerminal()) {
                         const std::string& inputBuffer = panel->GetInputBuffer();
                         SSH_LOG("OnKeyDown: inputBuffer='" << inputBuffer << "'");
@@ -1394,7 +1405,9 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
             case 'C':
 
-                if (event.ControlDown()) {
+            case WXK_CONTROL_C:
+
+                if (event.ControlDown() || event.GetKeyCode() == WXK_CONTROL_C) {
 
                     sequence = "\x03"; // Ctrl+C = ETX (interrupt)
 
@@ -1440,6 +1453,16 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
         SSH_LOG("OnChar: RETURN pressed, checking for command interception");
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+        if (panel) {
+            bool alive = panel->IsSessionAlive();
+            SSH_LOG("OnChar: IsSessionAlive=" << alive);
+            // If the session has ended, pressing Enter starts a new local terminal
+            if (!alive) {
+                SSH_LOG("OnChar: session not alive, restarting as local terminal");
+                panel->RestartAsLocalTerminal();
+                return;
+            }
+        }
         if (panel && panel->IsLocalTerminal()) {
             const std::string& inputBuffer = panel->GetInputBuffer();
             SSH_LOG("OnChar: inputBuffer='" << inputBuffer << "'");
@@ -1584,6 +1607,16 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
         SSH_LOG("OnCharHook: RETURN pressed, checking for command interception");
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+        if (panel) {
+            bool alive = panel->IsSessionAlive();
+            SSH_LOG("OnCharHook: IsSessionAlive=" << alive);
+            // If the session has ended, pressing Enter starts a new local terminal
+            if (!alive) {
+                SSH_LOG("OnCharHook: session not alive, restarting as local terminal");
+                panel->RestartAsLocalTerminal();
+                return;
+            }
+        }
         if (panel && panel->IsLocalTerminal()) {
             const std::string& inputBuffer = panel->GetInputBuffer();
             SSH_LOG("OnCharHook: inputBuffer='" << inputBuffer << "'");
@@ -2369,7 +2402,27 @@ void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
 void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
 
     int keycode = event.GetKeyCode();
-    SSH_LOG("OnProxyKeyDown called, keycode=" << keycode);
+    SSH_LOG("OnProxyKeyDown called, keycode=" << keycode
+              << " ctrl=" << event.ControlDown()
+              << " rawctrl=" << event.RawControlDown()
+              << " cmd=" << event.CmdDown()
+              << " meta=" << event.MetaDown()
+              << " alt=" << event.AltDown()
+              << " shift=" << event.ShiftDown());
+
+    // Handle Ctrl+C / Cmd+C on macOS
+    bool isControlC = (event.ControlDown() || event.RawControlDown()) && (keycode == 'C' || keycode == WXK_CONTROL_C);
+    bool isCmdC = event.CmdDown() && keycode == 'C';
+    if (isControlC || isCmdC) {
+        SSH_LOG("OnProxyKeyDown: Ctrl/Cmd+C detected, sending ETX");
+        std::string key_seq = "\x03";
+        if (m_imeCallback) {
+            m_imeCallback(key_seq.c_str(), key_seq.length());
+        } else if (key_callback_) {
+            key_callback_(key_seq.c_str(), key_seq.length());
+        }
+        return;
+    }
 
     // Handle backspace for command interception
     if (keycode == WXK_BACK) {

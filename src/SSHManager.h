@@ -140,6 +140,7 @@ private:
     uv_connect_t connect_req_;
     uv_poll_t* poll_handle_;
     bool poll_active_;
+    bool tcp_handle_initialized_;
     
     // libssh2 components
     LIBSSH2_SESSION* ssh_session_;

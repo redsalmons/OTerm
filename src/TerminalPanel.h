@@ -57,6 +57,8 @@ public:
     void ClearInputBuffer();
     const std::string& GetInputBuffer() const { return m_inputBuffer; }
     bool IsLocalTerminal() const { return m_terminalContainer != nullptr; }
+    bool IsSessionAlive() const;
+    void RestartAsLocalTerminal();
 
     // Command interceptor for local terminals
     CommandInterceptor& GetCommandInterceptor() { return m_commandInterceptor; }

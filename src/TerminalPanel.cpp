@@ -590,6 +590,56 @@ void TerminalPanel::ClearInputBuffer() {
     m_inputBuffer.clear();
 }
 
+bool TerminalPanel::IsSessionAlive() const {
+    if (m_terminalContainer) {
+        LocalTerminalThread* thread = m_terminalContainer->GetThread();
+        bool alive = thread && thread->IsRunning();
+        SSH_LOG("TerminalPanel::IsSessionAlive local: thread=" << thread << ", alive=" << alive);
+        return alive;
+    }
+    if (m_sshThread) {
+        bool alive = m_sshThread->IsRunning() && !m_sshThread->IsDisconnected();
+        SSH_LOG("TerminalPanel::IsSessionAlive ssh: running=" << m_sshThread->IsRunning() << ", disconnected=" << m_sshThread->IsDisconnected() << ", alive=" << alive);
+        return alive;
+    }
+    SSH_LOG("TerminalPanel::IsSessionAlive: no thread/container, returning false");
+    return false;
+}
+
+void TerminalPanel::RestartAsLocalTerminal() {
+    SSH_LOG("TerminalPanel::RestartAsLocalTerminal called");
+    
+    // Stop and clear existing SSH thread (panel owns it)
+    if (m_sshThread) {
+        m_sshThread->SetShuttingDown();
+        m_sshThread->Wait();
+        delete m_sshThread;
+        m_sshThread = nullptr;
+    }
+    
+    // Stop and clear existing local terminal (panel owns it)
+    if (m_terminalContainer) {
+        m_terminalContainer->StopTerminal();
+        m_terminalContainer->ClearUIHandler();
+        m_terminalContainer.reset();
+    }
+    
+    // Clear canvas thread pointers so old thread is not referenced
+    if (m_canvas) {
+        m_canvas->m_terminalThread = nullptr;
+        m_canvas->m_localTerminalThread = nullptr;
+    }
+    
+    // Clear command input buffer
+    ClearInputBuffer();
+    
+    // Create and start a new local terminal container
+    int initialRows = (m_prevRows > 0) ? m_prevRows : 24;
+    int initialCols = (m_prevCols > 0) ? m_prevCols : 80;
+    auto newContainer = std::make_unique<LocalTerminalContainer>(initialRows, initialCols, "");
+    SetTerminalContainer(std::move(newContainer));
+}
+
 void TerminalPanel::ConvertToSSH(const DeviceConfig& device) {
     SPLIT_LOG("TerminalPanel::ConvertToSSH called for device: " << device.name);
     
@@ -628,10 +678,18 @@ void TerminalPanel::ConvertToSSH(const DeviceConfig& device) {
 }
 
 void TerminalPanel::OnKeyDown(wxKeyEvent& event) {
-    SPLIT_LOG("TerminalPanel::OnKeyDown: keycode=" << event.GetKeyCode());
+    SSH_LOG("TerminalPanel::OnKeyDown: keycode=" << event.GetKeyCode());
 
     // Handle RETURN key for command interception
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
+        SSH_LOG("TerminalPanel::OnKeyDown: RETURN pressed, checking session alive");
+        // If the session has ended (local or SSH), pressing Enter starts a new local terminal
+        if (!IsSessionAlive()) {
+            SSH_LOG("TerminalPanel::OnKeyDown: session not alive, restarting as local terminal");
+            RestartAsLocalTerminal();
+            return;
+        }
+        SSH_LOG("TerminalPanel::OnKeyDown: session alive, normal Enter handling");
         if (IsLocalTerminal()) {
             SPLIT_LOG("TerminalPanel::OnKeyDown: RETURN pressed on local terminal, checking command interception");
             SPLIT_LOG("TerminalPanel::OnKeyDown: inputBuffer='" << m_inputBuffer << "'");

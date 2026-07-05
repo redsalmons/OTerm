@@ -78,8 +78,9 @@ void SSHManager::init_log_file() {
 }
 
 SSHManager::SSHManager()
-    : loop_(nullptr), ssh_session_(nullptr), ssh_channel_(nullptr),
-      ssh_state_(SSH_DISCONNECTED), poll_handle_(nullptr), poll_active_(false),
+    : loop_(nullptr), tcp_handle_{}, connect_req_{}, poll_handle_(nullptr),
+      poll_active_(false), tcp_handle_initialized_(false),
+      ssh_session_(nullptr), ssh_channel_(nullptr), ssh_state_(SSH_DISCONNECTED),
       auth_retry_count_(0) {
     init_log_file();
     SSH_LOG("SSHManager created");
@@ -153,25 +154,16 @@ bool SSHManager::connect(const std::string& host, int port,
         status_callback_(msg.c_str(), (int)msg.size());
     }
 
-    // Check if TCP handle is already active (reconnecting)
-    if (uv_is_active((uv_handle_t*)&tcp_handle_)) {
-        SSH_LOG("Reusing existing TCP connection for reconnect");
-        // Create new SSH session on existing TCP connection
-        ssh_session_ = libssh2_session_init();
-        if (!ssh_session_) {
-            SSH_ERR("Failed to create SSH session");
-            if (status_callback_) {
-                const char* msg = "Failed to create SSH session.\r\n";
-                status_callback_(msg, (int)strlen(msg));
-            }
-            return false;
+    // Close any existing TCP handle before starting a fresh connection.
+    // Reusing an old handle is unreliable: the socket may be dead or already
+    // closing, which makes uv_fileno fail later when polling is started.
+    if (tcp_handle_initialized_ && !uv_is_closing((uv_handle_t*)&tcp_handle_)) {
+        uv_close((uv_handle_t*)&tcp_handle_, nullptr);
+        tcp_handle_initialized_ = false;
+        // Process the close callback immediately so the handle is fully reset.
+        if (loop_) {
+            uv_run(loop_, UV_RUN_NOWAIT);
         }
-        libssh2_session_set_blocking(ssh_session_, 0);
-
-        // Start handshake immediately
-        ssh_state_ = SSH_HANDSHAKING;
-        start_polling();
-        return true;
     }
 
     // Initialize new TCP handle for fresh connection
@@ -183,6 +175,7 @@ bool SSHManager::connect(const std::string& host, int port,
         }
         return false;
     }
+    tcp_handle_initialized_ = true;
     
     tcp_handle_.data = this;
     uv_tcp_nodelay(&tcp_handle_, 1);
@@ -319,9 +312,10 @@ void SSHManager::cleanup() {
         ssh_session_ = nullptr;
     }
 
-    if (!uv_is_closing((uv_handle_t*)&tcp_handle_)) {
+    if (tcp_handle_initialized_ && !uv_is_closing((uv_handle_t*)&tcp_handle_)) {
         SSH_LOG("Closing TCP handle");
         uv_close((uv_handle_t*)&tcp_handle_, nullptr);
+        tcp_handle_initialized_ = false;
         // Run the event loop to process the close callback immediately
         if (loop_) {
             uv_run(loop_, UV_RUN_NOWAIT);
@@ -610,7 +604,13 @@ void SSHManager::process_ssh_data() {
 
     // Check for EOF
     if (libssh2_channel_eof(ssh_channel_)) {
-        SSH_LOG("SSH channel EOF detected");
+        SSH_LOG("SSH channel EOF detected, marking connection as DISCONNECTED");
+        if (status_callback_) {
+            const char* msg = "\r\nConnection closed by remote host.\r\n";
+            status_callback_(msg, (int)strlen(msg));
+        }
+        ssh_state_ = SSH_DISCONNECTED;
+        stop_polling();
     }
 }
 

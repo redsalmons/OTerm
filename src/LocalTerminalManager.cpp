@@ -345,7 +345,7 @@ int LocalTerminalManager::Read(char* buffer, size_t len) {
         return -1; // Pipe broken
     }
     if (avail == 0) {
-        return 0; // No data right now
+        return -2; // No data right now
     }
 
     DWORD toRead = (avail < (DWORD)len) ? avail : (DWORD)len;
@@ -356,10 +356,13 @@ int LocalTerminalManager::Read(char* buffer, size_t len) {
     return -1;
 #elif defined(__APPLE__) || defined(__linux__)
     ssize_t result = read(m_masterFd, buffer, len);
-    if (result < 0 && errno == EAGAIN) {
-        return 0;
+    if (result < 0) {
+        if (errno == EAGAIN) {
+            return -2; // No data available right now
+        }
+        return -1; // Error
     }
-    return result;
+    return result; // >0 data, 0 EOF
 #else
     return -1;
 #endif

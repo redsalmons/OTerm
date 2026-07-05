@@ -327,9 +327,16 @@ wxThread::ExitCode LocalTerminalThread::Entry() {
                 }
                 LT_LOG("LocalTerminalThread::Entry() Read() bytesRead=" + std::to_string(bytesRead) + " data=" + hexBytes);
                 m_vtermManager.write_input(buffer, bytesRead);
+            } else if (bytesRead == 0) {
+                // EOF: shell has exited, pty slave closed
+                LT_LOG("LocalTerminalThread::Entry() Read() returned 0 (EOF), breaking loop");
+                break;
+            } else if (bytesRead == -2) {
+                // No data available right now (EAGAIN), continue loop
+                // do nothing
             } else if (bytesRead < 0) {
-                // Error or EOF
-                LT_LOG("LocalTerminalThread::Entry() Read() returned -1, breaking loop");
+                // Error
+                LT_LOG("LocalTerminalThread::Entry() Read() returned error, breaking loop");
                 break;
             }
 

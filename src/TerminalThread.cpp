@@ -34,6 +34,7 @@ TerminalThread::TerminalThread(EventProxyPtr event_proxy, int rows, int cols, co
       m_last_ui_update(),
       m_heavy_streaming(false),
       m_consecutive_updates(0),
+      m_idle_iterations(0),
       m_pending_input() {
     m_front_buffer.resize(rows, cols);
     m_back_buffer.resize(rows, cols);
@@ -323,12 +324,18 @@ wxThread::ExitCode TerminalThread::Entry() {
         // Stream state detection: enter heavy streaming if we receive data consecutively
         if (had_data) {
             m_consecutive_updates++;
+            m_idle_iterations = 0;
             if (m_consecutive_updates >= 5) {
                 m_heavy_streaming = true;
             }
         } else {
             m_consecutive_updates = 0;
-            m_heavy_streaming = false; // Immediately exit heavy streaming when idle
+            m_idle_iterations++;
+            // Require a few consecutive idle iterations before exiting heavy streaming
+            // to avoid oscillating between modes during bursty data
+            if (m_idle_iterations > 3) {
+                m_heavy_streaming = false;
+            }
         }
         
         // Check if we have damage to report

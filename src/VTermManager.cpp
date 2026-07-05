@@ -398,12 +398,6 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
     // Mark that we have new output for auto-scroll
     has_new_output_ = true;
 
-    SSH_LOG("update_cell_buffer: rect={" << rect.start_row << "," << rect.start_col << " -> " << rect.end_row << "," << rect.end_col << "}");
-    // {
-    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    //     if (f.is_open()) f << "[VTERM] update_cell_buffer rect={" << rect.start_row << "," << rect.start_col << " -> " << rect.end_row << "," << rect.end_col << "}" << std::endl;
-    // }
-
     // Obtain VTerm state once outside the loop to avoid repeated calls
     VTermState* state = vterm_obtain_state(vt_);
     if (!state) return;
@@ -503,21 +497,6 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             }
         }
     }
-    char32_t first_char = 0;
-    for (const auto& row : cell_buffer_) {
-        for (const auto& cell : row) {
-            if (cell.char_code != 0 && cell.char_code != ' ') {
-                first_char = cell.char_code;
-                break;
-            }
-        }
-        if (first_char != 0) break;
-    }
-    SSH_LOG("update_cell_buffer: done, cell[0][0] char_code=" << (cell_buffer_.size() > 0 && cell_buffer_[0].size() > 0 ? cell_buffer_[0][0].char_code : 0));
-    // {
-    //     std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    //     if (f.is_open()) f << "[VTERM] update_cell_buffer done first_nonempty_char=" << static_cast<int>(first_char) << std::endl;
-    // }
 }
 
 void VTermManager::refresh_cell_buffer() {
@@ -634,11 +613,8 @@ void VTermManager::save_top_row_to_history() {
     
     // Don't save history in alternate screen mode (e.g., vi, less)
     if (in_alternate_screen_) {
-        SSH_LOG("save_top_row_to_history: skipped (in alternate screen mode)");
         return;
     }
-    
-    SSH_LOG("save_top_row_to_history: saving top row to history, history size: " << scroll_history_.size());
     
     // Get the top row (row 0) before it gets scrolled off
     std::vector<TerminalCell> top_row = cell_buffer_[0];
@@ -664,11 +640,8 @@ void VTermManager::save_row_to_history(int row_index) {
     
     // Don't save history in alternate screen mode (e.g., vi, less)
     if (in_alternate_screen_) {
-        SSH_LOG("save_row_to_history: skipped (in alternate screen mode)");
         return;
     }
-    
-    SSH_LOG("save_row_to_history: saving row " << row_index << " to history, history size: " << scroll_history_.size());
     
     // Get the specified row
     std::vector<TerminalCell> row = cell_buffer_[row_index];
