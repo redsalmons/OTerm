@@ -1,5 +1,5 @@
 !define APP_NAME "OceanTerm"
-!define APP_VERSION "1.0.0"
+!define APP_VERSION "1.0.3"
 !define APP_PUBLISHER "OceanTerm"
 !define APP_EXE "OceanTerm.exe"
 !define APP_ARCH "ARM64"
