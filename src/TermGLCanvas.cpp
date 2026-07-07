@@ -1008,7 +1008,40 @@ void TermGLCanvas::Render() {
 
     }
 
-    
+
+    // 2.5 绘制下划线
+    glBegin(GL_LINES);
+    for (const auto& cell : m_screen_cells) {
+        if (cell.char_code == 0) continue;
+        if (cell.char_code < 32 && cell.char_code != '\t') continue;
+
+        // Check if underline attribute is set (0x02)
+        if (cell.attrs & 0x02) {
+            float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
+            float y = (static_cast<int>(cell.cell_y) - m_scroll_offset) * cell_height + margin_y;
+
+            uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
+            float render_width = cell_width * cell_width_multiplier;
+
+            if (cell.char_code == '\t') {
+                x -= 3.0f;
+                render_width += 6.0f;
+            }
+
+            // Draw underline at baseline (near bottom of cell)
+            float underline_y = y + cell_height - 2.0f;
+
+            uint8_t fg_r = cell.fg_color & 0xFF;
+            uint8_t fg_g = (cell.fg_color >> 8) & 0xFF;
+            uint8_t fg_b = (cell.fg_color >> 16) & 0xFF;
+            glColor3f(fg_r / 255.0f, fg_g / 255.0f, fg_b / 255.0f);
+
+            glVertex2f(x, underline_y);
+            glVertex2f(x + render_width, underline_y);
+        }
+    }
+    glEnd();
+
 
     // 3. 绘制光标 (直接使用 SetCursorPosition 中计算好的 m_cursorRect)
 

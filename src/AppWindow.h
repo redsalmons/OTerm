@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wx/wx.h>
+#include <wx/timer.h>
 #include "CustomTitleBar.h"
 #include <memory>
 #include <vector>
@@ -44,6 +45,11 @@ private:
     void OnDeviceShowRequest(wxCommandEvent& event);
     void OnFileTransferRequest(wxCommandEvent& event);
     void OnCreateLocalTab(wxCommandEvent& event);
+    
+    // Timer for delayed dialog showing to fix Windows x86 unresponsiveness
+    wxTimer m_deviceShowTimer;
+    TerminalPanel* m_pendingDeviceShowPanel;
+    void OnDeviceShowTimer(wxTimerEvent& event);
     
     void CreateDashboardTab();
     void CreateTerminalTab(const DeviceConfig& device);

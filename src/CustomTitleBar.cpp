@@ -692,20 +692,20 @@ void CustomTitleBar::NotifyAllTabsResize() {
     // 先Layout确保所有tab都被正确布局
     m_notebook->Layout();
     
-    // 保存当前选中的页面
-    int currentSelection = m_notebook->GetSelection();
-    
     // 通知所有tab调整大小
     for (auto tab : m_tabs) {
         TerminalThread* thread = tab->GetTerminalThread();
         if (thread) {
             TermGLCanvas* canvas = tab->GetCanvas();
             if (canvas) {
-                // 临时切换到这个tab以获取正确的size
+                // 不再进行SetSelection切换，直接对page应用notebook的ClientSize并布局
                 int pageIndex = FindNotebookPage(canvas);
                 if (pageIndex != wxNOT_FOUND) {
-                    m_notebook->SetSelection(pageIndex);
-                    m_notebook->Layout();
+                    wxWindow* page = m_notebook->GetPage(pageIndex);
+                    if (page) {
+                        page->SetSize(m_notebook->GetClientSize());
+                        page->Layout();
+                    }
                     
                     wxSize size = canvas->GetSize();
                     
@@ -746,11 +746,6 @@ void CustomTitleBar::NotifyAllTabsResize() {
                 }
             }
         }
-    }
-    
-    // 恢复原来的选中页面
-    if (currentSelection != wxNOT_FOUND) {
-        m_notebook->SetSelection(currentSelection);
     }
 }
 

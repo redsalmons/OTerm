@@ -91,6 +91,7 @@ void TerminalThread::ScrollVTerm(int lines) {
             inst.bg_color = cell.bg_color;
             inst.char_code = cell.char_code;
             inst.width = cell.width;
+            inst.attrs = cell.attrs;
         }
     }
     
@@ -131,6 +132,7 @@ void TerminalThread::ResetScrollToBottom() {
             inst.bg_color = cell.bg_color;
             inst.char_code = cell.char_code;
             inst.width = cell.width;
+            inst.attrs = cell.attrs;
         }
     }
     
@@ -308,6 +310,7 @@ wxThread::ExitCode TerminalThread::Entry() {
                         inst.bg_color = cell.bg_color;
                         inst.char_code = cell.char_code;
                         inst.width = cell.width;
+                        inst.attrs = cell.attrs;
                     }
                 }
                 
@@ -367,6 +370,7 @@ wxThread::ExitCode TerminalThread::Entry() {
                         inst.bg_color = cell.bg_color;
                         inst.char_code = cell.char_code;
                         inst.width = cell.width;
+                        inst.attrs = cell.attrs;
                     }
                 }
                 VTermPos cursor_pos = m_vtermManager.get_cursor_pos();

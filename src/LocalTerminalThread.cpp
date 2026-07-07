@@ -107,6 +107,7 @@ void LocalTerminalThread::ScrollVTerm(int lines) {
             inst.char_code = cell.char_code;
             inst.fg_color = cell.fg_color;
             inst.bg_color = cell.bg_color;
+            inst.attrs = cell.attrs;
         }
     }
 
@@ -144,6 +145,7 @@ void LocalTerminalThread::ResetScrollToBottom() {
             inst.char_code = cell.char_code;
             inst.fg_color = cell.fg_color;
             inst.bg_color = cell.bg_color;
+            inst.attrs = cell.attrs;
         }
     }
     
@@ -275,6 +277,7 @@ void LocalTerminalThread::process_resize() {
                 inst.bg_color = cell.bg_color;
                 inst.char_code = cell.char_code;
                 inst.width = cell.width;
+                inst.attrs = cell.attrs;
             }
         }
         

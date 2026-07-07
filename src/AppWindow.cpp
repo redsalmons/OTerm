@@ -308,6 +308,7 @@ wxBEGIN_EVENT_TABLE(AppWindow, wxFrame)
     EVT_COMMAND(wxID_ANY, wxEVT_DEVICE_SHOW_REQUEST, AppWindow::OnDeviceShowRequest)
     EVT_MENU(wxID_ANY, AppWindow::OnFileTransferRequest)
     EVT_COMMAND(wxID_ANY, wxEVT_CREATE_LOCAL_TAB, AppWindow::OnCreateLocalTab)
+    EVT_TIMER(wxID_ANY, AppWindow::OnDeviceShowTimer)
 wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
@@ -318,6 +319,9 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     : wxFrame(nullptr, wxID_ANY, title, pos, size, wxDEFAULT_FRAME_STYLE)
 #endif
 {
+    m_deviceShowTimer.SetOwner(this);
+    m_pendingDeviceShowPanel = nullptr;
+
     // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     // if (f.is_open()) f << "[APPWINDOW] AppWindow constructor called" << std::endl;
 
@@ -627,29 +631,27 @@ void AppWindow::OnSSHDirectConnect(wxCommandEvent& event) {
     }
 }
 
-void AppWindow::OnDeviceShowRequest(wxCommandEvent& event) {
-    SSH_LOG("AppWindow::OnDeviceShowRequest called");
-    TerminalPanel* panel = (TerminalPanel*)event.GetEventObject();
-    if (!panel) {
-        SSH_LOG("OnDeviceShowRequest: panel is null");
-        return;
-    }
-
+void AppWindow::OnDeviceShowTimer(wxTimerEvent& event) {
+    if (!m_pendingDeviceShowPanel) return;
+    
+    TerminalPanel* panel = m_pendingDeviceShowPanel;
+    m_pendingDeviceShowPanel = nullptr;
+    
     ConnectionDialog dialog(this, TranslationHelper::Tr("deviceList"));
     if (dialog.ShowModal() == wxID_OK) {
         DeviceConfig newDevice = dialog.GetSelectedDevice();
         SSH_LOG("Device selected: " << newDevice.name);
-        
+
         // Convert the current local terminal panel to SSH
         panel->ConvertToSSH(newDevice);
-        
+
         // Find the ConnectInfo for this panel, update its label and internal thread pointers
         if (m_titleBar) {
             for (auto* tab : m_titleBar->GetTabs()) {
                 if (tab->GetContentPanel() == panel) {
                     SSH_LOG("OnDeviceShowRequest: found ConnectInfo tab=" << tab << ", switching to SSH");
                     tab->SwitchToSSH(panel->GetSSHThread(), newDevice);
-                    
+
                     // Notify layout update to adjust tab sizes
                     wxCommandEvent layoutEvent(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);
                     layoutEvent.SetInt(1); // Flag to indicate tab label changed
@@ -661,6 +663,23 @@ void AppWindow::OnDeviceShowRequest(wxCommandEvent& event) {
     } else {
         SSH_LOG("Device selection cancelled");
     }
+}
+
+void AppWindow::OnDeviceShowRequest(wxCommandEvent& event) {
+    SSH_LOG("AppWindow::OnDeviceShowRequest called");
+    TerminalPanel* panel = (TerminalPanel*)event.GetEventObject();
+    if (!panel) {
+        SSH_LOG("OnDeviceShowRequest: panel is null");
+        return;
+    }
+
+    // Start the timer to break the event loop nesting issue
+    // We use a CallAfter to trigger the timer, just to be absolutely sure
+    // we're completely out of the keyboard event processing context
+    CallAfter([this, panel]() {
+        m_pendingDeviceShowPanel = panel;
+        m_deviceShowTimer.StartOnce(50); // 50ms delay
+    });
 }
 
 void AppWindow::OnFileTransferRequest(wxCommandEvent& event) {

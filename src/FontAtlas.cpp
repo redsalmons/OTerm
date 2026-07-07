@@ -60,14 +60,20 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
     // Use a temporary DC to get font metrics
     wxBitmap tempBitmap(1, 1, 24);
     wxMemoryDC tempDC(tempBitmap);
-    tempDC.SetFont(m_font);
+    wxGCDC gcdc(tempDC); // Use GCDC for accurate font metrics
+    gcdc.SetFont(m_font);
 
-    // Get text extent for a single character with descender (like 'g')
-    wxString testChar = "g";
-    wxSize extent = tempDC.GetTextExtent(testChar);
+    // Get text extent for a string containing ascenders and descenders
+    wxString testChar = "Mg|jpqy_";
+    wxSize extent = gcdc.GetTextExtent(testChar);
 
     // Use the actual character height including descenders
     m_charHeight = extent.y;
+
+#ifdef _WIN32
+    // On Windows, add padding to character height to provide space for underline rendering
+    m_charHeight += 4;
+#endif
 
     tempDC.SelectObject(wxNullBitmap);
 
@@ -187,13 +193,14 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     
     // Create bitmap for this character
     int charSize = m_fontSize;
-    int charHeight = m_charHeight; // Use actual character height including descenders
+    int charHeight = m_charHeight; // Already includes extra padding on Windows if applicable
     
     // Get actual character width from font using temporary DC
     wxBitmap tempBitmap(1, 1, 24);
     wxMemoryDC tempDC(tempBitmap);
-    tempDC.SetFont(m_font);
-    wxSize extent = tempDC.GetTextExtent(text);
+    wxGCDC gcdc(tempDC); // Use GCDC for accurate character width
+    gcdc.SetFont(m_font);
+    wxSize extent = gcdc.GetTextExtent(text);
     int charWidth = extent.x;
     if (charWidth == 0) charWidth = charSize; // Fallback if extent is 0
     tempDC.SelectObject(wxNullBitmap);
@@ -220,7 +227,13 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
 
         // Calculate vertical offset to center character in cell
         wxSize charExtent = dc.GetTextExtent(text);
-        int yOffset = (charHeight - charExtent.y) / 2;
+        int yOffset;
+#ifdef _WIN32
+        // On Windows, shift text up to leave space at bottom for underline
+        yOffset = (charHeight - 12 - charExtent.y) / 2; // Subtract extra space from calculation
+#else
+        yOffset = (charHeight - charExtent.y) / 2;
+#endif
         if (yOffset < 0) yOffset = 0;
 
         // Draw character with left padding to preserve left bearing

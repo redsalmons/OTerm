@@ -23,7 +23,8 @@ public:
     // Get front buffer (read-only for UI thread)
     const ScreenBuffer* GetFrontBuffer() const { return &m_front_buffer; }
     void CopyFrontBuffer(ScreenBuffer& dest) const {
-        std::lock_guard<std::mutex> lock(m_buffer_mutex);
+        // Direct read without lock - front buffer is only written by swap_buffers which is atomic
+        // This avoids blocking the worker thread during UI rendering
         dest = m_front_buffer;
     }
     

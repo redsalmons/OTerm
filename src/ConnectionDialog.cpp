@@ -11,8 +11,8 @@
 
 wxDEFINE_EVENT(wxEVT_DEVICE_LIST_UPDATE, wxCommandEvent);
 
-ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect)
-    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize) {
+ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect, bool modal)
+    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize), m_modal(modal) {
 
     double dpiScale = GlobalConfig::GetDPIScaleFactor();
 
@@ -291,7 +291,12 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
     }
 
     // Close dialog with save result
-    EndModal(wxID_SAVE);
+    if (m_modal) {
+        EndModal(wxID_SAVE);
+    } else {
+        SetReturnCode(wxID_SAVE);
+        Close();
+    }
 }
 
 void ConnectionDialog::OnConnect(wxCommandEvent& event) {
@@ -314,11 +319,21 @@ void ConnectionDialog::OnConnect(wxCommandEvent& event) {
         }
     }
 
-    EndModal(wxID_OK);
+    if (m_modal) {
+        EndModal(wxID_OK);
+    } else {
+        SetReturnCode(wxID_OK);
+        Close();
+    }
 }
 
 void ConnectionDialog::OnCancel(wxCommandEvent& event) {
-    EndModal(wxID_CANCEL);
+    if (m_modal) {
+        EndModal(wxID_CANCEL);
+    } else {
+        SetReturnCode(wxID_CANCEL);
+        Close();
+    }
 }
 
 void ConnectionDialog::OnDelete(wxCommandEvent& event) {

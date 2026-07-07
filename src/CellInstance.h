@@ -9,4 +9,5 @@ struct CellInstance {
     uint32_t bg_color;           // Background color (RGBA)
     uint32_t char_code;          // Unicode character code
     uint8_t width;               // Cell width (1 for normal, 2 for wide characters)
+    uint8_t attrs;               // Text attributes (bold, underline, etc.)
 };

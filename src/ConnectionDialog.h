@@ -19,7 +19,7 @@ private:
 
 class ConnectionDialog : public wxDialog {
 public:
-    ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect = false);
+    ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect = false, bool modal = true);
 
     DeviceConfig GetSelectedDevice() const { return m_selectedDevice; }
 
@@ -32,6 +32,8 @@ private:
     void OnAuthMethodChanged(wxCommandEvent& event);
     void OnKeyBrowse(wxCommandEvent& event);
     void OnSize(wxSizeEvent& event);
+
+    bool m_modal;
 
     void LoadConfig();
     void SaveConfig();
