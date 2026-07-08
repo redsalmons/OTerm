@@ -516,6 +516,15 @@ void SSHTerminalContainer::Cleanup() {
     m_keepAliveTimer.Stop();
     m_readTimer.Stop();
 
+    // Close socket first to stop network I/O
+    if (m_socket) {
+        m_socket->Notify(false);
+        m_socket->Close();
+        m_socket->Destroy();
+        m_socket = nullptr;
+    }
+
+    // Clean up SSH resources (socket is already closed, so these should be fast)
     if (m_sshChannel) {
         libssh2_channel_free(m_sshChannel);
         m_sshChannel = nullptr;
@@ -524,13 +533,6 @@ void SSHTerminalContainer::Cleanup() {
     if (m_sshSession) {
         libssh2_session_free(m_sshSession);
         m_sshSession = nullptr;
-    }
-
-    if (m_socket) {
-        m_socket->Notify(false);
-        m_socket->Close();
-        m_socket->Destroy(); // Safe deletion
-        m_socket = nullptr;
     }
 
     m_sshState = SSH_DISCONNECTED;
