@@ -12,8 +12,6 @@
 
 #include "FileTransferDialog.h"
 
-#include "FileTransferThread.h"
-
 #include "EventProxy.h"
 
 #include <memory>
@@ -76,7 +74,7 @@ public:
 
     LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
 
-    void SwitchToSSH(TerminalThread* sshThread, const DeviceConfig& deviceConfig);
+    void SwitchToSSH(const DeviceConfig& deviceConfig);
 
 
 
@@ -161,8 +159,6 @@ private:
     std::string m_currentInput; // Record current keyboard input
 
     FileTransferDialog* m_fileTransferDialog; // File transfer dialog
-
-    FileTransferThread* m_fileTransferThread; // File transfer thread
 
     int m_prevRows;
 

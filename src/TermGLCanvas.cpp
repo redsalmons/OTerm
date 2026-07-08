@@ -34,8 +34,6 @@
 
 #include "GlobalConfig.h"
 
-#include "LocalTerminalThread.h"
-
 #include "TerminalThread.h"
 
 #include "TranslationHelper.h"
@@ -206,18 +204,9 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
 
 
-    // Create local terminal thread by default for console if requested
+    // Create local terminal thread by default for console if requested (no-op since single-threaded)
     if (createThread) {
-        m_ownsThreads = true;
-        m_localTerminalThread = new LocalTerminalThread(nullptr, 24, 80);
-        m_localTerminalThread->Start();
-
-        // Set key callback to send input to local terminal thread
-        SetKeyCallback([this](const char* data, int length) {
-            if (m_localTerminalThread) {
-                m_localTerminalThread->QueueInput(std::string(data, length));
-            }
-        });
+        m_ownsThreads = false;
     }
 
 
@@ -239,16 +228,6 @@ void TermGLCanvas::StopThreads() {
     }
     
     if (m_ownsThreads) {
-        if (m_localTerminalThread) {
-            auto localStartTime = std::chrono::steady_clock::now();
-            SSH_LOG("Stopping local terminal thread");
-            m_localTerminalThread->SetShuttingDown();
-            SSH_LOG("Waiting for local terminal thread to exit");
-            m_localTerminalThread->Wait();
-            auto localDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - localStartTime).count();
-            SSH_LOG("Local terminal thread exited after " << localDuration << "ms, deleting");
-            delete m_localTerminalThread;
-        }
         if (m_terminalThread) {
             auto sshStartTime = std::chrono::steady_clock::now();
             SSH_LOG("Stopping SSH terminal thread");
@@ -262,7 +241,6 @@ void TermGLCanvas::StopThreads() {
         m_ownsThreads = false;
     }
     
-    m_localTerminalThread = nullptr;
     m_terminalThread = nullptr;
     m_threadsStopped = true;
     auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
@@ -333,22 +311,7 @@ void TermGLCanvas::ConvertToSSH(const std::string& username, const std::string& 
 
 
 void TermGLCanvas::ConvertToSSH(const DeviceConfig& device) {
-
-    // Stop local terminal thread
-
-    if (m_localTerminalThread) {
-
-        m_localTerminalThread->SetShuttingDown();
-
-        m_localTerminalThread->Wait();
-
-        delete m_localTerminalThread;
-
-        m_localTerminalThread = nullptr;
-
-    }
-
-
+    // Stop local terminal (no-op since single-threaded)
 
     // Update device config
 

@@ -75,12 +75,7 @@ public:
     void ReinitializeGLContext();
     
     // Get local terminal thread
-
-    
-
-    // Get local terminal thread
-
-    LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
+    void* GetLocalTerminalThread() const { return nullptr; }
 
 
 
@@ -261,7 +256,7 @@ public:
 
 
     // Terminal threads
-    LocalTerminalThread* m_localTerminalThread;
+    void* m_localTerminalThread;
     TerminalThread* m_terminalThread;
     bool m_ownsThreads; // Track if we created and own the threads
     bool m_threadsStopped; // Track if StopThreads has been called

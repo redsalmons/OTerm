@@ -3,6 +3,7 @@
 
 #include <wx/wx.h>
 #include <wx/splitter.h>
+#include "ITerminalContainer.h"
 #include "LocalTerminalContainer.h"
 #include "TermGLCanvas.h"
 #include "EventProxy.h"
@@ -13,7 +14,7 @@ class InfiniteSplitter;
 
 class TerminalPanel : public wxPanel, public ISplitable {
 public:
-    TerminalPanel(wxWindow* parent, std::unique_ptr<LocalTerminalContainer> container = nullptr);
+    TerminalPanel(wxWindow* parent, std::unique_ptr<ITerminalContainer> container = nullptr);
     ~TerminalPanel();
     
     // ISplitable interface implementation
@@ -21,8 +22,8 @@ public:
     void Shutdown() override;
     bool CanSplit() const override { return HasTerminal(); }
     
-    LocalTerminalContainer* GetTerminalContainer() const { return m_terminalContainer.get(); }
-    void SetTerminalContainer(std::unique_ptr<LocalTerminalContainer> container);
+    ITerminalContainer* GetTerminalContainer() const { return m_terminalContainer.get(); }
+    void SetTerminalContainer(std::unique_ptr<ITerminalContainer> container);
     
     TermGLCanvas* GetCanvas() const { return m_canvas; }
     void SetCanvas(TermGLCanvas* canvas);
@@ -56,7 +57,7 @@ public:
     void AppendToInputBuffer(const std::string& text);
     void ClearInputBuffer();
     const std::string& GetInputBuffer() const { return m_inputBuffer; }
-    bool IsLocalTerminal() const { return m_terminalContainer != nullptr; }
+    bool IsLocalTerminal() const;
     bool IsSessionAlive() const;
     void RestartAsLocalTerminal();
 
@@ -74,7 +75,7 @@ private:
 
     void UpdateCanvasFromTerminal();
     
-    std::unique_ptr<LocalTerminalContainer> m_terminalContainer;
+    std::unique_ptr<ITerminalContainer> m_terminalContainer;
     TerminalThread* m_sshThread = nullptr;
     TermGLCanvas* m_canvas;
     wxStaticText* m_text;

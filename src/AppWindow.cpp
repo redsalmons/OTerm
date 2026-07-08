@@ -650,7 +650,7 @@ void AppWindow::OnDeviceShowTimer(wxTimerEvent& event) {
             for (auto* tab : m_titleBar->GetTabs()) {
                 if (tab->GetContentPanel() == panel) {
                     SSH_LOG("OnDeviceShowRequest: found ConnectInfo tab=" << tab << ", switching to SSH");
-                    tab->SwitchToSSH(panel->GetSSHThread(), newDevice);
+                    tab->SwitchToSSH(newDevice);
 
                     // Notify layout update to adjust tab sizes
                     wxCommandEvent layoutEvent(wxEVT_COMMAND_MENU_SELECTED, wxID_ANY);

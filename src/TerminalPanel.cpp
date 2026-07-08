@@ -1,6 +1,8 @@
 #include "TerminalPanel.h"
 #include "InfiniteSplitter.h"
 #include "TerminalThread.h"
+#include "SSHTerminalContainer.h"
+#include "LocalTerminalContainer.h"
 #include "GlobalConfig.h"
 #include "AppWindow.h"
 #include <wx/menu.h>
@@ -10,7 +12,7 @@
 
 #define SPLIT_LOG(msg) ((void)0)
 
-TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<LocalTerminalContainer> container)
+TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<ITerminalContainer> container)
     : wxPanel(parent, wxID_ANY),
       m_terminalContainer(std::move(container)),
       m_canvas(nullptr),
@@ -44,7 +46,10 @@ TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<LocalTerminalCont
         // 设置 UI handler 为当前面板
         m_terminalContainer->SetUIHandler(this);
         // 让容器使用面板的EventProxy
-        m_terminalContainer->GetThread()->SetEventProxy(m_eventProxy);
+        auto localContainer = dynamic_cast<LocalTerminalContainer*>(m_terminalContainer.get());
+        if (localContainer) {
+            m_eventProxy = localContainer->GetEventProxy();
+        }
         SPLIT_LOG("TerminalPanel attached container and set EventProxy");
     }
     
@@ -107,7 +112,7 @@ void TerminalPanel::Shutdown() {
     SPLIT_LOG("TerminalPanel::Shutdown done");
 }
 
-void TerminalPanel::SetTerminalContainer(std::unique_ptr<LocalTerminalContainer> container) {
+void TerminalPanel::SetTerminalContainer(std::unique_ptr<ITerminalContainer> container) {
     SPLIT_LOG("SetTerminalContainer called: " << container.get());
     
     // 清除旧的 UI handler 和容器
@@ -120,7 +125,10 @@ void TerminalPanel::SetTerminalContainer(std::unique_ptr<LocalTerminalContainer>
     // 设置新的 UI handler
     if (m_terminalContainer) {
         m_terminalContainer->SetUIHandler(this);
-        m_terminalContainer->GetThread()->SetEventProxy(m_eventProxy);
+        auto localContainer = dynamic_cast<LocalTerminalContainer*>(m_terminalContainer.get());
+        if (localContainer) {
+            m_eventProxy = localContainer->GetEventProxy();
+        }
         SPLIT_LOG("SetTerminalContainer: attached new container and set EventProxy");
     }
     
@@ -212,8 +220,8 @@ void TerminalPanel::SetupCanvasConnection() {
         m_canvas->m_terminalThread = m_sshThread;
         SPLIT_LOG("Set SSH terminal thread pointer on canvas");
     } else if (m_terminalContainer) {
-        m_canvas->m_localTerminalThread = m_terminalContainer->GetThread();
-        SPLIT_LOG("Set local terminal thread pointer on canvas");
+        m_canvas->m_localTerminalThread = nullptr;
+        SPLIT_LOG("Set local terminal thread pointer on canvas (null because single-threaded)");
     }
     
     // Set damage callback to trigger canvas refresh
@@ -241,17 +249,14 @@ void TerminalPanel::SetupCanvasConnection() {
         if (m_sshThread) {
             m_sshThread->ScrollVTerm(lines);
         } else if (m_terminalContainer) {
-            LocalTerminalThread* thread = m_terminalContainer->GetThread();
-            if (thread) {
-                thread->ScrollVTerm(lines);
-            }
+            m_terminalContainer->Scroll(lines);
         }
     });
     SPLIT_LOG("Scroll callback set");
 
     // 设置 canvas 的 mouse 回调
     m_canvas->SetMouseCallback([this](int row, int col, int button) {
-        bool inAltScreen = m_sshThread ? m_sshThread->IsInAlternateScreen() : (m_terminalContainer && m_terminalContainer->GetThread() ? m_terminalContainer->GetThread()->IsInAlternateScreen() : false);
+        bool inAltScreen = m_sshThread ? m_sshThread->IsInAlternateScreen() : (m_terminalContainer ? m_terminalContainer->IsInAlternateScreen() : false);
         SPLIT_LOG("Mouse callback invoked: row=" << row << " col=" << col << " button=" << button << " inAltScreen=" << inAltScreen);
         if (inAltScreen) {
             char seq[6];
@@ -501,14 +506,13 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
         scroll_offset = m_sshThread->GetScrollOffset();
         has_buffer = true;
     } else if (m_terminalContainer) {
-        LocalTerminalThread* thread = m_terminalContainer->GetThread();
-        if (!thread) {
-            // Thread has been stopped/deleted (e.g. during panel close). Nothing to render.
+        if (!m_terminalContainer->IsSessionAlive()) {
+            // Session has been stopped/deleted (e.g. during panel close). Nothing to render.
             return;
         }
-        thread->CopyFrontBuffer(local_buffer);
-        in_alt_screen = thread->IsInAlternateScreen();
-        scroll_offset = thread->GetScrollOffset();
+        m_terminalContainer->CopyFrontBuffer(local_buffer);
+        in_alt_screen = m_terminalContainer->IsInAlternateScreen();
+        scroll_offset = m_terminalContainer->GetScrollOffset();
         has_buffer = true;
     }
     
@@ -590,11 +594,14 @@ void TerminalPanel::ClearInputBuffer() {
     m_inputBuffer.clear();
 }
 
+bool TerminalPanel::IsLocalTerminal() const {
+    return m_terminalContainer && dynamic_cast<LocalTerminalContainer*>(m_terminalContainer.get()) != nullptr;
+}
+
 bool TerminalPanel::IsSessionAlive() const {
     if (m_terminalContainer) {
-        LocalTerminalThread* thread = m_terminalContainer->GetThread();
-        bool alive = thread && thread->IsRunning();
-        SSH_LOG("TerminalPanel::IsSessionAlive local: thread=" << thread << ", alive=" << alive);
+        bool alive = m_terminalContainer->IsSessionAlive();
+        SSH_LOG("TerminalPanel::IsSessionAlive local: alive=" << alive);
         return alive;
     }
     if (m_sshThread) {
@@ -643,7 +650,7 @@ void TerminalPanel::RestartAsLocalTerminal() {
 void TerminalPanel::ConvertToSSH(const DeviceConfig& device) {
     SPLIT_LOG("TerminalPanel::ConvertToSSH called for device: " << device.name);
     
-    // Stop and clear local terminal
+    // Stop and clear any existing terminal container
     if (m_terminalContainer) {
         m_terminalContainer->StopTerminal();
         m_terminalContainer->ClearUIHandler();
@@ -653,28 +660,21 @@ void TerminalPanel::ConvertToSSH(const DeviceConfig& device) {
     // Use actual current rows and columns
     int initialRows = (m_prevRows > 0) ? m_prevRows : 24;
     int initialCols = (m_prevCols > 0) ? m_prevCols : 80;
-    SPLIT_LOG("TerminalPanel::ConvertToSSH - Creating thread with actual size: " << initialRows << "x" << initialCols);
+    SPLIT_LOG("TerminalPanel::ConvertToSSH - Creating SSHTerminalContainer with actual size: " << initialRows << "x" << initialCols);
     
-    // Create SSH thread
-    m_sshThread = new TerminalThread(m_eventProxy, initialRows, initialCols, device);
+    // Create SSH container
+    auto sshContainer = std::make_unique<SSHTerminalContainer>(initialRows, initialCols, device);
     
-    // Re-establish canvas connection with SSH thread before starting it
+    // Connect SSH container
+    sshContainer->Connect();
+    
+    // Store in m_terminalContainer
+    SetTerminalContainer(std::move(sshContainer));
+    
+    // Re-establish canvas connection
     SetupCanvasConnection();
     
-    // Start the thread after connection is set up
-    wxThreadError createErr = m_sshThread->Create();
-    if (createErr != wxTHREAD_NO_ERROR) {
-        SPLIT_LOG("TerminalPanel::ConvertToSSH - Create() failed, err=" << createErr);
-        return;
-    }
-    
-    wxThreadError runErr = m_sshThread->Run();
-    if (runErr != wxTHREAD_NO_ERROR) {
-        SPLIT_LOG("TerminalPanel::ConvertToSSH - Run() failed, err=" << runErr);
-        return;
-    }
-    
-    SPLIT_LOG("TerminalPanel::ConvertToSSH completed, thread started successfully");
+    SPLIT_LOG("TerminalPanel::ConvertToSSH completed, SSHTerminalContainer started successfully");
 }
 
 void TerminalPanel::OnKeyDown(wxKeyEvent& event) {
@@ -721,8 +721,8 @@ void TerminalPanel::OnKeyDown(wxKeyEvent& event) {
                     return;
                 } else {
                     SPLIT_LOG("TerminalPanel::OnKeyDown: Command intercepted, sending Ctrl+C instead of Enter");
-                    if (m_terminalContainer && m_terminalContainer->GetThread()) {
-                        m_terminalContainer->GetThread()->QueueInput("\x03");
+                    if (m_terminalContainer) {
+                        m_terminalContainer->QueueInput("\x03");
                     }
                     ClearInputBuffer();
                     return;

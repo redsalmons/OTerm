@@ -1,8 +1,7 @@
 #include "FileTransferDialog.h"
-#include "SSHFileThread.h"
+#include "AsynchronousSFTPTask.h"
 #include "SSHManager.h"
 #include "FileTransferTask.h"
-#include "FileTransferThread.h"
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
 #include <wx/dir.h>
@@ -20,7 +19,7 @@ wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_REQUEST, wxCommandEvent);
 FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, const DeviceConfig& deviceConfig)
     : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize,
                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-      m_deviceConfig(deviceConfig), m_sshThread(nullptr), m_imageList(nullptr),
+      m_deviceConfig(deviceConfig), m_imageList(nullptr),
       m_localList(nullptr), m_remoteList(nullptr), m_taskList(nullptr), m_localPathLabel(nullptr),
       m_remotePathLabel(nullptr), m_remoteDropTarget(nullptr), m_localDropTarget(nullptr),
       m_localCurrentPath(
@@ -47,21 +46,12 @@ FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, 
     CreateControls();
     LayoutControls();
     
-    // Start SSH thread
-    SSH_LOG("FileTransferDialog constructor - Creating SSH thread");
-    m_sshThread = new SSHFileThread(this, m_deviceConfig);
-    SSH_LOG("FileTransferDialog constructor - Starting SSH thread");
-    m_sshThread->Run();
-    SSH_LOG("FileTransferDialog constructor - SSH thread started");
-    
     // Populate local list
     PopulateLocalList(m_localCurrentPath);
     
     // Get the full path of ~ by executing pwd, then request directory listing
     SSH_LOG("FileTransferDialog constructor - Getting full path with pwd");
-    if (m_sshThread) {
-        m_sshThread->ExecuteCommand("pwd");
-    }
+    AsynchronousSFTPTask::CreateCommandTask(this, m_deviceConfig, "pwd");
     SSH_LOG("FileTransferDialog constructor - pwd command sent");
     
     // Create and start timer for task list refresh (every 3 seconds)
@@ -83,10 +73,6 @@ FileTransferDialog::~FileTransferDialog() {
     if (m_taskTimer) {
         m_taskTimer->Stop();
         delete m_taskTimer;
-    }
-    if (m_sshThread) {
-        m_sshThread->Stop();
-        delete m_sshThread;
     }
     if (m_imageList) {
         delete m_imageList;
@@ -345,9 +331,8 @@ void FileTransferDialog::PopulateRemoteList() {
 }
 
 void FileTransferDialog::RequestRemoteDirectory(const wxString& path) {
-    if (m_sshThread) {
-        m_sshThread->RequestDirectory(path);
-    }
+    PopulateRemoteList(); // Show "Loading..."
+    AsynchronousSFTPTask::CreateListTask(this, m_deviceConfig, path);
 }
 
 wxString FileTransferDialog::FormatFileSize(long long bytes) {

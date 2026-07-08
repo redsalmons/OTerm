@@ -1,4 +1,5 @@
 #include "InfiniteSplitter.h"
+#include "ITerminalContainer.h"
 #include "TerminalPanel.h"
 #include "AppWindow.h"
 #include <fstream>
@@ -71,7 +72,7 @@ void InfiniteSplitter::ReplaceChildWithSplitter(wxWindow* childToReplace, wxSpli
     
     // 获取原面板的终端容器和canvas
     TerminalPanel* originalPanel = wxDynamicCast(childToReplace, TerminalPanel);
-    LocalTerminalContainer* originalContainer = nullptr;
+    ITerminalContainer* originalContainer = nullptr;
     TermGLCanvas* originalCanvas = nullptr;
     if (originalPanel) {
         originalContainer = originalPanel->GetTerminalContainer();
@@ -87,7 +88,8 @@ void InfiniteSplitter::ReplaceChildWithSplitter(wxWindow* childToReplace, wxSpli
         SPLIT_LOG("Not split, handling initial split");
         
         // 1. 记录旧UI的状态
-        EventProxyPtr proxy = originalContainer ? originalContainer->GetEventProxy() : nullptr;
+        auto localContainer = dynamic_cast<LocalTerminalContainer*>(originalContainer);
+        EventProxyPtr proxy = localContainer ? localContainer->GetEventProxy() : nullptr;
         SPLIT_LOG("Proxy: " << proxy.get());
         
         // 2. 停止原面板的线程，避免继续运行

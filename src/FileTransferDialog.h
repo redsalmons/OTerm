@@ -12,8 +12,6 @@
 #include <nlohmann/json.hpp>
 #include "DeviceConfig.h"
 
-class SSHFileThread;
-
 wxDECLARE_EVENT(wxEVT_FILE_TRANSFER_REQUEST, wxCommandEvent);
 
 class FileDropTarget : public wxDropTarget {
@@ -196,7 +194,6 @@ private:
     FileDropTarget* m_localDropTarget;
     wxImageList* m_imageList;
     DeviceConfig m_deviceConfig;
-    SSHFileThread* m_sshThread;
     wxString m_localCurrentPath;
     wxString m_remoteCurrentPath;
     std::map<wxString, bool> m_expandingItems;

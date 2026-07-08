@@ -2,6 +2,8 @@
 
 #include <wx/simplebook.h>
 
+#include "ITerminalContainer.h"
+#include "SSHTerminalContainer.h"
 #include "TermGLCanvas.h"
 
 #include "TerminalPanel.h"
@@ -15,6 +17,7 @@
 #include "SSHManager.h"
 
 #include "FileTransferTask.h"
+#include "AsynchronousSFTPTask.h"
 
 #include "TranslationHelper.h"
 
@@ -42,7 +45,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
       m_isActive(false), m_isHovered(false), m_isLocalTerminal(isLocalTerminal), m_terminalThread(nullptr), m_localTerminalThread(nullptr), m_termCanvas(nullptr),
 
-      m_fileTransferDialog(nullptr), m_fileTransferThread(nullptr), m_prevRows(0), m_prevCols(0), m_cachedWidth(0)
+      m_fileTransferDialog(nullptr), m_prevRows(0), m_prevCols(0), m_cachedWidth(0)
 
     , m_splitManager(std::make_unique<SplitManager>(contentPanel->GetParent())), m_labelEditor(nullptr) {
 
@@ -402,11 +405,10 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
     if (m_termCanvas) {
 
         m_termCanvas->SetScrollCallback([this](int lines) {
-
-            if (m_isLocalTerminal && m_localTerminalThread) {
-
-                m_localTerminalThread->ScrollVTerm(lines);
-
+            TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+            ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
+            if (container) {
+                container->Scroll(lines);
             } else if (m_terminalThread) {
 
                 m_terminalThread->ScrollVTerm(lines);
@@ -420,8 +422,9 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         // Set mouse callback for vi mouse mode (X10 protocol)
 
         m_termCanvas->SetMouseCallback([this](int row, int col, int button) {
-
-            bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
+            TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+            ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
+            bool inAltScreen = container ? container->IsInAlternateScreen() : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
 
             SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << inAltScreen);
 
@@ -453,10 +456,10 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
                 SSH_LOG("Sending X10 mouse sequence: " << std::hex << (int)(unsigned char)seq[0] << " " << (int)(unsigned char)seq[1] << " " << (int)(unsigned char)seq[2] << " " << (int)(unsigned char)seq[3] << " " << (int)(unsigned char)seq[4] << " " << (int)(unsigned char)seq[5] << std::dec);
 
-                if (m_isLocalTerminal && m_localTerminalThread) {
-
-                    m_localTerminalThread->QueueInput(seq_str);
-
+                TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+                ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
+                if (container) {
+                    container->QueueInput(seq_str);
                 } else if (m_terminalThread) {
 
                     m_terminalThread->QueueInput(seq_str);
@@ -478,11 +481,11 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         if (panel) {
             // Use the panel's EventProxy
             m_eventProxy = panel->GetEventProxy();
-            m_localTerminalThread = panel->GetTerminalContainer()->GetThread();
-            SSH_LOG("ConnectInfo: Using EventProxy and LocalTerminalThread from TerminalPanel");
+            m_localTerminalThread = nullptr;
+            SSH_LOG("ConnectInfo: Using EventProxy from TerminalPanel");
         } else {
             // Fallback for non-TerminalPanel content (should not happen in current architecture)
-            m_localTerminalThread = m_termCanvas->GetLocalTerminalThread();
+            m_localTerminalThread = nullptr;
             m_eventProxy = std::make_shared<EventProxy>();
             m_eventProxy->SetTarget(m_termCanvas);
             m_eventProxy->SetDamageCallback([this](int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
@@ -493,18 +496,15 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
             });
         }
 
-        if (m_localTerminalThread) {
-            m_localTerminalThread->SetEventProxy(m_eventProxy);
-            SSH_LOG("ConnectInfo: Set EventProxy on LocalTerminalThread");
-        }
-        
-        // Set keyboard callback to send input to local thread
+        // Set keyboard callback to send input to local container
         if (m_termCanvas) {
             SSH_LOG("ConnectInfo: Setting key callback for local terminal");
             m_termCanvas->SetKeyCallback([this](const char* data, int length) {
                 SSH_LOG("ConnectInfo key callback: len=" << length << " first=" << (int)(unsigned char)data[0]);
-                if (m_localTerminalThread) {
-                    m_localTerminalThread->QueueInput(std::string(data, length));
+                TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+                ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
+                if (container) {
+                    container->QueueInput(std::string(data, length));
                 }
             });
             
@@ -541,16 +541,15 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
         
 
-        // Create TerminalThread for SSH
-
-        m_terminalThread = new TerminalThread(m_eventProxy, initialRows, initialCols, m_deviceConfig);
+        // Create SSHTerminalContainer for SSH
+        auto sshContainer = std::make_unique<SSHTerminalContainer>(initialRows, initialCols, m_deviceConfig);
 
         if (panel) {
-            panel->SetSSHThread(m_terminalThread);
+            panel->SetTerminalContainer(std::move(sshContainer));
             panel->SetupCanvasConnection();
         }
 
-        SSH_LOG("ConnectInfo: TerminalThread created");
+        SSH_LOG("ConnectInfo: SSHTerminalContainer created");
 
         // Note: Key callback is now set in TerminalPanel::SetupCanvasConnection
         // which includes upload/download command detection
@@ -581,19 +580,14 @@ void ConnectInfo::HandleClosePanel(TerminalPanel* sourcePanel) {
 void ConnectInfo::ShowFileTransferDialog() {
     SSH_LOG("ConnectInfo::ShowFileTransferDialog called");
     
-    // Find the active TerminalThread (including for converted sessions)
-    TerminalThread* activeThread = m_terminalThread;
-    if (!activeThread && m_contentPanel) {
-        TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
-        if (panel) {
-            activeThread = panel->GetSSHThread();
+    // Update our device config from the active SSHTerminalContainer
+    TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+    if (panel && panel->GetTerminalContainer()) {
+        auto sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
+        if (sshContainer) {
+            m_deviceConfig = sshContainer->GetDeviceConfig();
+            SSH_LOG("ConnectInfo::ShowFileTransferDialog: updated m_deviceConfig from SSHTerminalContainer (username=" << m_deviceConfig.username << ", address=" << m_deviceConfig.address << ")");
         }
-    }
-    
-    // Update our device config from the active thread (critical for direct connections / oc ssh)
-    if (activeThread) {
-        m_deviceConfig = activeThread->GetDeviceConfig();
-        SSH_LOG("ConnectInfo::ShowFileTransferDialog: updated m_deviceConfig from active TerminalThread (username=" << m_deviceConfig.username << ", address=" << m_deviceConfig.address << ")");
     }
     
     if (!m_fileTransferDialog) {
@@ -608,148 +602,66 @@ void ConnectInfo::ShowFileTransferDialog() {
 
 
 void ConnectInfo::Connect() {
-
-    if (m_terminalThread) {
-
-        if (m_terminalThread->Run() != wxTHREAD_NO_ERROR) {
-
-            SSH_LOG("ConnectInfo: Failed to start TerminalThread");
-
-        } else {
-
-            SSH_LOG("ConnectInfo: TerminalThread started");
-
+    if (!m_isLocalTerminal) {
+        TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+        if (panel && panel->GetTerminalContainer()) {
+            auto sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
+            if (sshContainer) {
+                sshContainer->Connect();
+                SSH_LOG("ConnectInfo: SSHTerminalContainer Connect() called");
+            }
         }
-
     }
-
 }
 
 
 
 void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
-
     auto t0 = std::chrono::steady_clock::now();
 
+    if (!m_termCanvas) return;
 
-
-    // Get the appropriate thread based on terminal type
+    TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
+    ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
+    if (!container) {
+        SSH_LOG("OnTerminalDamage: m_termCanvas is valid but container is null");
+        return;
+    }
 
     ScreenBuffer local_buffer;
-    bool has_buffer = false;
-
-    if (m_isLocalTerminal) {
-
-        if (!m_termCanvas || !m_localTerminalThread) {
-
-            SSH_LOG("OnTerminalDamage: m_termCanvas or m_localTerminalThread is null");
-
-            return;
-
-        }
-
-        m_localTerminalThread->CopyFrontBuffer(local_buffer);
-        has_buffer = true;
-
-    } else {
-
-        if (!m_termCanvas || !m_terminalThread) {
-
-            SSH_LOG("OnTerminalDamage: m_termCanvas or m_terminalThread is null");
-
-            return;
-
-        }
-
-        m_terminalThread->CopyFrontBuffer(local_buffer);
-        has_buffer = true;
-
-    }
-
-
-
-    if (!has_buffer) {
-
-        SSH_LOG("OnTerminalDamage: buffer is null");
-
-        return;
-
-    }
-
-
-
-    // SSH_LOG("OnTerminalDamage: buffer rows=" << local_buffer.rows << ", cols=" << local_buffer.cols << ", cursor=" << local_buffer.cursor_row << "," << local_buffer.cursor_col);
-
-
+    container->CopyFrontBuffer(local_buffer);
 
     // Convert entire buffer to CellInstance vector
-
     std::vector<CellInstance> instances;
-
     for (int row = 0; row < local_buffer.rows; row++) {
-
         for (int col = 0; col < local_buffer.cols; col++) {
-
             CellInstance cell = local_buffer.cells[row][col];
-
             cell.cell_x = (float)col;
-
             cell.cell_y = (float)row;
-
             instances.push_back(cell);
-
         }
-
     }
-
-
-
-    // SSH_LOG("OnTerminalDamage: created " << instances.size() << " cell instances");
-
-
 
     m_termCanvas->ClearScreenData();
-
     m_termCanvas->UpdateScreenData(instances);
 
-
-
-    // Get alternate screen state and scroll offset from appropriate thread
-
-    bool inAltScreen = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->IsInAlternateScreen() : false) : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
-
-    int scrollOffset = m_isLocalTerminal ? (m_localTerminalThread ? m_localTerminalThread->GetScrollOffset() : 0) : (m_terminalThread ? m_terminalThread->GetScrollOffset() : 0);
-
+    bool inAltScreen = container->IsInAlternateScreen();
+    int scrollOffset = container->GetScrollOffset();
     m_termCanvas->SetCursorPosition(local_buffer.cursor_row, local_buffer.cursor_col, inAltScreen, scrollOffset);
 
-    
-
     // Set cursor visibility based on event
-
     TerminalDamageEvent* damageEvent = dynamic_cast<TerminalDamageEvent*>(&event);
-
     if (damageEvent) {
-
         m_termCanvas->SetCursorVisible(damageEvent->GetCursorVisible());
-
     }
-
-    
 
     m_termCanvas->Refresh();
 
-    
-
     auto t1 = std::chrono::steady_clock::now();
-
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-
     if (ms > 5) {
-
         SSH_LOG("PROFILE: ConnectInfo::OnTerminalDamage took " << ms << "ms");
-
     }
-
 }
 
 
@@ -804,53 +716,14 @@ void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
 
         
 
-        // Check if file transfer thread exists and is running
-
-        if (!m_fileTransferThread || !m_fileTransferThread->IsRunning()) {
-
-            // Create new thread
-
-            if (m_fileTransferThread) {
-
-                delete m_fileTransferThread;
-
-            }
-
-            m_fileTransferThread = new FileTransferThread(this, m_deviceConfig);
-
-            if (m_fileTransferThread->Run() != wxTHREAD_NO_ERROR) {
-
-                SSH_LOG("Failed to start FileTransferThread");
-
-                delete m_fileTransferThread;
-
-                m_fileTransferThread = nullptr;
-
-                return;
-
-            }
-
-            SSH_LOG("FileTransferThread started for device: " << deviceId);
-
-        }
-
-        
-
-        // Parse task and add to thread
-
+        // Parse task and queue it asynchronously
         FileTransferTask task = FileTransferTask::fromJson(j);
-
         task.status = "pending";
-
         task.progress = 0;
-
         task.result = "";
 
-        
-
-        m_fileTransferThread->AddTask(task);
-
-        SSH_LOG("Task added to queue: " << task.id);
+        AsynchronousSFTPTask::QueueTransferTask(this, m_deviceConfig, task);
+        SSH_LOG("Task queued asynchronously: " << task.id);
 
         
 
@@ -1335,11 +1208,11 @@ void ConnectInfo::HandleSplit(wxSplitMode mode, TerminalPanel* sourcePanel) {
 
 
 
-void ConnectInfo::SwitchToSSH(TerminalThread* sshThread, const DeviceConfig& deviceConfig) {
+void ConnectInfo::SwitchToSSH(const DeviceConfig& deviceConfig) {
     SSH_LOG("ConnectInfo::SwitchToSSH called");
     m_isLocalTerminal = false;
     m_localTerminalThread = nullptr;
-    m_terminalThread = sshThread;
+    m_terminalThread = nullptr;
     m_deviceConfig = deviceConfig;
 
     // Refresh the tab layout
