@@ -2,9 +2,6 @@
 #include "TermGLCanvas.h"
 #include <iostream>
 
-wxDEFINE_EVENT(wxEVT_TERMINAL_DAMAGE, wxThreadEvent);
-wxDEFINE_EVENT(wxEVT_TERMINAL_EXIT, wxThreadEvent);
-
 TerminalThread::TerminalThread(EventProxyPtr event_proxy, int rows, int cols, const DeviceConfig& config)
     : wxThread(wxTHREAD_JOINABLE),
       m_loop(),

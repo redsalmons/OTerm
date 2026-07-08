@@ -27,8 +27,6 @@
 
 
 
-class LocalTerminalThread;
-
 class TerminalPanel;
 
 class TerminalThread;
@@ -57,14 +55,6 @@ public:
 
 
 
-    // Convert local terminal to SSH terminal
-
-    void ConvertToSSH(const std::string& username, const std::string& address, int port = 22);
-
-    void ConvertToSSH(const DeviceConfig& device);
-
-
-
     // Stop terminal threads (called before window destruction to avoid hanging)
 
     void StopThreads();
@@ -73,9 +63,6 @@ public:
 
     // Reinitialize OpenGL context after reparent
     void ReinitializeGLContext();
-    
-    // Get local terminal thread
-    void* GetLocalTerminalThread() const { return nullptr; }
 
 
 
@@ -256,8 +243,6 @@ public:
 
 
     // Terminal threads
-    void* m_localTerminalThread;
-    TerminalThread* m_terminalThread;
     bool m_ownsThreads; // Track if we created and own the threads
     bool m_threadsStopped; // Track if StopThreads has been called
     DeviceConfig m_deviceConfig;

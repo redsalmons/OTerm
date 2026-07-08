@@ -67,14 +67,14 @@ public:
     // Convert local terminal to SSH terminal
     void ConvertToSSH(const DeviceConfig& device);
 
+    // Update canvas from terminal (public for event-driven callbacks)
+    void UpdateCanvasFromTerminal();
+
 private:
     void OnClosePanel(wxCommandEvent& event);
-    void OnTerminalDamage(wxThreadEvent& event);
     void OnSize(wxSizeEvent& event);
     void OnKeyDown(wxKeyEvent& event);
 
-    void UpdateCanvasFromTerminal();
-    
     std::unique_ptr<ITerminalContainer> m_terminalContainer;
     TerminalThread* m_sshThread = nullptr;
     TermGLCanvas* m_canvas;

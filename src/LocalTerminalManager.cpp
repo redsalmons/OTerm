@@ -256,11 +256,9 @@ void LocalTerminalManager::Stop() {
         m_hInPipeWrite = nullptr;
     }
 
-    // Give the process a brief chance to exit on its own
+    // Directly terminate the process
     if (m_hProcess) {
-        WaitForSingleObject((HANDLE)m_hProcess, 500);
         TerminateProcess((HANDLE)m_hProcess, 0);
-        WaitForSingleObject((HANDLE)m_hProcess, 1000);
         CloseHandle((HANDLE)m_hProcess);
         m_hProcess = nullptr;
     }
@@ -288,22 +286,10 @@ void LocalTerminalManager::Stop() {
     }
 
     if (m_childPid > 0) {
-        kill(m_childPid, SIGTERM);
-        
-        // Wait with a short timeout using WNOHANG to prevent blocking the UI thread
-        int status = 0;
-        pid_t res = waitpid(m_childPid, &status, WNOHANG);
-        if (res == 0) {
-            // Give it 50ms to exit gracefully
-            usleep(50000);
-            res = waitpid(m_childPid, &status, WNOHANG);
-            if (res == 0) {
-                // If still running, force kill
-                kill(m_childPid, SIGKILL);
-                waitpid(m_childPid, &status, 0);
-            }
-        }
+        // Directly kill the child process
+        kill(m_childPid, SIGKILL);
         m_childPid = -1;
+        // Child process will be reaped by global SIGCHLD handler
     }
 #endif
 

@@ -83,8 +83,6 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
       m_imeInputBox(nullptr),
 
       m_imeInputBoxVisible(false),
-      m_localTerminalThread(nullptr),
-      m_terminalThread(nullptr),
       m_ownsThreads(false),
       m_threadsStopped(false),
       m_wheelRotationAccumulator(0) {
@@ -219,7 +217,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
 void TermGLCanvas::StopThreads() {
     auto startTime = std::chrono::steady_clock::now();
-    SSH_LOG("TermGLCanvas::StopThreads called");
+    SSH_LOG("TermGLCanvas::StopThreads called (no-op - threads managed by TerminalPanel)");
     
     // Skip if already stopped
     if (m_threadsStopped) {
@@ -227,21 +225,6 @@ void TermGLCanvas::StopThreads() {
         return;
     }
     
-    if (m_ownsThreads) {
-        if (m_terminalThread) {
-            auto sshStartTime = std::chrono::steady_clock::now();
-            SSH_LOG("Stopping SSH terminal thread");
-            m_terminalThread->SetShuttingDown();
-            SSH_LOG("Waiting for SSH terminal thread to exit");
-            m_terminalThread->Wait();
-            auto sshDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - sshStartTime).count();
-            SSH_LOG("SSH terminal thread exited after " << sshDuration << "ms, deleting");
-            delete m_terminalThread;
-        }
-        m_ownsThreads = false;
-    }
-    
-    m_terminalThread = nullptr;
     m_threadsStopped = true;
     auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
     SSH_LOG("TermGLCanvas::StopThreads completed, total time: " << totalDuration << "ms");
@@ -267,7 +250,7 @@ void TermGLCanvas::ReinitializeGLContext() {
 
 TermGLCanvas::~TermGLCanvas() {
 
-    SSH_LOG("TermGLCanvas destructor start, this=" << this << ", m_ownsThreads=" << m_ownsThreads << ", m_threadsStopped=" << m_threadsStopped << ", m_localTerminalThread=" << m_localTerminalThread << ", m_terminalThread=" << m_terminalThread);
+    SSH_LOG("TermGLCanvas destructor start, this=" << this << ", m_ownsThreads=" << m_ownsThreads << ", m_threadsStopped=" << m_threadsStopped);
 
     // Only call StopThreads if not already called
     if (!m_threadsStopped) {
@@ -289,53 +272,6 @@ TermGLCanvas::~TermGLCanvas() {
     }
 
     SSH_LOG("TermGLCanvas destructor end, this=" << this);
-
-}
-
-
-
-void TermGLCanvas::ConvertToSSH(const std::string& username, const std::string& address, int port) {
-
-    DeviceConfig device;
-
-    device.username = wxString::FromUTF8(username.c_str());
-
-    device.address = wxString::FromUTF8(address.c_str());
-
-    device.port = port;
-
-    ConvertToSSH(device);
-
-}
-
-
-
-void TermGLCanvas::ConvertToSSH(const DeviceConfig& device) {
-    // Stop local terminal (no-op since single-threaded)
-
-    // Update device config
-
-    m_deviceConfig = device;
-
-
-
-    // Create SSH terminal thread
-
-    int initialRows = (m_rows_count > 0) ? m_rows_count : 24;
-    int initialCols = (m_cols_count > 0) ? m_cols_count : 80;
-    m_terminalThread = new TerminalThread(nullptr, initialRows, initialCols, m_deviceConfig);
-
-    m_terminalThread->Run();
-
-    m_terminalThread->Connect();
-
-
-
-    // Clear screen
-
-    ClearScreenData();
-
-    Refresh();
 
 }
 

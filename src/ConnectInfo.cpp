@@ -12,8 +12,6 @@
 
 #include "TerminalThread.h"
 
-#include "LocalTerminalThread.h"
-
 #include "SSHManager.h"
 
 #include "FileTransferTask.h"
@@ -43,7 +41,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
     : wxPanel(parent, wxID_ANY), m_contentPanel(contentPanel), m_deviceConfig(deviceConfig),
 
-      m_isActive(false), m_isHovered(false), m_isLocalTerminal(isLocalTerminal), m_terminalThread(nullptr), m_localTerminalThread(nullptr), m_termCanvas(nullptr),
+      m_isActive(false), m_isHovered(false), m_isLocalTerminal(isLocalTerminal), m_terminalThread(nullptr), m_termCanvas(nullptr),
 
       m_fileTransferDialog(nullptr), m_prevRows(0), m_prevCols(0), m_cachedWidth(0)
 
@@ -394,12 +392,6 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
 
 
-    // Bind terminal-specific events BEFORE creating threads so handlers are ready
-
-    Bind(wxEVT_TERMINAL_EXIT, &ConnectInfo::OnTerminalExit, this);
-
-
-
     // Set scroll callback to scroll vterm history (shared for both terminal types)
 
     if (m_termCanvas) {
@@ -481,17 +473,14 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         if (panel) {
             // Use the panel's EventProxy
             m_eventProxy = panel->GetEventProxy();
-            m_localTerminalThread = nullptr;
             SSH_LOG("ConnectInfo: Using EventProxy from TerminalPanel");
         } else {
             // Fallback for non-TerminalPanel content (should not happen in current architecture)
-            m_localTerminalThread = nullptr;
             m_eventProxy = std::make_shared<EventProxy>();
             m_eventProxy->SetTarget(m_termCanvas);
             m_eventProxy->SetDamageCallback([this](int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
                 if (m_termCanvas) {
-                    wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
-                    wxQueueEvent(m_termCanvas, evt.Clone());
+                    m_termCanvas->Refresh();
                 }
             });
         }
@@ -529,13 +518,11 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
         m_eventProxy->SetDamageCallback([this](int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
             TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
             if (panel) {
-                // Send to panel
-                wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
-                wxQueueEvent(panel, evt.Clone());
+                // Directly update panel
+                panel->UpdateCanvasFromTerminal();
             } else if (m_termCanvas) {
                 // Fallback to canvas
-                wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
-                wxQueueEvent(m_termCanvas, evt.Clone());
+                m_termCanvas->Refresh();
             }
         });
 
@@ -615,64 +602,6 @@ void ConnectInfo::Connect() {
 }
 
 
-
-void ConnectInfo::OnTerminalDamage(wxThreadEvent& event) {
-    auto t0 = std::chrono::steady_clock::now();
-
-    if (!m_termCanvas) return;
-
-    TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
-    ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
-    if (!container) {
-        SSH_LOG("OnTerminalDamage: m_termCanvas is valid but container is null");
-        return;
-    }
-
-    ScreenBuffer local_buffer;
-    container->CopyFrontBuffer(local_buffer);
-
-    // Convert entire buffer to CellInstance vector
-    std::vector<CellInstance> instances;
-    for (int row = 0; row < local_buffer.rows; row++) {
-        for (int col = 0; col < local_buffer.cols; col++) {
-            CellInstance cell = local_buffer.cells[row][col];
-            cell.cell_x = (float)col;
-            cell.cell_y = (float)row;
-            instances.push_back(cell);
-        }
-    }
-
-    m_termCanvas->ClearScreenData();
-    m_termCanvas->UpdateScreenData(instances);
-
-    bool inAltScreen = container->IsInAlternateScreen();
-    int scrollOffset = container->GetScrollOffset();
-    m_termCanvas->SetCursorPosition(local_buffer.cursor_row, local_buffer.cursor_col, inAltScreen, scrollOffset);
-
-    // Set cursor visibility based on event
-    TerminalDamageEvent* damageEvent = dynamic_cast<TerminalDamageEvent*>(&event);
-    if (damageEvent) {
-        m_termCanvas->SetCursorVisible(damageEvent->GetCursorVisible());
-    }
-
-    m_termCanvas->Refresh();
-
-    auto t1 = std::chrono::steady_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-    if (ms > 5) {
-        SSH_LOG("PROFILE: ConnectInfo::OnTerminalDamage took " << ms << "ms");
-    }
-}
-
-
-
-void ConnectInfo::OnTerminalExit(wxThreadEvent& event) {
-
-    SSH_LOG("ConnectInfo: TerminalThread exited");
-
-    // Thread cleanup is handled by wxThread
-
-}
 
 
 
@@ -1211,7 +1140,6 @@ void ConnectInfo::HandleSplit(wxSplitMode mode, TerminalPanel* sourcePanel) {
 void ConnectInfo::SwitchToSSH(const DeviceConfig& deviceConfig) {
     SSH_LOG("ConnectInfo::SwitchToSSH called");
     m_isLocalTerminal = false;
-    m_localTerminalThread = nullptr;
     m_terminalThread = nullptr;
     m_deviceConfig = deviceConfig;
 
@@ -1231,7 +1159,6 @@ ConnectInfo::~ConnectInfo() {
     m_label = nullptr;
     m_closeButton = nullptr;
     m_terminalThread = nullptr;
-    m_localTerminalThread = nullptr;
 
 }
 

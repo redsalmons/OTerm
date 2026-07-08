@@ -2,7 +2,6 @@
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
 #include "MasterPasswordDialog.h"
-#include "LocalTerminalThread.h"
 #include <iostream>
 #include <wx/simplebook.h>
 #include "ConnectionDialog.h"
@@ -18,6 +17,21 @@
 #include <sstream>
 #include <fstream>
 #include "ConnectInfo.h"
+
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <signal.h>
+
+// Global SIGCHLD handler to reap zombie child processes
+void sigchld_handler(int sig) {
+    int status;
+    pid_t pid;
+    // Reap all zombie child processes
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        // Child process reaped, no action needed
+    }
+}
+#endif
 
 int AppWindow::s_globalTabCounter = 0;
 #include "TerminalPanel.h"
@@ -144,6 +158,15 @@ bool MyApp::OnInit() {
 #endif
 
         wxLog::SetActiveTarget(new wxLogFileAndStderr((std::filesystem::temp_directory_path() / "oterm_wx.log").string()));
+
+#ifndef _WIN32
+        // Register SIGCHLD handler to reap zombie child processes
+        struct sigaction sa;
+        sa.sa_handler = sigchld_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_NOCLDSTOP | SA_RESTART;
+        sigaction(SIGCHLD, &sa, nullptr);
+#endif
 
         // Set application name for proper config directory
         wxApp::SetAppName("OceanTerm");

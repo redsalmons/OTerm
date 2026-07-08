@@ -14,48 +14,6 @@
 #include "TermGLCanvas.h"
 #include "EventProxy.h"
 
-// Custom event for terminal damage notification
-wxDECLARE_EVENT(wxEVT_TERMINAL_DAMAGE, wxThreadEvent);
-wxDECLARE_EVENT(wxEVT_TERMINAL_EXIT, wxThreadEvent);
-
-class TerminalDamageEvent : public wxThreadEvent {
-public:
-    TerminalDamageEvent(int rows, int cols, int cursor_row, int cursor_col, int damage_start_row, int damage_end_row, int damage_start_col, int damage_end_col, bool cursor_visible = true)
-        : wxThreadEvent(wxEVT_TERMINAL_DAMAGE),
-          m_rows(rows), m_cols(cols),
-          m_cursor_row(cursor_row), m_cursor_col(cursor_col),
-          m_damage_start_row(damage_start_row), m_damage_end_row(damage_end_row),
-          m_damage_start_col(damage_start_col), m_damage_end_col(damage_end_col),
-          m_cursor_visible(cursor_visible) {
-        SetInt(rows);
-    }
-    
-    virtual wxEvent* Clone() const override {
-        return new TerminalDamageEvent(*this);
-    }
-    
-    int GetRows() const { return m_rows; }
-    int GetCols() const { return m_cols; }
-    int GetCursorRow() const { return m_cursor_row; }
-    int GetCursorCol() const { return m_cursor_col; }
-    int GetDamageStartRow() const { return m_damage_start_row; }
-    int GetDamageEndRow() const { return m_damage_end_row; }
-    int GetDamageStartCol() const { return m_damage_start_col; }
-    int GetDamageEndCol() const { return m_damage_end_col; }
-    bool GetCursorVisible() const { return m_cursor_visible; }
-    
-private:
-    int m_rows;
-    int m_cols;
-    int m_cursor_row;
-    int m_cursor_col;
-    int m_damage_start_row;
-    int m_damage_end_row;
-    int m_damage_start_col;
-    int m_damage_end_col;
-    bool m_cursor_visible;
-};
-
 // Worker thread for each SSH connection
 // Runs its own libuv event loop and manages SSH/VTerm independently
 class TerminalThread : public wxThread {

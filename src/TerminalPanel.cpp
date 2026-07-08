@@ -31,8 +31,6 @@ TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<ITerminalContaine
     // 设置最小尺寸，防止面板塌陷
     SetMinSize(wxSize(100, 100));
 
-    // 绑定终端损坏事件
-    Bind(wxEVT_TERMINAL_DAMAGE, &TerminalPanel::OnTerminalDamage, this);
     Bind(wxEVT_SIZE, &TerminalPanel::OnSize, this);
     Bind(wxEVT_KEY_DOWN, &TerminalPanel::OnKeyDown, this);
     Bind(wxEVT_COMMAND_MENU_SELECTED, &TerminalPanel::OnFileTransferRequest, this);
@@ -62,9 +60,6 @@ TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<ITerminalContaine
 TerminalPanel::~TerminalPanel() {
     SPLIT_LOG("TerminalPanel destructor called");
     
-    // Unbind events to prevent crash
-    Unbind(wxEVT_TERMINAL_DAMAGE, &TerminalPanel::OnTerminalDamage, this);
-    
     // Clear EventProxy target to prevent callbacks to destroyed windows
     if (m_eventProxy) {
         m_eventProxy->SetTarget(nullptr);
@@ -90,7 +85,6 @@ void TerminalPanel::Shutdown() {
     SPLIT_LOG("TerminalPanel::Shutdown called");
     
     // Unbind events immediately to stop processing any new messages
-    Unbind(wxEVT_TERMINAL_DAMAGE, &TerminalPanel::OnTerminalDamage, this);
     Unbind(wxEVT_SIZE, &TerminalPanel::OnSize, this);
     
     // Stop local terminal thread
@@ -215,20 +209,10 @@ void TerminalPanel::SetupCanvasConnection() {
     m_eventProxy->SetTarget(m_canvas);
     SPLIT_LOG("EventProxy target set to canvas");
     
-    // Ensure canvas has reference to the thread
-    if (m_sshThread) {
-        m_canvas->m_terminalThread = m_sshThread;
-        SPLIT_LOG("Set SSH terminal thread pointer on canvas");
-    } else if (m_terminalContainer) {
-        m_canvas->m_localTerminalThread = nullptr;
-        SPLIT_LOG("Set local terminal thread pointer on canvas (null because single-threaded)");
-    }
-    
     // Set damage callback to trigger canvas refresh
     m_eventProxy->SetDamageCallback([this](int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
-        // Trigger OnTerminalDamage on this panel
-        wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
-        wxQueueEvent(this, evt.Clone());
+        // Directly call UpdateCanvasFromTerminal for event-driven architecture
+        UpdateCanvasFromTerminal();
     });
     SPLIT_LOG("Damage callback set");
     
@@ -480,16 +464,6 @@ void TerminalPanel::OnSize(wxSizeEvent& event) {
     event.Skip();
 }
 
-void TerminalPanel::OnTerminalDamage(wxThreadEvent& event) {
-    SPLIT_LOG("OnTerminalDamage called");
-    // Check if panel is being destroyed to prevent use-after-free
-    if (IsBeingDeleted()) {
-        SPLIT_LOG("OnTerminalDamage: panel is being deleted, ignoring event");
-        return;
-    }
-    UpdateCanvasFromTerminal();
-}
-
 void TerminalPanel::UpdateCanvasFromTerminal() {
     if (!m_canvas) {
         return;
@@ -629,12 +603,6 @@ void TerminalPanel::RestartAsLocalTerminal() {
         m_terminalContainer->StopTerminal();
         m_terminalContainer->ClearUIHandler();
         m_terminalContainer.reset();
-    }
-    
-    // Clear canvas thread pointers so old thread is not referenced
-    if (m_canvas) {
-        m_canvas->m_terminalThread = nullptr;
-        m_canvas->m_localTerminalThread = nullptr;
     }
     
     // Clear command input buffer

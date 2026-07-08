@@ -1,6 +1,7 @@
 #include "SSHTerminalContainer.h"
 #include "SSHManager.h"
 #include "TerminalThread.h"
+#include "TerminalPanel.h"
 #include <iostream>
 
 SSHTerminalContainer::SSHTerminalContainer(int rows, int cols, const DeviceConfig& config)
@@ -27,12 +28,19 @@ SSHTerminalContainer::SSHTerminalContainer(int rows, int cols, const DeviceConfi
         std::cerr << "SSHTerminalContainer: Failed to initialize VTermManager" << std::endl;
     }
 
+    // Set damage callback for VTerm updates
+    m_vtermManager.set_damage_callback([this](VTermRect rect, const std::vector<std::vector<VTermManager::TerminalCell>>& cells) {
+        m_hasDamage = true;
+    });
+
     // Set up timer event bindings
     m_handshakeTimer.SetOwner(this, HANDSHAKE_TIMER_ID);
     m_keepAliveTimer.SetOwner(this, KEEPALIVE_TIMER_ID);
+    m_readTimer.SetOwner(this, READ_TIMER_ID);
 
     Bind(wxEVT_TIMER, &SSHTerminalContainer::OnHandshakeTimer, this, HANDSHAKE_TIMER_ID);
     Bind(wxEVT_TIMER, &SSHTerminalContainer::OnKeepAliveTimer, this, KEEPALIVE_TIMER_ID);
+    Bind(wxEVT_TIMER, &SSHTerminalContainer::OnReadTimer, this, READ_TIMER_ID);
     
     SSH_LOG("SSHTerminalContainer created for " << config.address);
 }
@@ -300,6 +308,12 @@ void SSHTerminalContainer::OnKeepAliveTimer(wxTimerEvent& event) {
     }
 }
 
+void SSHTerminalContainer::OnReadTimer(wxTimerEvent& event) {
+    if (m_sshState == SSH_READY && m_sshChannel) {
+        ProcessSSHData();
+    }
+}
+
 void SSHTerminalContainer::ContinueHandshake() {
     if (!m_socket || !m_sshSession) return;
 
@@ -439,6 +453,9 @@ void SSHTerminalContainer::RequestShell() {
         libssh2_keepalive_config(m_sshSession, 1, 10);
         m_keepAliveTimer.Start(10000);
 
+        // Start read timer for polling SSH data (15ms intervals)
+        m_readTimer.Start(15);
+
         // Bind normal socket input and output events for regular SSH operations
         m_socket->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
@@ -497,6 +514,7 @@ void SSHTerminalContainer::SendStatusMessage(const std::string& msg) {
 void SSHTerminalContainer::Cleanup() {
     m_handshakeTimer.Stop();
     m_keepAliveTimer.Stop();
+    m_readTimer.Stop();
 
     if (m_sshChannel) {
         libssh2_channel_free(m_sshChannel);
@@ -575,8 +593,14 @@ void SSHTerminalContainer::UpdateBackBuffer() {
 
 void SSHTerminalContainer::TriggerDamage() {
     if (m_uiHandler) {
-        wxThreadEvent evt(wxEVT_TERMINAL_DAMAGE);
-        wxQueueEvent(m_uiHandler, evt.Clone());
+        // Try to call UpdateCanvasFromTerminal if it's a TerminalPanel
+        TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_uiHandler);
+        if (panel) {
+            panel->UpdateCanvasFromTerminal();
+        } else {
+            // Fallback to Refresh
+            m_uiHandler->Refresh();
+        }
     }
 }
 

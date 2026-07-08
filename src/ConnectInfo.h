@@ -22,8 +22,6 @@ class TermGLCanvas;
 
 class TerminalThread;
 
-class LocalTerminalThread;
-
 class TerminalPanel;
 
 class InfiniteSplitter;
@@ -72,8 +70,6 @@ public:
 
     TerminalThread* GetTerminalThread() const { return m_terminalThread; }
 
-    LocalTerminalThread* GetLocalTerminalThread() const { return m_localTerminalThread; }
-
     void SwitchToSSH(const DeviceConfig& deviceConfig);
 
 
@@ -118,10 +114,6 @@ private:
 
     void OnSize(wxSizeEvent& event);
 
-    void OnTerminalDamage(wxThreadEvent& event);
-
-    void OnTerminalExit(wxThreadEvent& event);
-
     void OnFileTransferRequest(wxCommandEvent& event);
 
     void OnFileTransferProgress(wxCommandEvent& event);
@@ -149,8 +141,6 @@ private:
 
 
     TerminalThread* m_terminalThread;
-
-    LocalTerminalThread* m_localTerminalThread;
 
     TermGLCanvas* m_termCanvas;
 
