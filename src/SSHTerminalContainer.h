@@ -7,12 +7,19 @@
 #include <libssh2.h>
 #include <string>
 #include <mutex>
+#ifndef _WIN32
+#include <wx/evtloopsrc.h>
+#endif
 #include "ITerminalContainer.h"
 #include "DeviceConfig.h"
 #include "VTermManager.h"
 #include "ScreenBuffer.h"
 
-class SSHTerminalContainer : public wxEvtHandler, public ITerminalContainer {
+class SSHTerminalContainer : public wxEvtHandler, public ITerminalContainer
+#ifndef _WIN32
+                           , public wxEventLoopSourceHandler
+#endif
+{
 public:
     enum SSHState {
         SSH_DISCONNECTED,
@@ -49,10 +56,18 @@ public:
     SSHState GetState() const { return m_sshState; }
     DeviceConfig GetDeviceConfig() const { return m_deviceConfig; }
 
+#ifndef _WIN32
+    // wxEventLoopSourceHandler overrides
+    void OnReadWaiting() override;
+    void OnWriteWaiting() override;
+    void OnExceptionWaiting() override;
+#endif
+
 private:
     // Socket and Timer Event Handlers
     void OnSocketEvent(wxSocketEvent& event);
     void OnKeepAliveTimer(wxTimerEvent& event);
+    void DriveStateMachine();
 
     // SSH Connection Step Handlers
     void ContinueHandshake();
@@ -61,7 +76,6 @@ private:
     void PerformAuthentication();
     void OpenSSHChannel();
     void RequestPTY();
-    void RequestLocale();
     void RequestShell();
     void ProcessSSHData();
     void SendStatusMessage(const std::string& msg);
@@ -98,6 +112,10 @@ private:
     int m_authRetryCount;
     std::string m_pendingInput;
     bool m_hasDamage;
+
+#ifndef _WIN32
+    wxEventLoopSource* m_fdSource = nullptr;
+#endif
 
     // Socket Event Identifier
     static const int SOCKET_ID = 10001;

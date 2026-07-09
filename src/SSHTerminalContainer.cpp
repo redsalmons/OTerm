@@ -212,6 +212,15 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
 
             libssh2_session_set_blocking(m_sshSession, 0); // Non-blocking
             
+#ifndef _WIN32
+            // Turn off wxSocket notifications on Unix; we will use the raw FD source
+            m_socket->Notify(false);
+            wxEventLoopBase* loop = wxEventLoop::GetActive();
+            if (loop && m_socket->GetSocket() >= 0) {
+                m_fdSource = loop->AddSourceForFD(m_socket->GetSocket(), this, wxEVENT_SOURCE_INPUT | wxEVENT_SOURCE_OUTPUT);
+            }
+#endif
+
             ContinueHandshake();
             break;
         }
@@ -249,6 +258,15 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
                 case SSH_AUTHENTICATING:
                     PerformAuthentication();
                     break;
+                case SSH_CHANNEL_OPENING:
+                    OpenSSHChannel();
+                    break;
+                case SSH_PTY_REQUESTING:
+                    RequestPTY();
+                    break;
+                case SSH_SHELL_REQUESTING:
+                    RequestShell();
+                    break;
                 default:
                     break;
             }
@@ -260,6 +278,47 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
             Cleanup();
             break;
         }
+        default:
+            break;
+    }
+}
+
+#ifndef _WIN32
+void SSHTerminalContainer::OnReadWaiting() {
+    DriveStateMachine();
+}
+
+void SSHTerminalContainer::OnWriteWaiting() {
+    DriveStateMachine();
+}
+
+void SSHTerminalContainer::OnExceptionWaiting() {
+    SSH_ERR("Socket error or connection lost (exception event)");
+    SendStatusMessage("\r\nConnection lost.\r\n");
+    Cleanup();
+}
+#endif
+
+void SSHTerminalContainer::DriveStateMachine() {
+    switch (m_sshState) {
+        case SSH_HANDSHAKING:
+            ContinueHandshake();
+            break;
+        case SSH_AUTHENTICATING:
+            PerformAuthentication();
+            break;
+        case SSH_CHANNEL_OPENING:
+            OpenSSHChannel();
+            break;
+        case SSH_PTY_REQUESTING:
+            RequestPTY();
+            break;
+        case SSH_SHELL_REQUESTING:
+            RequestShell();
+            break;
+        case SSH_READY:
+            ProcessSSHData();
+            break;
         default:
             break;
     }
@@ -375,7 +434,7 @@ void SSHTerminalContainer::RequestPTY() {
     if (rc == 0) {
         SSH_LOG("PTY granted.");
         m_sshState = SSH_SHELL_REQUESTING;
-        RequestLocale();
+        RequestShell();
     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
         HandleDirections();
     } else {
@@ -383,13 +442,6 @@ void SSHTerminalContainer::RequestPTY() {
         SendStatusMessage("\r\nPTY request failed.\r\n");
         Cleanup();
     }
-}
-
-void SSHTerminalContainer::RequestLocale() {
-    // Proceed directly to shell, setting env variables is best-effort and often rejected
-    libssh2_channel_setenv(m_sshChannel, "LANG", "zh_CN.UTF-8");
-    libssh2_channel_setenv(m_sshChannel, "LC_ALL", "zh_CN.UTF-8");
-    RequestShell();
 }
 
 void SSHTerminalContainer::RequestShell() {
@@ -467,6 +519,13 @@ void SSHTerminalContainer::SendStatusMessage(const std::string& msg) {
 void SSHTerminalContainer::Cleanup() {
     m_keepAliveTimer.Stop();
 
+#ifndef _WIN32
+    if (m_fdSource) {
+        delete m_fdSource;
+        m_fdSource = nullptr;
+    }
+#endif
+
     if (m_sshChannel) {
         libssh2_channel_free(m_sshChannel);
         m_sshChannel = nullptr;
@@ -490,6 +549,38 @@ void SSHTerminalContainer::Cleanup() {
 
 void SSHTerminalContainer::HandleDirections() {
     if (!m_socket || !m_sshSession) return;
+
+#ifndef _WIN32
+    if (m_fdSource) {
+        int sockfd = m_socket->GetSocket();
+        if (sockfd >= 0) {
+            int directions = libssh2_session_block_directions(m_sshSession);
+            int flags = 0;
+            if (directions & LIBSSH2_SESSION_BLOCK_INBOUND) {
+                flags |= wxEVENT_SOURCE_INPUT;
+            }
+            if (directions & LIBSSH2_SESSION_BLOCK_OUTBOUND) {
+                flags |= wxEVENT_SOURCE_OUTPUT;
+            }
+
+            // Default to INPUT if no direction is specified
+            if (flags == 0) {
+                flags |= wxEVENT_SOURCE_INPUT;
+            }
+
+            if (m_fdSource) {
+                delete m_fdSource;
+                m_fdSource = nullptr;
+            }
+
+            wxEventLoopBase* loop = wxEventLoop::GetActive();
+            if (loop) {
+                m_fdSource = loop->AddSourceForFD(sockfd, this, flags);
+            }
+            return;
+        }
+    }
+#endif
 
     int directions = libssh2_session_block_directions(m_sshSession);
     int flags = wxSOCKET_LOST_FLAG;
