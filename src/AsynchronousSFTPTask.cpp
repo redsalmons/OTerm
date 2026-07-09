@@ -77,6 +77,11 @@ void AsynchronousSFTPTask::QueueTransferTask(wxEvtHandler* handler, const Device
 void AsynchronousSFTPTask::Start() {
     m_state = SFTPState::CONNECTING;
     m_socket = new wxSocketClient(wxSOCKET_NOWAIT);
+    m_socket->SetEventHandler(*this, SOCKET_ID);
+    m_socket->SetNotify(wxSOCKET_CONNECTION_FLAG | wxSOCKET_LOST_FLAG);
+    m_socket->Notify(true);
+    
+    Bind(wxEVT_SOCKET, &AsynchronousSFTPTask::OnSocketEvent, this, SOCKET_ID);
     
     wxIPaddress* addr;
     wxIPV4address addr4;
@@ -102,8 +107,10 @@ void AsynchronousSFTPTask::Start() {
         return;
     }
     
-    // Start timer for polling loop (15ms tick)
+#ifdef _WIN32
+    // Start timer for polling loop (15ms tick) on Windows
     m_timer.Start(15);
+#endif
 }
 
 void AsynchronousSFTPTask::Cancel() {
@@ -122,6 +129,82 @@ void AsynchronousSFTPTask::OnTimer(wxTimerEvent& event) {
     DoStateMachineStep();
 }
 
+void AsynchronousSFTPTask::OnSocketEvent(wxSocketEvent& event) {
+    if (!m_socket) return;
+    
+    switch (event.GetSocketEvent()) {
+        case wxSOCKET_CONNECTION: {
+            m_state = SFTPState::HANDSHAKE;
+#ifndef _WIN32
+            // Move to wxEventLoopSourceHandler for pure OS events
+            m_socket->Notify(false);
+            wxEventLoopBase* loop = wxEventLoop::GetActive();
+            if (loop && m_socket->GetSocket() >= 0) {
+                m_fdSource = loop->AddSourceForFD(m_socket->GetSocket(), this, wxEVENT_SOURCE_INPUT | wxEVENT_SOURCE_OUTPUT);
+            }
+#else
+            m_timer.Start(15);
+#endif
+            DoStateMachineStep();
+            break;
+        }
+        case wxSOCKET_LOST: {
+            Fail("Connection lost unexpectedly");
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void AsynchronousSFTPTask::HandleDirections() {
+#ifndef _WIN32
+    if (m_fdSource) {
+        if (!m_socket || !m_sshSession) return;
+        int sockfd = m_socket->GetSocket();
+        if (sockfd < 0) return;
+
+        int directions = libssh2_session_block_directions(m_sshSession);
+        int flags = 0;
+        if (directions & LIBSSH2_SESSION_BLOCK_INBOUND) {
+            flags |= wxEVENT_SOURCE_INPUT;
+        }
+        if (directions & LIBSSH2_SESSION_BLOCK_OUTBOUND) {
+            flags |= wxEVENT_SOURCE_OUTPUT;
+        }
+
+        // Default to INPUT if no direction is specified
+        if (flags == 0) {
+            flags |= wxEVENT_SOURCE_INPUT;
+        }
+
+        if (m_fdSource) {
+            delete m_fdSource;
+            m_fdSource = nullptr;
+        }
+        
+        wxEventLoopBase* loop = wxEventLoop::GetActive();
+        if (loop) {
+            m_fdSource = loop->AddSourceForFD(sockfd, this, flags);
+        }
+    }
+#endif
+}
+
+#ifndef _WIN32
+void AsynchronousSFTPTask::OnReadWaiting() {
+    DoStateMachineStep();
+}
+
+void AsynchronousSFTPTask::OnWriteWaiting() {
+    DoStateMachineStep();
+}
+
+void AsynchronousSFTPTask::OnExceptionWaiting() {
+    Fail("Socket exception / connection lost");
+}
+#endif
+
 void AsynchronousSFTPTask::DoStateMachineStep() {
     if (IsFinished()) {
         m_timer.Stop();
@@ -132,8 +215,10 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
         case SFTPState::CONNECTING: {
             if (m_socket->IsConnected()) {
                 m_state = SFTPState::HANDSHAKE;
+                DoStateMachineStep();
             } else if (m_socket->WaitOnConnect(0, 0)) {
                 m_state = SFTPState::HANDSHAKE;
+                DoStateMachineStep();
             } else if (m_socket->Error()) {
                 Fail("Failed to connect to SSH server " + m_deviceConfig.address);
             }
@@ -146,8 +231,9 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
             int rc = libssh2_session_handshake(m_sshSession, sockfd);
             if (rc == 0) {
                 m_state = SFTPState::AUTHENTICATING;
+                DoStateMachineStep();
             } else if (rc == LIBSSH2_ERROR_EAGAIN) {
-                // Retry next tick
+                HandleDirections();
             } else {
                 Fail("SSH handshake failed: error " + std::to_string(rc));
             }
@@ -162,8 +248,9 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                 } else {
                     m_state = SFTPState::SFTP_INIT;
                 }
+                DoStateMachineStep();
             } else if (rc == LIBSSH2_ERROR_EAGAIN) {
-                // Retry next tick
+                HandleDirections();
             } else {
                 Fail("Authentication failed for user " + m_deviceConfig.username);
             }
@@ -174,10 +261,11 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
             m_sftpSession = libssh2_sftp_init(m_sshSession);
             if (m_sftpSession) {
                 m_state = SFTPState::OPEN_FILE;
+                DoStateMachineStep();
             } else {
                 int err = libssh2_session_last_errno(m_sshSession);
                 if (err == LIBSSH2_ERROR_EAGAIN) {
-                    // Retry
+                    HandleDirections();
                 } else {
                     Fail("SFTP initialization failed");
                 }
@@ -189,10 +277,11 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
             m_sshChannel = libssh2_channel_open_session(m_sshSession);
             if (m_sshChannel) {
                 m_state = SFTPState::EXEC_CMD;
+                DoStateMachineStep();
             } else {
                 int err = libssh2_session_last_errno(m_sshSession);
                 if (err == LIBSSH2_ERROR_EAGAIN) {
-                    // Retry
+                    HandleDirections();
                 } else {
                     Fail("Failed to open SSH session channel");
                 }
@@ -205,8 +294,9 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
             int rc = libssh2_channel_exec(m_sshChannel, cmd.c_str());
             if (rc == 0) {
                 m_state = SFTPState::READ_CMD;
+                DoStateMachineStep();
             } else if (rc == LIBSSH2_ERROR_EAGAIN) {
-                // Retry
+                HandleDirections();
             } else {
                 Fail("Failed to execute command: " + cmd);
             }
@@ -220,9 +310,11 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                 if (rc > 0) {
                     m_cmdOutput.append(buffer, rc);
                 } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    HandleDirections();
                     break; // wait for next tick
                 } else if (rc == 0) {
                     m_state = SFTPState::CLOSE_CHANNEL;
+                    DoStateMachineStep();
                     break;
                 } else {
                     Fail("Error reading command execution output");
@@ -238,6 +330,9 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                 libssh2_channel_free(m_sshChannel);
                 m_sshChannel = nullptr;
                 m_state = SFTPState::CLEANUP;
+                DoStateMachineStep();
+            } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                HandleDirections();
             }
             break;
         }
@@ -256,11 +351,12 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                         Fail("Failed to open local file for reading: " + m_task.local);
                     } else {
                         m_state = SFTPState::TRANSFERRING;
+                        DoStateMachineStep();
                     }
                 } else {
                     int err = libssh2_session_last_errno(m_sshSession);
                     if (err == LIBSSH2_ERROR_EAGAIN) {
-                        // Retry next tick
+                        HandleDirections();
                     } else {
                         Fail("Failed to open remote file for writing: " + m_task.remote);
                     }
@@ -276,11 +372,12 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                         Fail("Failed to open local file for writing: " + m_task.local);
                     } else {
                         m_state = SFTPState::TRANSFERRING;
+                        DoStateMachineStep();
                     }
                 } else {
                     int err = libssh2_session_last_errno(m_sshSession);
                     if (err == LIBSSH2_ERROR_EAGAIN) {
-                        // Retry next tick
+                        HandleDirections();
                     } else {
                         Fail("Failed to open remote file for reading: " + m_task.remote);
                     }
@@ -301,6 +398,7 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                         } else {
                             // EOF local file
                             m_state = SFTPState::CLOSE_FILE;
+                            DoStateMachineStep();
                             break;
                         }
                     }
@@ -323,6 +421,7 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                             wxQueueEvent(m_handler, progressEvt.Clone());
                         }
                     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                        HandleDirections();
                         blocked = true;
                     } else {
                         Fail("SFTP write failed");
@@ -354,8 +453,10 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                     } else if (rc == 0) {
                         // EOF remote file
                         m_state = SFTPState::CLOSE_FILE;
+                        DoStateMachineStep();
                         break;
                     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                        HandleDirections();
                         blocked = true;
                     } else {
                         Fail("SFTP read failed");
@@ -375,6 +476,9 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
             if (rc == 0 || rc != LIBSSH2_ERROR_EAGAIN) {
                 m_sftpHandle = nullptr;
                 m_state = SFTPState::CLEANUP;
+                DoStateMachineStep();
+            } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+                HandleDirections();
             }
             break;
         }
@@ -382,12 +486,18 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
         case SFTPState::CLEANUP: {
             if (m_sftpSession) {
                 int rc = libssh2_sftp_shutdown(m_sftpSession);
-                if (rc == LIBSSH2_ERROR_EAGAIN) return;
+                if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    HandleDirections();
+                    return;
+                }
                 m_sftpSession = nullptr;
             }
             if (m_sshSession) {
                 int rc = libssh2_session_disconnect(m_sshSession, "Normal shutdown");
-                if (rc == LIBSSH2_ERROR_EAGAIN) return;
+                if (rc == LIBSSH2_ERROR_EAGAIN) {
+                    HandleDirections();
+                    return;
+                }
                 libssh2_session_free(m_sshSession);
                 m_sshSession = nullptr;
             }
@@ -462,6 +572,13 @@ void AsynchronousSFTPTask::Succeed() {
 }
 
 void AsynchronousSFTPTask::Cleanup() {
+#ifndef _WIN32
+    if (m_fdSource) {
+        delete m_fdSource;
+        m_fdSource = nullptr;
+    }
+#endif
+
     if (m_localFile) {
         fclose(m_localFile);
         m_localFile = nullptr;

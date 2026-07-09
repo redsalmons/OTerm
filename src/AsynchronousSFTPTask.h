@@ -9,6 +9,9 @@
 #include <string>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
+#ifndef _WIN32
+#include <wx/evtloopsrc.h>
+#endif
 #include "DeviceConfig.h"
 #include "FileTransferTask.h"
 
@@ -17,7 +20,11 @@ wxDECLARE_EVENT(wxEVT_FILE_TRANSFER_COMPLETE, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_SSH_FILE_LIST, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_SSH_COMMAND_OUTPUT, wxCommandEvent);
 
-class AsynchronousSFTPTask : public wxEvtHandler {
+class AsynchronousSFTPTask : public wxEvtHandler
+#ifndef _WIN32
+                           , public wxEventLoopSourceHandler
+#endif
+{
 public:
     // Create a list directory task (bypasses 3-active limit)
     static AsynchronousSFTPTask* CreateListTask(wxEvtHandler* handler, const DeviceConfig& deviceConfig, const wxString& path);
@@ -45,10 +52,19 @@ private:
     AsynchronousSFTPTask(wxEvtHandler* handler, const DeviceConfig& deviceConfig);
 
     void OnTimer(wxTimerEvent& event);
+    void OnSocketEvent(wxSocketEvent& event);
     void DoStateMachineStep();
     void Cleanup();
     void Fail(const std::string& errorMsg);
     void Succeed();
+    void HandleDirections();
+
+#ifndef _WIN32
+    // wxEventLoopSourceHandler overrides
+    void OnReadWaiting() override;
+    void OnWriteWaiting() override;
+    void OnExceptionWaiting() override;
+#endif
 
     static void ManageQueue();
 
@@ -96,6 +112,11 @@ private:
     
     wxTimer m_timer;
     static const int TIMER_ID = 30001;
+    static const int SOCKET_ID = 30002;
+
+#ifndef _WIN32
+    wxEventLoopSource* m_fdSource = nullptr;
+#endif
 
     // Queue limits
     static std::vector<AsynchronousSFTPTask*> s_activeTasks;
