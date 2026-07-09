@@ -20,6 +20,10 @@ public:
     void Resize(int rows, int cols);
     bool IsRunning() const { return m_running; }
 
+#ifndef _WIN32
+    int GetFd() const { return m_masterFd; }
+#endif
+
 private:
     int m_masterFd;
     int m_slaveFd;

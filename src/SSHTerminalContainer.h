@@ -52,9 +52,7 @@ public:
 private:
     // Socket and Timer Event Handlers
     void OnSocketEvent(wxSocketEvent& event);
-    void OnHandshakeTimer(wxTimerEvent& event);
     void OnKeepAliveTimer(wxTimerEvent& event);
-    void OnReadTimer(wxTimerEvent& event);
 
     // SSH Connection Step Handlers
     void ContinueHandshake();
@@ -89,15 +87,12 @@ private:
     SSHState m_sshState;
 
     // Timers
-    wxTimer m_handshakeTimer;
     wxTimer m_keepAliveTimer;
-    wxTimer m_readTimer;
 
     // Terminal Emulator
     VTermManager m_vtermManager;
     ScreenBuffer m_frontBuffer;
     ScreenBuffer m_backBuffer;
-    mutable std::mutex m_bufferMutex;
 
     // Interactive state
     int m_authRetryCount;
@@ -106,9 +101,7 @@ private:
 
     // Socket Event Identifier
     static const int SOCKET_ID = 10001;
-    static const int HANDSHAKE_TIMER_ID = 10002;
     static const int KEEPALIVE_TIMER_ID = 10003;
-    static const int READ_TIMER_ID = 10004;
 };
 
 #endif // SSH_TERMINAL_CONTAINER_H

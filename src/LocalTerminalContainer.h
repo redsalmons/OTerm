@@ -4,13 +4,20 @@
 #include <wx/wx.h>
 #include <wx/timer.h>
 #include <mutex>
+#ifndef _WIN32
+#include <wx/evtloopsrc.h>
+#endif
 #include "ITerminalContainer.h"
 #include "LocalTerminalManager.h"
 #include "VTermManager.h"
 #include "ScreenBuffer.h"
 #include "EventProxy.h"
 
-class LocalTerminalContainer : public wxEvtHandler, public ITerminalContainer {
+class LocalTerminalContainer : public wxEvtHandler, public ITerminalContainer
+#ifndef _WIN32
+                             , public wxEventLoopSourceHandler
+#endif
+{
 public:
     LocalTerminalContainer(int rows = 24, int cols = 80, const std::string& shell = "");
     ~LocalTerminalContainer() override;
@@ -31,8 +38,18 @@ public:
     bool IsInAlternateScreen() const override;
     int GetScrollOffset() const override;
 
+#ifndef _WIN32
+    // wxEventLoopSourceHandler overrides
+    void OnReadWaiting() override;
+    void OnWriteWaiting() override;
+    void OnExceptionWaiting() override;
+#endif
+
 private:
+#ifdef _WIN32
     void OnReadTimer(wxTimerEvent& event);
+#endif
+    void ProcessRead();
     void UpdateBackBuffer();
     void SwapBuffers();
     void TriggerDamage();
@@ -47,18 +64,21 @@ private:
     // Buffers for rendering
     ScreenBuffer m_frontBuffer;
     ScreenBuffer m_backBuffer;
-    mutable std::mutex m_bufferMutex;
 
     // Dimensions and State
     int m_rows;
     int m_cols;
     bool m_hasDamage;
 
-    // Poll timer
+#ifdef _WIN32
+    // Poll timer (Windows fallback)
     wxTimer m_readTimer;
 
     // Timer Event Identifier
     static const int READ_TIMER_ID = 20001;
+#else
+    wxEventLoopSource* m_fdSource = nullptr;
+#endif
 };
 
 #endif // LOCAL_TERMINAL_CONTAINER_H

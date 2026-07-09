@@ -1,6 +1,5 @@
 #include "SSHTerminalContainer.h"
 #include "SSHManager.h"
-#include "TerminalThread.h"
 #include "TerminalPanel.h"
 #include <iostream>
 
@@ -34,13 +33,8 @@ SSHTerminalContainer::SSHTerminalContainer(int rows, int cols, const DeviceConfi
     });
 
     // Set up timer event bindings
-    m_handshakeTimer.SetOwner(this, HANDSHAKE_TIMER_ID);
     m_keepAliveTimer.SetOwner(this, KEEPALIVE_TIMER_ID);
-    m_readTimer.SetOwner(this, READ_TIMER_ID);
-
-    Bind(wxEVT_TIMER, &SSHTerminalContainer::OnHandshakeTimer, this, HANDSHAKE_TIMER_ID);
     Bind(wxEVT_TIMER, &SSHTerminalContainer::OnKeepAliveTimer, this, KEEPALIVE_TIMER_ID);
-    Bind(wxEVT_TIMER, &SSHTerminalContainer::OnReadTimer, this, READ_TIMER_ID);
     
     SSH_LOG("SSHTerminalContainer created for " << config.address);
 }
@@ -129,11 +123,8 @@ void SSHTerminalContainer::Resize(int rows, int cols) {
 
     m_vtermManager.resize(rows, cols);
     
-    {
-        std::lock_guard<std::mutex> lock(m_bufferMutex);
-        m_frontBuffer.resize(rows, cols);
-        m_frontBuffer.clear();
-    }
+    m_frontBuffer.resize(rows, cols);
+    m_frontBuffer.clear();
     m_backBuffer.resize(rows, cols);
     m_backBuffer.clear();
 
@@ -166,7 +157,6 @@ const ScreenBuffer* SSHTerminalContainer::GetFrontBuffer() const {
 }
 
 void SSHTerminalContainer::CopyFrontBuffer(ScreenBuffer& dest) const {
-    std::lock_guard<std::mutex> lock(m_bufferMutex);
     dest = m_frontBuffer;
 }
 
@@ -222,8 +212,6 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
 
             libssh2_session_set_blocking(m_sshSession, 0); // Non-blocking
             
-            // Start the handshake driving timer
-            m_handshakeTimer.Start(50); 
             ContinueHandshake();
             break;
         }
@@ -277,40 +265,10 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
     }
 }
 
-void SSHTerminalContainer::OnHandshakeTimer(wxTimerEvent& event) {
-    // Drive the connection state machine periodically if it gets stuck due to missed edge triggers
-    switch (m_sshState) {
-        case SSH_HANDSHAKING:
-            ContinueHandshake();
-            break;
-        case SSH_AUTHENTICATING:
-            PerformAuthentication();
-            break;
-        case SSH_CHANNEL_OPENING:
-            OpenSSHChannel();
-            break;
-        case SSH_PTY_REQUESTING:
-            RequestPTY();
-            break;
-        case SSH_SHELL_REQUESTING:
-            RequestShell();
-            break;
-        default:
-            m_handshakeTimer.Stop();
-            break;
-    }
-}
-
 void SSHTerminalContainer::OnKeepAliveTimer(wxTimerEvent& event) {
     if (m_sshState == SSH_READY && m_sshSession && m_sshChannel) {
         int seconds_to_next = 0;
         libssh2_keepalive_send(m_sshSession, &seconds_to_next);
-    }
-}
-
-void SSHTerminalContainer::OnReadTimer(wxTimerEvent& event) {
-    if (m_sshState == SSH_READY && m_sshChannel) {
-        ProcessSSHData();
     }
 }
 
@@ -322,7 +280,6 @@ void SSHTerminalContainer::ContinueHandshake() {
     
     if (rc == 0) {
         SSH_LOG("SSH Handshake completed.");
-        m_handshakeTimer.Stop();
         StartLoginPrompt();
     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
         HandleDirections();
@@ -349,7 +306,6 @@ void SSHTerminalContainer::StartPasswordPrompt() {
         SendStatusMessage("password: ");
     } else {
         m_sshState = SSH_AUTHENTICATING;
-        m_handshakeTimer.Start(50); // Restart driving timer for authentication
         PerformAuthentication();
     }
 }
@@ -383,7 +339,6 @@ void SSHTerminalContainer::PerformAuthentication() {
     } else {
         m_authRetryCount++;
         SSH_ERR("Authentication failed (" << m_authRetryCount << "/3)");
-        m_handshakeTimer.Stop();
 
         if (m_authRetryCount >= 3) {
             SendStatusMessage("\r\nAuthentication failed (3/3). Connection closed.\r\n");
@@ -444,7 +399,6 @@ void SSHTerminalContainer::RequestShell() {
     if (rc == 0) {
         SSH_LOG("SSH Shell successfully initiated. Connection fully ready.");
         m_sshState = SSH_READY;
-        m_handshakeTimer.Stop();
 
         // Send initial resize
         libssh2_channel_request_pty_size_ex(m_sshChannel, m_cols, m_rows, 0, 0);
@@ -453,11 +407,10 @@ void SSHTerminalContainer::RequestShell() {
         libssh2_keepalive_config(m_sshSession, 1, 10);
         m_keepAliveTimer.Start(10000);
 
-        // Start read timer for polling SSH data (15ms intervals)
-        m_readTimer.Start(15);
-
         // Bind normal socket input and output events for regular SSH operations
         m_socket->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
+        // Process any data that might already be waiting
+        ProcessSSHData();
     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
         HandleDirections();
     } else {
@@ -512,9 +465,7 @@ void SSHTerminalContainer::SendStatusMessage(const std::string& msg) {
 }
 
 void SSHTerminalContainer::Cleanup() {
-    m_handshakeTimer.Stop();
     m_keepAliveTimer.Stop();
-    m_readTimer.Stop();
 
     if (m_sshChannel) {
         libssh2_channel_free(m_sshChannel);
@@ -563,7 +514,6 @@ void SSHTerminalContainer::SwapBuffers() {
     m_backBuffer.cursor_row = cursor_pos.row;
     m_backBuffer.cursor_col = cursor_pos.col;
 
-    std::lock_guard<std::mutex> lock(m_bufferMutex);
     std::swap(m_frontBuffer, m_backBuffer);
 }
 

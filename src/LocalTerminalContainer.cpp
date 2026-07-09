@@ -1,5 +1,4 @@
 #include "LocalTerminalContainer.h"
-#include "TerminalThread.h"
 #include <fstream>
 #include <filesystem>
 #include <iostream>
@@ -30,12 +29,30 @@ LocalTerminalContainer::LocalTerminalContainer(int rows, int cols, const std::st
         std::cerr << "LocalTerminalContainer: Failed to start LocalTerminalManager" << std::endl;
     }
 
+#ifdef _WIN32
     // Timer setup
     m_readTimer.SetOwner(this, READ_TIMER_ID);
     Bind(wxEVT_TIMER, &LocalTerminalContainer::OnReadTimer, this, READ_TIMER_ID);
     
     // Start reading with 15ms intervals (~60 FPS polling)
     m_readTimer.Start(15);
+#else
+    // Unix: Register FD with the event loop
+    auto registerFd = [this]() {
+        wxEventLoopBase* loop = wxEventLoop::GetActive();
+        if (loop && m_terminalManager.GetFd() >= 0 && !m_fdSource) {
+            m_fdSource = loop->AddSourceForFD(m_terminalManager.GetFd(), this, wxEVENT_SOURCE_INPUT);
+            ProcessRead(); // Drain any data that arrived before registration
+        }
+    };
+
+    if (wxEventLoop::GetActive()) {
+        registerFd();
+    } else if (wxTheApp) {
+        // Use CallAfter to ensure the event loop is active, particularly for the initial tab created during app startup.
+        wxTheApp->CallAfter(registerFd);
+    }
+#endif
     
     // Update initial screen display
     UpdateBackBuffer();
@@ -51,7 +68,6 @@ const ScreenBuffer* LocalTerminalContainer::GetFrontBuffer() const {
 }
 
 void LocalTerminalContainer::CopyFrontBuffer(ScreenBuffer& dest) const {
-    std::lock_guard<std::mutex> lock(m_bufferMutex);
     dest = m_frontBuffer;
 }
 
@@ -68,7 +84,14 @@ void LocalTerminalContainer::ClearUIHandler() {
 }
 
 void LocalTerminalContainer::StopTerminal() {
+#ifdef _WIN32
     m_readTimer.Stop();
+#else
+    if (m_fdSource) {
+        delete m_fdSource;
+        m_fdSource = nullptr;
+    }
+#endif
     m_terminalManager.Stop();
 }
 
@@ -86,11 +109,8 @@ void LocalTerminalContainer::Resize(int rows, int cols) {
     m_vtermManager.resize(rows, cols);
     m_terminalManager.Resize(rows, cols);
 
-    {
-        std::lock_guard<std::mutex> lock(m_bufferMutex);
-        m_frontBuffer.resize(rows, cols);
-        m_frontBuffer.clear();
-    }
+    m_frontBuffer.resize(rows, cols);
+    m_frontBuffer.clear();
     m_backBuffer.resize(rows, cols);
     m_backBuffer.clear();
 
@@ -126,9 +146,33 @@ int LocalTerminalContainer::GetScrollOffset() const {
     return m_vtermManager.get_scroll_offset();
 }
 
+#ifndef _WIN32
+void LocalTerminalContainer::OnReadWaiting() {
+    ProcessRead();
+}
+
+void LocalTerminalContainer::OnWriteWaiting() {
+    // Nothing to do for write
+}
+
+void LocalTerminalContainer::OnExceptionWaiting() {
+    StopTerminal();
+    TriggerDamage();
+}
+#endif
+
+#ifdef _WIN32
 void LocalTerminalContainer::OnReadTimer(wxTimerEvent& event) {
     if (!m_terminalManager.IsRunning()) {
         m_readTimer.Stop();
+        return;
+    }
+    ProcessRead();
+}
+#endif
+
+void LocalTerminalContainer::ProcessRead() {
+    if (!m_terminalManager.IsRunning()) {
         return;
     }
 
@@ -193,7 +237,6 @@ void LocalTerminalContainer::UpdateBackBuffer() {
 }
 
 void LocalTerminalContainer::SwapBuffers() {
-    std::lock_guard<std::mutex> lock(m_bufferMutex);
     std::swap(m_frontBuffer, m_backBuffer);
 }
 
