@@ -33,9 +33,7 @@
 #include "SSHManager.h"
 
 #include "GlobalConfig.h"
-
-#include "TerminalThread.h"
-
+#include "SSHTerminalContainer.h"
 #include "TranslationHelper.h"
 
 
@@ -1439,10 +1437,10 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
             SSH_LOG("OnChar SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
 
             // Check if SSH is disconnected and trigger reconnect
-            TerminalThread* sshThread = panel->GetSSHThread();
-            if (sshThread && sshThread->IsDisconnected()) {
+            SSHTerminalContainer* sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
+            if (sshContainer && sshContainer->GetState() == SSHTerminalContainer::SSH_DISCONNECTED) {
                 SSH_LOG("OnChar SSH: SSH is disconnected, triggering reconnect");
-                sshThread->Connect();
+                sshContainer->Connect();
                 m_sshInputBuffer.clear();
                 return;
             }
@@ -1594,10 +1592,10 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
             SSH_LOG("OnCharHook SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
 
             // Check if SSH is disconnected and trigger reconnect
-            TerminalThread* sshThread = panel->GetSSHThread();
-            if (sshThread && sshThread->IsDisconnected()) {
+            SSHTerminalContainer* sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
+            if (sshContainer && sshContainer->GetState() == SSHTerminalContainer::SSH_DISCONNECTED) {
                 SSH_LOG("OnCharHook SSH: SSH is disconnected, triggering reconnect");
-                sshThread->Connect();
+                sshContainer->Connect();
                 m_sshInputBuffer.clear();
                 return;
             }

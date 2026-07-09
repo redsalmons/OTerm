@@ -34,12 +34,3 @@ SplitterPanel::SplitterPanel(wxWindow* parent, TerminalPanel* originalPanel, boo
 
 SplitterPanel::~SplitterPanel() {
 }
-
-void SplitterPanel::StopThreads() {
-    if (m_panel1) {
-        m_panel1->StopThreads();
-    }
-    if (m_panel2) {
-        m_panel2->StopThreads();
-    }
-}

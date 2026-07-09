@@ -28,13 +28,8 @@ public:
     TermGLCanvas* GetCanvas() const { return m_canvas; }
     void SetCanvas(TermGLCanvas* canvas);
     
-    void SetSSHThread(TerminalThread* thread) { m_sshThread = thread; }
-    TerminalThread* GetSSHThread() const { return m_sshThread; }
-    
-    void StopThreads();
-    
     void ShowContextMenu();
-    bool HasTerminal() const { return m_terminalContainer != nullptr || m_sshThread != nullptr; }
+    bool HasTerminal() const { return m_terminalContainer != nullptr; }
     
     // Called when this panel becomes the active rendering target
     void Activate();
@@ -76,7 +71,6 @@ private:
     void OnKeyDown(wxKeyEvent& event);
 
     std::unique_ptr<ITerminalContainer> m_terminalContainer;
-    TerminalThread* m_sshThread = nullptr;
     TermGLCanvas* m_canvas;
     wxStaticText* m_text;
     EventProxyPtr m_eventProxy;

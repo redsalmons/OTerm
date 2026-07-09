@@ -1,6 +1,5 @@
 #include "CustomTitleBar.h"
 #include "AppWindow.h"
-#include "TerminalThread.h"
 #include "TermGLCanvas.h"
 #include "TerminalPanel.h"
 #include "TranslationHelper.h"
@@ -694,55 +693,58 @@ void CustomTitleBar::NotifyAllTabsResize() {
     
     // 通知所有tab调整大小
     for (auto tab : m_tabs) {
-        TerminalThread* thread = tab->GetTerminalThread();
-        if (thread) {
-            TermGLCanvas* canvas = tab->GetCanvas();
-            if (canvas) {
-                // 不再进行SetSelection切换，直接对page应用notebook的ClientSize并布局
-                int pageIndex = FindNotebookPage(canvas);
-                if (pageIndex != wxNOT_FOUND) {
-                    wxWindow* page = m_notebook->GetPage(pageIndex);
-                    if (page) {
-                        page->SetSize(m_notebook->GetClientSize());
-                        page->Layout();
+        TermGLCanvas* canvas = tab->GetCanvas();
+        if (canvas) {
+            // 不再进行SetSelection切换，直接对page应用notebook的ClientSize并布局
+            int pageIndex = FindNotebookPage(canvas);
+            if (pageIndex != wxNOT_FOUND) {
+                wxWindow* page = m_notebook->GetPage(pageIndex);
+                if (page) {
+                    page->SetSize(m_notebook->GetClientSize());
+                    page->Layout();
+                }
+                
+                wxSize size = canvas->GetSize();
+                
+                // Get configured font size
+                int fontSize = GlobalConfig::GetFontSize();
+                if (fontSize == 0) fontSize = 12;
+
+                float dpiScale = canvas->GetDPIScale();
+                int terminalFontSize = fontSize;
+                if (dpiScale > 1.0f) {
+                    terminalFontSize = static_cast<int>(fontSize * 2);
+                }
+                if (terminalFontSize < 8) terminalFontSize = 8;
+                if (terminalFontSize > 72) terminalFontSize = 72;
+
+                // Calculate cell size based on actual canvas metrics or fallback
+                int cellWidth = (canvas->m_cellWidth > 0) ? canvas->m_cellWidth : (terminalFontSize / 2);
+                int cellHeight = (canvas->m_cellHeight > 0) ? canvas->m_cellHeight : terminalFontSize;
+
+                if (cellWidth < 6) cellWidth = 6;
+                if (cellHeight < 12) cellHeight = 12;
+
+                // Account for margins (8px left/right, 4px top/bottom, DPI-scaled)
+                int margin_x = static_cast<int>(8 * dpiScale);
+                int margin_y = static_cast<int>(4 * dpiScale);
+
+                int availableHeight = size.GetHeight() - margin_y * 2;
+                int availableWidth = size.GetWidth() - margin_x * 2;
+                if (availableHeight < 100) availableHeight = 100;
+                if (availableWidth < 100) availableWidth = 100;
+
+                int rows = availableHeight / cellHeight;
+                int cols = availableWidth / cellWidth;
+                if (rows < 10) rows = 10;
+                if (cols < 40) cols = 40;
+                
+                TerminalPanel* terminalPanel = dynamic_cast<TerminalPanel*>(tab->GetContentPanel());
+                if (terminalPanel) {
+                    ITerminalContainer* container = terminalPanel->GetTerminalContainer();
+                    if (container) {
+                        container->Resize(rows, cols);
                     }
-                    
-                    wxSize size = canvas->GetSize();
-                    
-                    // Get configured font size
-                    int fontSize = GlobalConfig::GetFontSize();
-                    if (fontSize == 0) fontSize = 12;
-
-                    float dpiScale = canvas->GetDPIScale();
-                    int terminalFontSize = fontSize;
-                    if (dpiScale > 1.0f) {
-                        terminalFontSize = static_cast<int>(fontSize * 2);
-                    }
-                    if (terminalFontSize < 8) terminalFontSize = 8;
-                    if (terminalFontSize > 72) terminalFontSize = 72;
-
-                    // Calculate cell size based on actual canvas metrics or fallback
-                    int cellWidth = (canvas->m_cellWidth > 0) ? canvas->m_cellWidth : (terminalFontSize / 2);
-                    int cellHeight = (canvas->m_cellHeight > 0) ? canvas->m_cellHeight : terminalFontSize;
-
-                    if (cellWidth < 6) cellWidth = 6;
-                    if (cellHeight < 12) cellHeight = 12;
-
-                    // Account for margins (8px left/right, 4px top/bottom, DPI-scaled)
-                    int margin_x = static_cast<int>(8 * dpiScale);
-                    int margin_y = static_cast<int>(4 * dpiScale);
-
-                    int availableHeight = size.GetHeight() - margin_y * 2;
-                    int availableWidth = size.GetWidth() - margin_x * 2;
-                    if (availableHeight < 100) availableHeight = 100;
-                    if (availableWidth < 100) availableWidth = 100;
-
-                    int rows = availableHeight / cellHeight;
-                    int cols = availableWidth / cellWidth;
-                    if (rows < 10) rows = 10;
-                    if (cols < 40) cols = 40;
-                    
-                    thread->ResizeVTerm(rows, cols);
                 }
             }
         }

@@ -1,6 +1,5 @@
 #include "TerminalPanel.h"
 #include "InfiniteSplitter.h"
-#include "TerminalThread.h"
 #include "SSHTerminalContainer.h"
 #include "LocalTerminalContainer.h"
 #include "GlobalConfig.h"
@@ -11,6 +10,7 @@
 #include <filesystem>
 
 #define SPLIT_LOG(msg) ((void)0)
+#define SSH_LOG(msg) ((void)0)
 
 TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<ITerminalContainer> container)
     : wxPanel(parent, wxID_ANY),
@@ -92,9 +92,6 @@ void TerminalPanel::Shutdown() {
         m_terminalContainer->StopTerminal();
         m_terminalContainer->ClearUIHandler();
     }
-    
-    // Clear SSH thread reference (it's owned by ConnectInfo)
-    m_sshThread = nullptr;
     
     // Clear EventProxy
     if (m_eventProxy) {
@@ -219,9 +216,7 @@ void TerminalPanel::SetupCanvasConnection() {
     // 设置 canvas 的 input 回调
     m_canvas->SetKeyCallback([this](const char* data, int length) {
         SPLIT_LOG("Key callback invoked: length=" << length << " first=" << (length > 0 ? (int)(unsigned char)data[0] : 0));
-        if (m_sshThread) {
-            m_sshThread->QueueInput(std::string(data, length));
-        } else if (m_terminalContainer) {
+        if (m_terminalContainer) {
             m_terminalContainer->QueueInput(std::string(data, length));
         }
     });
@@ -230,9 +225,7 @@ void TerminalPanel::SetupCanvasConnection() {
     // 设置 canvas 的 scroll 回调
     m_canvas->SetScrollCallback([this](int lines) {
         SPLIT_LOG("Scroll callback invoked: lines=" << lines);
-        if (m_sshThread) {
-            m_sshThread->ScrollVTerm(lines);
-        } else if (m_terminalContainer) {
+        if (m_terminalContainer) {
             m_terminalContainer->Scroll(lines);
         }
     });
@@ -240,7 +233,7 @@ void TerminalPanel::SetupCanvasConnection() {
 
     // 设置 canvas 的 mouse 回调
     m_canvas->SetMouseCallback([this](int row, int col, int button) {
-        bool inAltScreen = m_sshThread ? m_sshThread->IsInAlternateScreen() : (m_terminalContainer ? m_terminalContainer->IsInAlternateScreen() : false);
+        bool inAltScreen = m_terminalContainer ? m_terminalContainer->IsInAlternateScreen() : false;
         SPLIT_LOG("Mouse callback invoked: row=" << row << " col=" << col << " button=" << button << " inAltScreen=" << inAltScreen);
         if (inAltScreen) {
             char seq[6];
@@ -251,9 +244,7 @@ void TerminalPanel::SetupCanvasConnection() {
             seq[4] = (char)(33 + col);
             seq[5] = (char)(33 + row);
             std::string seq_str(seq, 6);
-            if (m_sshThread) {
-                m_sshThread->QueueInput(seq_str);
-            } else if (m_terminalContainer) {
+            if (m_terminalContainer) {
                 m_terminalContainer->QueueInput(seq_str);
             }
         }
@@ -380,7 +371,7 @@ void TerminalPanel::OnClosePanel(wxCommandEvent& event) {
 
 void TerminalPanel::OnSize(wxSizeEvent& event) {
     Layout();
-    if ((m_terminalContainer || m_sshThread) && m_canvas) {
+    if (m_terminalContainer && m_canvas) {
         wxSize size = GetClientSize();
         
         // Get font height for minimum height check
@@ -448,9 +439,7 @@ void TerminalPanel::OnSize(wxSizeEvent& event) {
                       << ", Available: " << availableWidth << "x" << availableHeight 
                       << ", Prev: " << m_prevRows << "x" << m_prevCols << ")");
             
-            if (m_sshThread) {
-                m_sshThread->ResizeVTerm(rows, cols);
-            } else if (m_terminalContainer) {
+            if (m_terminalContainer) {
                 m_terminalContainer->Resize(rows, cols);
             }
             
@@ -474,12 +463,7 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
     int scroll_offset = 0;
     bool has_buffer = false;
     
-    if (m_sshThread) {
-        m_sshThread->CopyFrontBuffer(local_buffer);
-        in_alt_screen = m_sshThread->IsInAlternateScreen();
-        scroll_offset = m_sshThread->GetScrollOffset();
-        has_buffer = true;
-    } else if (m_terminalContainer) {
+    if (m_terminalContainer) {
         if (!m_terminalContainer->IsSessionAlive()) {
             // Session has been stopped/deleted (e.g. during panel close). Nothing to render.
             return;
@@ -522,12 +506,6 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
     m_canvas->UpdateScreenData(instances);
     m_canvas->SetCursorPosition(local_buffer.cursor_row, local_buffer.cursor_col, in_alt_screen, scroll_offset);
     m_canvas->Refresh();
-}
-
-void TerminalPanel::StopThreads() {
-    if (m_canvas) {
-        m_canvas->StopThreads();
-    }
 }
 
 void TerminalPanel::Activate() {
@@ -575,28 +553,12 @@ bool TerminalPanel::IsLocalTerminal() const {
 bool TerminalPanel::IsSessionAlive() const {
     if (m_terminalContainer) {
         bool alive = m_terminalContainer->IsSessionAlive();
-        SSH_LOG("TerminalPanel::IsSessionAlive local: alive=" << alive);
         return alive;
     }
-    if (m_sshThread) {
-        bool alive = m_sshThread->IsRunning() && !m_sshThread->IsDisconnected();
-        SSH_LOG("TerminalPanel::IsSessionAlive ssh: running=" << m_sshThread->IsRunning() << ", disconnected=" << m_sshThread->IsDisconnected() << ", alive=" << alive);
-        return alive;
-    }
-    SSH_LOG("TerminalPanel::IsSessionAlive: no thread/container, returning false");
     return false;
 }
 
 void TerminalPanel::RestartAsLocalTerminal() {
-    SSH_LOG("TerminalPanel::RestartAsLocalTerminal called");
-    
-    // Stop and clear existing SSH thread (panel owns it)
-    if (m_sshThread) {
-        m_sshThread->SetShuttingDown();
-        m_sshThread->Wait();
-        delete m_sshThread;
-        m_sshThread = nullptr;
-    }
     
     // Stop and clear existing local terminal (panel owns it)
     if (m_terminalContainer) {

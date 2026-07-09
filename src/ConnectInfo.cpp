@@ -10,8 +10,6 @@
 
 #include "RootPanel.h"
 
-#include "TerminalThread.h"
-
 #include "SSHManager.h"
 
 #include "FileTransferTask.h"
@@ -401,22 +399,16 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
             ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
             if (container) {
                 container->Scroll(lines);
-            } else if (m_terminalThread) {
-
-                m_terminalThread->ScrollVTerm(lines);
-
             }
 
         });
-
-
 
         // Set mouse callback for vi mouse mode (X10 protocol)
 
         m_termCanvas->SetMouseCallback([this](int row, int col, int button) {
             TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
             ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
-            bool inAltScreen = container ? container->IsInAlternateScreen() : (m_terminalThread ? m_terminalThread->IsInAlternateScreen() : false);
+            bool inAltScreen = container ? container->IsInAlternateScreen() : false;
 
             SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << inAltScreen);
 
@@ -452,10 +444,6 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
                 if (container) {
                     container->QueueInput(seq_str);
-                } else if (m_terminalThread) {
-
-                    m_terminalThread->QueueInput(seq_str);
-
                 }
 
             }

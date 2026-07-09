@@ -1,71 +1,39 @@
 cmake_minimum_required(VERSION 3.16)
-project(OceanTerm VERSION 1.0.0)
+project(OceanTerm VERSION 1.0.0 LANGUAGES C CXX)
 
-# Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Build type
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo)
+    set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# Set output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Find packages using vcpkg
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(libuv CONFIG REQUIRED)
-find_package(Libssh2 CONFIG REQUIRED)
-
-# Use manually built wxWidgets for ARM64
-set(wxWidgets_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1)
-
-# Select Debug or Release wxWidgets libraries based on build type
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(wxWidgets_INCLUDE_DIRS
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/mswud
-    )
-    set(wxWidgets_LIBRARIES
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxmsw33ud.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxexpatd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxpngd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxzlibd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxregexud.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxjpegd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxtiffd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxscintillad.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxlexillad.lib
-        comctl32
-        rpcrt4
-    )
-else()
-    set(wxWidgets_INCLUDE_DIRS
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/mswu
-    )
-    set(wxWidgets_LIBRARIES
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxmsw33u.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxexpat.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxpng.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxzlib.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxregexu.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxjpeg.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxtiff.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxscintilla.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxlexilla.lib
-        comctl32
-        rpcrt4
-    )
-endif()
-
+find_package(PkgConfig REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(nlohmann_json QUIET CONFIG)
 find_package(OpenSSL REQUIRED)
 
-# Create executable
-add_executable(OceanTerm WIN32
+pkg_check_modules(VTERM REQUIRED IMPORTED_TARGET vterm)
+pkg_check_modules(LIBUV REQUIRED IMPORTED_TARGET libuv)
+pkg_check_modules(LIBSSH2 REQUIRED IMPORTED_TARGET libssh2)
+
+find_program(WX_CONFIG_EXECUTABLE wx-config REQUIRED)
+execute_process(
+    COMMAND ${WX_CONFIG_EXECUTABLE} --cxxflags
+    OUTPUT_VARIABLE WX_CXXFLAGS
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+execute_process(
+    COMMAND ${WX_CONFIG_EXECUTABLE} --libs core,base,gl,net
+    OUTPUT_VARIABLE WX_LIBS
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+separate_arguments(WX_CXXFLAGS_LIST NATIVE_COMMAND "${WX_CXXFLAGS}")
+
+add_executable(OceanTerm
     src/AppWindow.cpp
     src/CustomTitleBar.cpp
     src/ConnectInfo.cpp
@@ -74,9 +42,9 @@ add_executable(OceanTerm WIN32
     src/DeviceListPanel.cpp
     src/AddDeviceDialog.cpp
     src/SSHManager.cpp
+    src/SSHTerminalContainer.cpp
     src/VTermManager.cpp
     src/TermGLCanvas.cpp
-    src/TerminalThread.cpp
     src/FontAtlas.cpp
     src/FileTransferDialog.cpp
     src/AsynchronousSFTPTask.cpp
@@ -86,55 +54,66 @@ add_executable(OceanTerm WIN32
     src/MasterPasswordDialog.cpp
     src/MonospaceFontDialog.cpp
     src/LocalTerminalManager.cpp
+    src/LocalTerminalContainer.cpp
     src/TerminalPanel.cpp
     src/InfiniteSplitter.cpp
-    src/LocalTerminalContainer.cpp
-    src/SSHTerminalContainer.cpp
-    src/EventProxy.cpp
-    src/SplitTree.cpp
+    src/RootPanel.cpp
     src/SplitManager.cpp
+    src/SplitTree.cpp
     src/SplitContainer.cpp
+    src/SplitterPanel.cpp
+    src/EventProxy.cpp
     src/CommandInterceptor.cpp
+    src/MacTitleBar.mm
 )
 
-# Add include directories
+set_source_files_properties(src/MacTitleBar.mm PROPERTIES COMPILE_FLAGS "-x objective-c++")
+
 target_include_directories(OceanTerm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/include
-    ${wxWidgets_INCLUDE_DIRS}
 )
 
-# Compiler-specific options
-if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    target_compile_options(OceanTerm PRIVATE /utf-8 /DHAVE_LIBVTERM)
-    target_compile_definitions(OceanTerm PRIVATE UNICODE _UNICODE WXUSINGDLL)
-    target_link_options(OceanTerm PRIVATE /SUBSYSTEM:WINDOWS)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(OceanTerm PRIVATE -Wall -Wextra -DHAVE_LIBVTERM -g)
-    target_compile_definitions(OceanTerm PRIVATE UNICODE _UNICODE WXUSINGDLL)
-endif()
+target_compile_options(OceanTerm PRIVATE
+    -Wall
+    -Wextra
+    ${WX_CXXFLAGS_LIST}
+)
 
-# Link libraries
 target_link_libraries(OceanTerm PRIVATE
-    nlohmann_json::nlohmann_json
-    $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
-    libssh2::libssh2
-    ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/build/Release/vterm.lib
-    ws2_32
-    crypt32
-    ${wxWidgets_LIBRARIES}
+    PkgConfig::VTERM
+    PkgConfig::LIBUV
+    PkgConfig::LIBSSH2
     OpenGL::GL
     OpenSSL::Crypto
-    )
+)
 
-# Platform-specific libraries
-if(APPLE)
-    target_link_libraries(OceanTerm PRIVATE "-framework Foundation")
-elseif(UNIX)
-    target_link_libraries(OceanTerm PRIVATE pthread)
+target_link_libraries(OceanTerm PRIVATE
+    "-lutil"
+)
+
+target_link_options(OceanTerm PRIVATE
+    "SHELL:${WX_LIBS}"
+    "LINKER:-framework,Foundation"
+    "LINKER:-framework,Cocoa"
+    "LINKER:-framework,IOKit"
+    "LINKER:-framework,CoreFoundation"
+    "LINKER:-framework,AppKit"
+)
+
+if(nlohmann_json_FOUND)
+    target_link_libraries(OceanTerm PRIVATE nlohmann_json::nlohmann_json)
+else()
+    find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp
+        PATHS
+            /opt/homebrew/include
+            /usr/local/include
+    )
+    if(NOT NLOHMANN_JSON_INCLUDE_DIR)
+        message(FATAL_ERROR "nlohmann/json.hpp not found. Install it with: brew install nlohmann-json")
+    endif()
+    target_include_directories(OceanTerm PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
 endif()
 
-# Copy resources if they exist
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/resources)
     add_custom_command(TARGET OceanTerm POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -143,7 +122,6 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/resources)
     )
 endif()
 
-# Copy config directory
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config)
     add_custom_command(TARGET OceanTerm POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -152,7 +130,6 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config)
     )
 endif()
 
-# Copy locales directory
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/locales)
     add_custom_command(TARGET OceanTerm POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory

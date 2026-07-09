@@ -3,12 +3,9 @@
 #include <wx/wx.h>
 #include <memory>
 #include <functional>
-#include <mutex>
 
-// EventProxy acts as a mediator between threads and UI windows
-// Threads hold a shared_ptr to EventProxy, which holds a weak reference to the actual UI window
+// EventProxy acts as a mediator between terminal containers and UI windows
 // This allows dynamic panel switching without reparenting
-// Thread-safe: uses mutex to protect canvas operations
 class EventProxy {
 public:
     // Callback type for terminal damage events
@@ -20,33 +17,28 @@ public:
     EventProxy() = default;
     ~EventProxy() = default;
 
-    // Set the target UI window (thread-safe)
+    // Set the target UI window
     void SetTarget(wxWindow* target) {
-        std::lock_guard<std::mutex> lock(m_mutex);
         m_target = target;
     }
 
-    // Get the target UI window (thread-safe)
+    // Get the target UI window
     wxWindow* GetTarget() const {
-        std::lock_guard<std::mutex> lock(m_mutex);
         return m_target;
     }
 
-    // Set damage callback (thread-safe)
+    // Set damage callback
     void SetDamageCallback(DamageCallback callback) {
-        std::lock_guard<std::mutex> lock(m_mutex);
         m_damageCallback = callback;
     }
 
-    // Set input callback (thread-safe)
+    // Set input callback
     void SetInputCallback(InputCallback callback) {
-        std::lock_guard<std::mutex> lock(m_mutex);
         m_inputCallback = callback;
     }
 
-    // Post damage event to UI thread (thread-safe, can be called from any thread)
+    // Post damage event to UI
     void PostDamageEvent(int rows, int cols, int cursor_row, int cursor_col, int first_nonempty_char) {
-        std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_target) return;
         
         // Check if window is being deleted
@@ -54,22 +46,20 @@ public:
             return;
         }
         
-        // Call the damage callback directly (will be called from UI thread if set up properly)
+        // Call the damage callback directly
         if (m_damageCallback) {
             m_damageCallback(rows, cols, cursor_row, cursor_col, first_nonempty_char);
         }
     }
 
-    // Send input data (thread-safe, can be called from any thread)
+    // Send input data
     void SendInput(const char* data, int length) {
-        std::lock_guard<std::mutex> lock(m_mutex);
         if (m_inputCallback) {
             m_inputCallback(data, length);
         }
     }
 
 private:
-    mutable std::mutex m_mutex;
     wxWindow* m_target = nullptr;
     DamageCallback m_damageCallback;
     InputCallback m_inputCallback;

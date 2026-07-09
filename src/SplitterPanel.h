@@ -11,8 +11,6 @@ public:
     SplitterPanel(wxWindow* parent, TerminalPanel* originalPanel, bool horizontal);
     ~SplitterPanel();
 
-    void StopThreads();
-
 private:
     wxSplitterWindow* m_splitter;
     TerminalPanel* m_panel1;

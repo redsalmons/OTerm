@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(OceanTerm VERSION 1.0.0 LANGUAGES C CXX)
 
-if(NOT APPLE)
-    message(FATAL_ERROR "CMakeLists.macos.txt is intended for macOS only")
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -31,7 +27,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 execute_process(
-    COMMAND ${WX_CONFIG_EXECUTABLE} --libs core,base,gl
+    COMMAND ${WX_CONFIG_EXECUTABLE} --libs core,base,gl,net
     OUTPUT_VARIABLE WX_LIBS
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -46,21 +42,18 @@ add_executable(OceanTerm
     src/DeviceListPanel.cpp
     src/AddDeviceDialog.cpp
     src/SSHManager.cpp
+    src/SSHTerminalContainer.cpp
     src/VTermManager.cpp
     src/TermGLCanvas.cpp
-    src/TerminalThread.cpp
     src/FontAtlas.cpp
     src/FileTransferDialog.cpp
-    src/SSHFileThread.cpp
-    src/FileTransferThread.cpp
+    src/AsynchronousSFTPTask.cpp
     src/GlobalConfig.cpp
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
     src/MasterPasswordDialog.cpp
     src/MonospaceFontDialog.cpp
     src/LocalTerminalManager.cpp
-    src/LocalTerminalThread.cpp
-    src/LocalTerminalDelegate.cpp
     src/LocalTerminalContainer.cpp
     src/TerminalPanel.cpp
     src/InfiniteSplitter.cpp
