@@ -639,8 +639,55 @@ void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
         task.progress = 0;
         task.result = "";
 
+        SSH_LOG("Task created - ID: " << task.id << " Size: " << task.size << " Action: " << task.action);
         AsynchronousSFTPTask::QueueTransferTask(this, m_deviceConfig, task);
         SSH_LOG("Task queued asynchronously: " << task.id);
+        
+        // Persist the new task to task.json
+        wxString workspaceDir = wxString::FromUTF8(GlobalConfig::GetWorkspacePath().c_str());
+        wxString wxDeviceId = wxString::FromUTF8(m_deviceConfig.id.c_str());
+        wxDeviceId.Replace("/", "_"); // Replace slashes with underscores
+        wxString deviceDir = workspaceDir + wxFileName::GetPathSeparator() + wxDeviceId;
+        wxString taskFilePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
+        
+        // Load existing task file or create new one
+        FileTransferTaskList taskList;
+        std::ifstream file(taskFilePath.ToStdString());
+        if (file.is_open()) {
+            try {
+                nlohmann::json j;
+                file >> j;
+                file.close();
+                taskList = FileTransferTaskList::fromJson(j);
+            } catch (const std::exception& e) {
+                SSH_LOG("Failed to load task list: " << e.what());
+                file.close();
+                taskList.device_id = m_deviceConfig.id;
+            }
+        } else {
+            taskList.device_id = m_deviceConfig.id;
+        }
+        
+        // Add new task to list
+        taskList.tasks.push_back(task);
+        
+        // Ensure device directory exists
+        wxFileName::Mkdir(deviceDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        
+        // Save updated task list
+        try {
+            nlohmann::json j = taskList.to_json();
+            std::ofstream outfile(taskFilePath.ToStdString());
+            if (outfile.is_open()) {
+                outfile << j.dump(4);
+                outfile.close();
+                SSH_LOG("New task saved to task.json: " << task.id);
+            } else {
+                SSH_LOG("Failed to open task file for writing: " << taskFilePath.ToStdString());
+            }
+        } catch (const std::exception& e) {
+            SSH_LOG("Failed to save task list: " << e.what());
+        }
 
         
 
@@ -675,6 +722,18 @@ void ConnectInfo::OnFileTransferProgress(wxCommandEvent& event) {
         SSH_LOG("FileTransferDialog is null, cannot forward event");
 
     }
+    
+    // Parse and update task file
+    try {
+        nlohmann::json j = nlohmann::json::parse(json.ToStdString());
+        std::string taskId = j["id"];
+        int progress = j["progress"];
+        std::string status = j["status"];
+        SSH_LOG("Progress event parsed - TaskID: " << taskId << " Progress: " << progress << " Status: " << status);
+        UpdateTaskFile(wxString::FromUTF8(taskId.c_str()), progress, wxString::FromUTF8(status.c_str()));
+    } catch (const std::exception& e) {
+        SSH_LOG("Failed to parse file transfer progress: " << e.what());
+    }
 
 }
 
@@ -702,6 +761,108 @@ void ConnectInfo::OnFileTransferComplete(wxCommandEvent& event) {
 
     }
 
+    
+
+    // Parse and update task file
+    try {
+        nlohmann::json j = nlohmann::json::parse(json.ToStdString());
+        std::string taskId = j["id"];
+        int progress = j["progress"];
+        std::string status = j["status"];
+        std::string result = j.value("result", "");
+        UpdateTaskFile(wxString::FromUTF8(taskId.c_str()), progress, wxString::FromUTF8(status.c_str()), wxString::FromUTF8(result.c_str()));
+    } catch (const std::exception& e) {
+        SSH_LOG("Failed to parse file transfer complete: " << e.what());
+    }
+}
+
+void ConnectInfo::UpdateTaskFile(const wxString& taskId, int progress, const wxString& status, const wxString& result) {
+    // Get task file path
+    wxString workspaceDir = wxString::FromUTF8(GlobalConfig::GetWorkspacePath().c_str());
+    wxString wxDeviceId = wxString::FromUTF8(m_deviceConfig.id.c_str());
+    wxDeviceId.Replace("/", "_"); // Replace slashes with underscores
+    wxString deviceDir = workspaceDir + wxFileName::GetPathSeparator() + wxDeviceId;
+    wxString taskFilePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
+    
+    // Check throttling - only update disk if 2 seconds have passed since last update
+    // Bypass throttling for completion events and first updates
+    bool isCompletion = (status == "completed" || status == "failed");
+    auto now = std::chrono::steady_clock::now();
+    auto it = m_lastTaskUpdateTime.find(taskId);
+    
+    if (!isCompletion && it != m_lastTaskUpdateTime.end()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second).count();
+        if (elapsed < 2000) { // Less than 2 seconds
+            // Skip disk write but still update in-memory state if needed
+            SSH_LOG("Throttling task update - only " << elapsed << "ms since last update for task: " << taskId.ToStdString());
+            return;
+        }
+    }
+    
+    // Update last update time
+    m_lastTaskUpdateTime[taskId] = now;
+    
+    SSH_LOG("Updating task file - workspaceDir: " << workspaceDir.ToStdString());
+    SSH_LOG("Updating task file - wxDeviceId: " << wxDeviceId.ToStdString());
+    SSH_LOG("Updating task file - deviceDir: " << deviceDir.ToStdString());
+    SSH_LOG("Updating task file: " << taskFilePath.ToStdString() << " for task: " << taskId.ToStdString());
+    
+    // Load existing task file
+    FileTransferTaskList taskList;
+    std::ifstream file(taskFilePath.ToStdString());
+    if (file.is_open()) {
+        try {
+            nlohmann::json j;
+            file >> j;
+            file.close();
+            taskList = FileTransferTaskList::fromJson(j);
+        } catch (const std::exception& e) {
+            SSH_LOG("Failed to load task list: " << e.what());
+            file.close();
+            return;
+        }
+    } else {
+        SSH_LOG("Task file not found, creating new one");
+        taskList.device_id = m_deviceConfig.id;
+    }
+    
+    // Find and update the task
+    bool taskFound = false;
+    for (auto& task : taskList.tasks) {
+        if (wxString::FromUTF8(task.id.c_str()) == taskId) {
+            task.progress = progress;
+            task.status = status.ToStdString();
+            if (!result.IsEmpty()) {
+                task.result = result.ToStdString();
+            }
+            taskFound = true;
+            SSH_LOG("Updated task: " << task.id << " progress: " << progress << " status: " << status.ToStdString());
+            break;
+        }
+    }
+    
+    if (!taskFound) {
+        SSH_LOG("Task not found in list: " << taskId.ToStdString());
+        return;
+    }
+    
+    // Ensure device directory exists
+    wxFileName::Mkdir(deviceDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    
+    // Save updated task list
+    try {
+        nlohmann::json j = taskList.to_json();
+        std::ofstream outfile(taskFilePath.ToStdString());
+        if (outfile.is_open()) {
+            outfile << j.dump(4);
+            outfile.close();
+            SSH_LOG("Task file saved successfully");
+        } else {
+            SSH_LOG("Failed to open task file for writing: " << taskFilePath.ToStdString());
+        }
+    } catch (const std::exception& e) {
+        SSH_LOG("Failed to save task list: " << e.what());
+    }
 }
 
 

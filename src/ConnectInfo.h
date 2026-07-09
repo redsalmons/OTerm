@@ -16,6 +16,10 @@
 
 #include <memory>
 
+#include <chrono>
+
+#include <map>
+
 
 
 class TermGLCanvas;
@@ -120,6 +124,8 @@ private:
 
     void OnFileTransferComplete(wxCommandEvent& event);
 
+    void UpdateTaskFile(const wxString& taskId, int progress, const wxString& status, const wxString& result = "");
+
 
 
     wxStaticText* m_label;
@@ -149,6 +155,8 @@ private:
     std::string m_currentInput; // Record current keyboard input
 
     FileTransferDialog* m_fileTransferDialog; // File transfer dialog
+    
+    std::map<wxString, std::chrono::steady_clock::time_point> m_lastTaskUpdateTime; // Track last update time for throttling
 
     int m_prevRows;
 

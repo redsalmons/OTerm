@@ -74,15 +74,21 @@ FileTransferDialog::~FileTransferDialog() {
         m_taskTimer->Stop();
         delete m_taskTimer;
     }
+    
+    // Dissociate image list from list controls to prevent crash during their destruction
+    if (m_localList) {
+        m_localList->SetImageList(nullptr, wxIMAGE_LIST_SMALL);
+    }
+    if (m_remoteList) {
+        m_remoteList->SetImageList(nullptr, wxIMAGE_LIST_SMALL);
+    }
+    
     if (m_imageList) {
         delete m_imageList;
     }
-    if (m_remoteDropTarget) {
-        delete m_remoteDropTarget;
-    }
-    if (m_localDropTarget) {
-        delete m_localDropTarget;
-    }
+    // Do not manually delete m_remoteDropTarget and m_localDropTarget.
+    // In wxWidgets, SetDropTarget transfers ownership to the wxWindow (m_remoteList and m_localList),
+    // which will automatically delete them when they are destroyed.
 }
 
 void FileTransferDialog::CreateImageList() {
@@ -360,7 +366,7 @@ void FileTransferDialog::CreateControls() {
     
     m_localList = new wxListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                  wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER);
-    m_localList->AssignImageList(m_imageList, wxIMAGE_LIST_SMALL);
+    m_localList->SetImageList(m_imageList, wxIMAGE_LIST_SMALL);
     
     // Add columns to local list
     m_localList->AppendColumn(TranslationHelper::Tr("name"), wxLIST_FORMAT_LEFT, 300);
@@ -372,7 +378,7 @@ void FileTransferDialog::CreateControls() {
     
     m_remoteList = new wxListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                   wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER);
-    m_remoteList->AssignImageList(m_imageList, wxIMAGE_LIST_SMALL);
+    m_remoteList->SetImageList(m_imageList, wxIMAGE_LIST_SMALL);
     
     // Set drop target for remote list (for upload from local)
     m_remoteDropTarget = new FileDropTarget(GetParent(), wxString(m_deviceConfig.id.c_str(), wxConvUTF8), m_remoteCurrentPath, false);
