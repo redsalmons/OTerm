@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(OceanTerm VERSION 1.0.0 LANGUAGES C CXX)
 
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -27,7 +31,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 execute_process(
-    COMMAND ${WX_CONFIG_EXECUTABLE} --libs core,base,gl,net
+    COMMAND ${WX_CONFIG_EXECUTABLE} --libs core,base,gl,net,adv
     OUTPUT_VARIABLE WX_LIBS
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -65,9 +69,11 @@ add_executable(OceanTerm
     src/EventProxy.cpp
     src/CommandInterceptor.cpp
     src/MacTitleBar.mm
+    src/MacKeyMonitor.mm
+    src/MacIMEProxy.mm
 )
 
-set_source_files_properties(src/MacTitleBar.mm PROPERTIES COMPILE_FLAGS "-x objective-c++")
+set_source_files_properties(src/MacTitleBar.mm src/MacKeyMonitor.mm src/MacIMEProxy.mm PROPERTIES COMPILE_FLAGS "-x objective-c++")
 
 target_include_directories(OceanTerm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -95,6 +101,7 @@ target_link_options(OceanTerm PRIVATE
     "SHELL:${WX_LIBS}"
     "LINKER:-framework,Foundation"
     "LINKER:-framework,Cocoa"
+    "LINKER:-framework,Carbon"
     "LINKER:-framework,IOKit"
     "LINKER:-framework,CoreFoundation"
     "LINKER:-framework,AppKit"

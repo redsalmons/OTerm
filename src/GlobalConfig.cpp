@@ -6,6 +6,8 @@
 #include <openssl/md5.h>
 #include <iomanip>
 #include <sstream>
+#include <cmath>
+#include <algorithm>
 
 using json = nlohmann::json;
 
@@ -14,6 +16,7 @@ bool GlobalConfig::s_workspacePathSpecified = false;
 std::string GlobalConfig::s_language = "zh_CN";
 std::string GlobalConfig::s_fontName = "";
 int GlobalConfig::s_fontSize = 0;
+int GlobalConfig::s_zoomSteps = 0;
 std::string GlobalConfig::s_masterPassword = "";
 std::string GlobalConfig::x7f3a9k2m5p8q1r4 = "";
 double GlobalConfig::s_dpiScaleFactor = 1.0;
@@ -129,6 +132,25 @@ int GlobalConfig::GetFontSize() {
 
 void GlobalConfig::SetFontSize(int fontSize) {
     s_fontSize = fontSize;
+}
+
+int GlobalConfig::GetEffectiveFontSize() {
+    int fontSize = GetFontSize();
+    if (fontSize <= 0) fontSize = 12;
+    if (s_zoomSteps != 0) {
+        fontSize = static_cast<int>(fontSize * std::pow(1.1, s_zoomSteps) + 0.5);
+    }
+    if (fontSize < 8) fontSize = 8;
+    if (fontSize > 72) fontSize = 72;
+    return fontSize;
+}
+
+void GlobalConfig::AdjustFontZoom(int deltaSteps) {
+    s_zoomSteps = std::max(-20, std::min(40, s_zoomSteps + deltaSteps));
+}
+
+void GlobalConfig::ResetFontZoom() {
+    s_zoomSteps = 0;
 }
 
 std::string GlobalConfig::GetMasterPassword() {
@@ -251,12 +273,12 @@ double GlobalConfig::GetDPIScaleFactor() {
 }
 
 int GlobalConfig::GetTerminalFontSize(double dpiScale) {
-    int fontSize = GetFontSize();
+    int fontSize = GetEffectiveFontSize();
     if (fontSize <= 0) fontSize = 12;
     
     // Apply DPI scaling
     if (dpiScale > 1.0f) {
-        fontSize = static_cast<int>(fontSize * 2);
+        fontSize = static_cast<int>(fontSize * dpiScale + 0.5);
     }
     
     // Clamp to valid range

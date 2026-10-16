@@ -31,6 +31,8 @@ class TerminalPanel;
 
 class TerminalThread;
 
+class wxPopupTransientWindow;
+
 
 
 class TermGLCanvas : public wxGLCanvas {
@@ -52,6 +54,10 @@ public:
     void ClearScreenData();
 
     float GetDPIScale() const { return m_dpiScale; }
+
+    // Scale factor between logical window size and OpenGL framebuffer pixels.
+    // On macOS the GL drawable uses view (point) coordinates, so this is 1.
+    float GLPixelScale() const;
 
 
 
@@ -130,9 +136,15 @@ private:
 
     void InitializeGL();
 
+    bool CreateFontAtlas();
+
     void InitializeFontMetrics();
 
     void Render();
+
+    bool HandleZoomInput(const wxKeyEvent& event);
+
+    void BroadcastFontZoom();
 
     void CopySelectionToClipboard();
 
@@ -143,6 +155,12 @@ public:
     void ShowIMEInputBox();
 
     void HideIMEInputBox();
+
+    void UpdateIMEBoxPlacement();
+
+    // Rebuild the font atlas at the current GlobalConfig zoom level and refit
+    // the terminal grid. Called for every canvas when the zoom changes.
+    void ApplyFontZoom();
 
 
 
@@ -182,6 +200,8 @@ public:
     CloseCallback close_callback_;
 
     int m_wheelRotationAccumulator;
+
+    int m_zoomWheelAccumulator;
 
     bool m_glInitialized;
 
@@ -225,7 +245,27 @@ public:
 
     wxTextCtrl* m_imeInputBox;
 
+    // Floating window hosting the IME box on Windows. A native child HWND over
+    // the GL surface cannot be composited by GDI and leaves a dead patch, so
+    // it must live in a top-level popup instead.
+
+    wxPopupTransientWindow* m_imePopup;
+
     bool m_imeInputBoxVisible;
+
+    // Called when committed text arrives from the macOS IME view.
+    void OnIMECommit(const std::string& utf8);
+
+#ifdef __APPLE__
+
+    // On macOS the focused NSTextView consumes navigation keys at the AppKit
+    // level before wx can generate any key event, so they are intercepted by
+    // an NSEvent local monitor instead (MacKeyMonitor.mm).
+    void* m_macKeyMonitorToken;
+    void EnsureMacKeyMonitor();
+    bool HandleMacRawKey(unsigned short keyCode, unsigned long modifierFlags);
+
+#endif
 
     std::function<void(const char*, int)> m_imeCallback;
     

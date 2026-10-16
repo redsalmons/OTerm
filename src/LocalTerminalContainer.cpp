@@ -1,4 +1,5 @@
 #include "LocalTerminalContainer.h"
+#include "SSHManager.h"
 #include <fstream>
 #include <filesystem>
 #include <iostream>
@@ -36,8 +37,31 @@ LocalTerminalContainer::LocalTerminalContainer(int rows, int cols, const std::st
     
     // Start reading with 15ms intervals (~60 FPS polling)
     m_readTimer.Start(15);
+#elif defined(__APPLE__)
+    // Register the PTY master fd directly on the main CFRunLoop.
+    // wxEventLoop::GetActive() returns null during CallAfter dispatch on
+    // wxOSX, so wxEventLoopSource registration was unreliable — the terminal
+    // came up blank whenever no usable "active" loop existed.
+    {
+        CFSocketContext ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.info = this;
+        m_cfSocket = CFSocketCreateWithNative(kCFAllocatorDefault,
+                                              m_terminalManager.GetFd(),
+                                              kCFSocketReadCallBack,
+                                              &LocalTerminalContainer::OnFdReady,
+                                              &ctx);
+        if (m_cfSocket) {
+            CFRunLoopSourceRef src = CFSocketCreateRunLoopSource(kCFAllocatorDefault, m_cfSocket, 0);
+            CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
+            CFRelease(src);
+        }
+        SSH_LOG("LocalTerminalContainer: CFSocket registered, fd=" << m_terminalManager.GetFd()
+                << " socket=" << (void*)m_cfSocket);
+        ProcessRead(); // Drain anything already waiting on the fd
+    }
 #else
-    // Unix: Register FD with the event loop
+    // Linux/Unix: Register FD with the active event loop
     auto registerFd = [this]() {
         wxEventLoopBase* loop = wxEventLoop::GetActive();
         if (loop && m_terminalManager.GetFd() >= 0 && !m_fdSource) {
@@ -49,7 +73,6 @@ LocalTerminalContainer::LocalTerminalContainer(int rows, int cols, const std::st
     if (wxEventLoop::GetActive()) {
         registerFd();
     } else if (wxTheApp) {
-        // Use CallAfter to ensure the event loop is active, particularly for the initial tab created during app startup.
         wxTheApp->CallAfter(registerFd);
     }
 #endif
@@ -86,6 +109,12 @@ void LocalTerminalContainer::ClearUIHandler() {
 void LocalTerminalContainer::StopTerminal() {
 #ifdef _WIN32
     m_readTimer.Stop();
+#elif defined(__APPLE__)
+    if (m_cfSocket) {
+        CFSocketInvalidate(m_cfSocket);
+        CFRelease(m_cfSocket);
+        m_cfSocket = nullptr;
+    }
 #else
     if (m_fdSource) {
         delete m_fdSource;
@@ -146,6 +175,12 @@ int LocalTerminalContainer::GetScrollOffset() const {
     return m_vtermManager.get_scroll_offset();
 }
 
+#if defined(__APPLE__)
+void LocalTerminalContainer::OnFdReady(CFSocketRef, CFSocketCallBackType, CFDataRef, const void*, void* info) {
+    static_cast<LocalTerminalContainer*>(info)->ProcessRead();
+}
+#endif
+
 #ifndef _WIN32
 void LocalTerminalContainer::OnReadWaiting() {
     ProcessRead();
@@ -176,6 +211,9 @@ void LocalTerminalContainer::ProcessRead() {
         return;
     }
 
+    static int processReadCalls = 0;
+    SSH_LOG("LocalTerminalContainer::ProcessRead call=" << ++processReadCalls);
+
     char buffer[8192];
     bool has_data = false;
 
@@ -202,6 +240,7 @@ void LocalTerminalContainer::ProcessRead() {
     }
 
     if (has_data) {
+        SSH_LOG("LocalTerminalContainer::ProcessRead got data, flushing damage");
         m_vtermManager.flush_damage();
     }
 

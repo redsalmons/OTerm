@@ -23,6 +23,33 @@ extern "C" void SetupMacTitleBar(void* windowHandle) {
     }
 }
 
+extern "C" void MacActivateApp() {
+    @try {
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        if ([NSApp respondsToSelector:@selector(activate)]) {
+            // macOS 14+: activates the app and brings windows to the
+            // currently-visible space.
+            [NSApp activate];
+        } else {
+            [NSApp activateIgnoringOtherApps:YES];
+        }
+    } @catch (NSException *exception) {
+        // Ignore exceptions to prevent crash
+    }
+}
+
+extern "C" void MacWindowMoveToActiveSpace(void* windowHandle) {
+    @try {
+        NSView* view = (NSView*)windowHandle;
+        NSWindow* nsWindow = [view window];
+        if (nsWindow) {
+            nsWindow.collectionBehavior |= NSWindowCollectionBehaviorMoveToActiveSpace;
+        }
+    } @catch (NSException *exception) {
+        // Ignore exceptions to prevent crash
+    }
+}
+
 extern "C" void SetMacTitleBarVisible(void* windowHandle, bool visible) {
     @try {
         NSView* view = (NSView*)windowHandle;

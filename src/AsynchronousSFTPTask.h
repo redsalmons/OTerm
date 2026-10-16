@@ -7,6 +7,8 @@
 #include <queue>
 #include <vector>
 #include <string>
+#include <atomic>
+#include <memory>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 #ifndef _WIN32
@@ -19,6 +21,7 @@ wxDECLARE_EVENT(wxEVT_FILE_TRANSFER_PROGRESS, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_FILE_TRANSFER_COMPLETE, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_SSH_FILE_LIST, wxCommandEvent);
 wxDECLARE_EVENT(wxEVT_SSH_COMMAND_OUTPUT, wxCommandEvent);
+wxDECLARE_EVENT(wxEVT_SFTP_DNS_RESOLVED, wxCommandEvent);
 
 class AsynchronousSFTPTask : public wxEvtHandler
 #ifndef _WIN32
@@ -52,7 +55,10 @@ private:
     AsynchronousSFTPTask(wxEvtHandler* handler, const DeviceConfig& deviceConfig);
 
     void OnTimer(wxTimerEvent& event);
+    void OnTimeout(wxTimerEvent& event);
     void OnSocketEvent(wxSocketEvent& event);
+    void OnDnsResolved(wxCommandEvent& event);
+    void ConnectSocket(const std::string& ip);
     void DoStateMachineStep();
     void Cleanup();
     void Fail(const std::string& errorMsg);
@@ -111,8 +117,16 @@ private:
     std::vector<char> m_cacheBuffer; // For uploading partial block management
     
     wxTimer m_timer;
+    wxTimer m_timeoutTimer;
+    SFTPState m_watchState = SFTPState::CONNECTING;
+    long long m_watchProgress = -1; // bytesTransferred + cmdOutput size at last watchdog reset
+
+    // Liveness sentinel for the detached DNS worker thread
+    std::shared_ptr<std::atomic<bool>> m_alive = std::make_shared<std::atomic<bool>>(true);
     static const int TIMER_ID = 30001;
     static const int SOCKET_ID = 30002;
+    static const int TIMEOUT_TIMER_ID = 30003;
+    static const int STALL_TIMEOUT_MS = 30000;
 
 #ifndef _WIN32
     wxEventLoopSource* m_fdSource = nullptr;

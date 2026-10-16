@@ -1,5 +1,8 @@
 #include "MasterPasswordDialog.h"
 #include "TranslationHelper.h"
+#if defined(__WXMAC__)
+#include "MacTitleBar.h"
+#endif
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
@@ -74,6 +77,15 @@ MasterPasswordDialog::MasterPasswordDialog(wxWindow* parent, bool isNewPassword)
     if (m_passwordCtrl) {
         m_passwordCtrl->SetFocus();
     }
+
+#if defined(__WXMAC__)
+    // The backing NSWindow only exists once the dialog is shown; defer so the
+    // modal dialog lands on the user's current space instead of ordering out.
+    CallAfter([this]() {
+        MacWindowMoveToActiveSpace(GetHandle());
+        Raise();
+    });
+#endif
 }
 
 MasterPasswordDialog::~MasterPasswordDialog() {

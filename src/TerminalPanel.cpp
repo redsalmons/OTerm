@@ -218,6 +218,11 @@ void TerminalPanel::SetupCanvasConnection() {
         SPLIT_LOG("Key callback invoked: length=" << length << " first=" << (length > 0 ? (int)(unsigned char)data[0] : 0));
         if (m_terminalContainer) {
             m_terminalContainer->QueueInput(std::string(data, length));
+            // Snap the view back to the bottom when the user types while scrolled up
+            if (m_terminalContainer->GetScrollOffset() > 0) {
+                m_terminalContainer->ResetScrollToBottom();
+                UpdateCanvasFromTerminal();
+            }
         }
     });
     SPLIT_LOG("Key callback set");
@@ -372,7 +377,11 @@ void TerminalPanel::OnClosePanel(wxCommandEvent& event) {
 void TerminalPanel::OnSize(wxSizeEvent& event) {
     Layout();
     if (m_terminalContainer && m_canvas) {
+        // Convert to GL pixel space: cell metrics and margins are physical pixels
+        float glScale = m_canvas->GLPixelScale();
         wxSize size = GetClientSize();
+        size.SetWidth(static_cast<int>(size.GetWidth() * glScale));
+        size.SetHeight(static_cast<int>(size.GetHeight() * glScale));
         
         // Get font height for minimum height check
         int cellHeight = m_canvas->m_cellHeight;
@@ -455,6 +464,8 @@ void TerminalPanel::OnSize(wxSizeEvent& event) {
 
 void TerminalPanel::UpdateCanvasFromTerminal() {
     if (!m_canvas) {
+        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
+        dbg << "UpdateCanvasFromTerminal: m_canvas is null\n";
         return;
     }
     
@@ -475,6 +486,9 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
     }
     
     if (!has_buffer) {
+        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
+        dbg << "UpdateCanvasFromTerminal: no buffer (alive="
+            << (m_terminalContainer ? m_terminalContainer->IsSessionAlive() : false) << ")\n";
         return;
     }
     
@@ -501,6 +515,14 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
     static int updateCount = 0;
     if (updateCount++ % 60 == 0) {
         SPLIT_LOG("UpdateCanvasFromTerminal: sending " << instances.size() << " cells (" << rows << "x" << cols << ") to canvas");
+    }
+    {
+        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
+        int nonempty = 0;
+        for (const auto& inst : instances) if (inst.char_code != 0) ++nonempty;
+        dbg << "UpdateCanvasFromTerminal #" << updateCount << " rows=" << rows << " cols=" << cols
+            << " cells=" << instances.size() << " nonempty=" << nonempty
+            << " has_buffer=" << has_buffer << "\n";
     }
     
     m_canvas->UpdateScreenData(instances);

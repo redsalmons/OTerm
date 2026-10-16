@@ -2,6 +2,9 @@
 #include "SSHManager.h"
 #include "TerminalPanel.h"
 #include <iostream>
+#include <thread>
+
+wxDEFINE_EVENT(wxEVT_SSH_DNS_RESOLVED, wxCommandEvent);
 
 SSHTerminalContainer::SSHTerminalContainer(int rows, int cols, const DeviceConfig& config)
     : m_deviceConfig(config),
@@ -35,12 +38,16 @@ SSHTerminalContainer::SSHTerminalContainer(int rows, int cols, const DeviceConfi
     // Set up timer event bindings
     m_keepAliveTimer.SetOwner(this, KEEPALIVE_TIMER_ID);
     Bind(wxEVT_TIMER, &SSHTerminalContainer::OnKeepAliveTimer, this, KEEPALIVE_TIMER_ID);
+    m_connectTimer.SetOwner(this, CONNECT_TIMER_ID);
+    Bind(wxEVT_TIMER, &SSHTerminalContainer::OnConnectTimeout, this, CONNECT_TIMER_ID);
+    Bind(wxEVT_SSH_DNS_RESOLVED, &SSHTerminalContainer::OnDnsResolved, this);
     
     SSH_LOG("SSHTerminalContainer created for " << config.address);
 }
 
 SSHTerminalContainer::~SSHTerminalContainer() {
     SSH_LOG("SSHTerminalContainer destructor called");
+    m_alive->store(false);
     Cleanup();
 }
 
@@ -64,6 +71,9 @@ bool SSHTerminalContainer::IsSessionAlive() const {
 }
 
 void SSHTerminalContainer::QueueInput(const std::string& input) {
+    if (m_sshState == SSH_PROMPTING_USERNAME || m_sshState == SSH_PROMPTING_PASSWORD) {
+        ArmConnectTimeout(); // user typing counts as progress
+    }
     if (m_sshState == SSH_PROMPTING_USERNAME) {
         for (char c : input) {
             if (c == '\r' || c == '\n') {
@@ -104,13 +114,8 @@ void SSHTerminalContainer::QueueInput(const std::string& input) {
         UpdateBackBuffer();
         TriggerDamage();
     } else if (m_sshState == SSH_READY && m_sshChannel) {
-        int rc = libssh2_channel_write(m_sshChannel, input.c_str(), input.length());
-        if (rc < 0) {
-            SSH_ERR("SSHTerminalContainer: Channel write failed: " << rc);
-            if (rc == LIBSSH2_ERROR_EAGAIN) {
-                HandleDirections();
-            }
-        }
+        m_outQueue.append(input);
+        FlushOutbound();
     }
 }
 
@@ -172,6 +177,12 @@ void SSHTerminalContainer::Connect() {
     SSH_LOG("SSHTerminalContainer::Connect initiated");
     Cleanup();
 
+    if (!EnsureLibssh2Init()) {
+        SSH_ERR("Failed to initialize libssh2");
+        SendStatusMessage("\r\nFailed to initialize SSH library.\r\n");
+        return;
+    }
+
     m_sshState = SSH_CONNECTING;
     m_authRetryCount = 0;
 
@@ -184,15 +195,70 @@ void SSHTerminalContainer::Connect() {
 
     Bind(wxEVT_SOCKET, &SSHTerminalContainer::OnSocketEvent, this, SOCKET_ID);
 
+    ArmConnectTimeout();
+
+    if (IsNumericIPv4(m_deviceConfig.address)) {
+        ConnectSocket(m_deviceConfig.address);
+    } else {
+        // Resolve on a worker thread so DNS cannot stall the UI
+        SendStatusMessage("Resolving " + m_deviceConfig.address + "...\r\n");
+        std::string host = m_deviceConfig.address;
+        auto alive = m_alive;
+        std::thread([this, host, alive]() {
+            std::string ip = ResolveIPv4(host);
+            if (!alive->load()) return;
+            wxCommandEvent evt(wxEVT_SSH_DNS_RESOLVED);
+            evt.SetString(wxString::FromUTF8(ip));
+            wxQueueEvent(this, evt.Clone());
+        }).detach();
+    }
+}
+
+void SSHTerminalContainer::ConnectSocket(const std::string& ip) {
+    if (!m_socket) return;
+
     wxIPV4address addr;
-    addr.Hostname(m_deviceConfig.address);
+    addr.Hostname(ip); // numeric IP — does not block
     addr.Service(m_deviceConfig.port);
 
     m_socket->Connect(addr, false); // Asynchronous connect
 }
 
+void SSHTerminalContainer::OnDnsResolved(wxCommandEvent& event) {
+    if (!m_socket || m_sshState != SSH_CONNECTING) return;
+
+    std::string ip = event.GetString().ToStdString();
+    if (ip.empty()) {
+        SSH_ERR("DNS resolution failed for " << m_deviceConfig.address);
+        SendStatusMessage("\r\nCould not resolve host: " + m_deviceConfig.address + "\r\n");
+        Cleanup();
+        return;
+    }
+
+    SSH_LOG("Resolved " << m_deviceConfig.address << " -> " << ip);
+    ArmConnectTimeout();
+    ConnectSocket(ip);
+}
+
+void SSHTerminalContainer::ArmConnectTimeout() {
+    if (m_sshState != SSH_READY && m_sshState != SSH_DISCONNECTED) {
+        m_connectTimer.Start(CONNECT_TIMEOUT_MS, wxTIMER_ONE_SHOT);
+    }
+}
+
+void SSHTerminalContainer::OnConnectTimeout(wxTimerEvent& event) {
+    if (m_sshState == SSH_DISCONNECTED || m_sshState == SSH_READY) {
+        return;
+    }
+    SSH_ERR("Connection timed out in state " << GetStateName(m_sshState));
+    SendStatusMessage("\r\nConnection timed out.\r\n");
+    Cleanup();
+}
+
 void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
     if (!m_socket) return;
+
+    ArmConnectTimeout(); // any socket activity counts as progress
 
     switch (event.GetSocketEvent()) {
         case wxSOCKET_CONNECTION: {
@@ -213,11 +279,17 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
             libssh2_session_set_blocking(m_sshSession, 0); // Non-blocking
             
 #ifndef _WIN32
-            // Turn off wxSocket notifications on Unix; we will use the raw FD source
-            m_socket->Notify(false);
+            // Turn off wxSocket notifications on Unix; we will use the raw FD source.
+            // If the FD source cannot be registered, keep socket notifications as fallback.
             wxEventLoopBase* loop = wxEventLoop::GetActive();
             if (loop && m_socket->GetSocket() >= 0) {
                 m_fdSource = loop->AddSourceForFD(m_socket->GetSocket(), this, wxEVENT_SOURCE_INPUT | wxEVENT_SOURCE_OUTPUT);
+            }
+            if (m_fdSource) {
+                m_socket->Notify(false);
+            } else {
+                SSH_ERR("Failed to register FD source; falling back to wxSocket notifications");
+                m_socket->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_OUTPUT_FLAG | wxSOCKET_LOST_FLAG);
             }
 #endif
 
@@ -242,6 +314,7 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
                     RequestShell();
                     break;
                 case SSH_READY:
+                    FlushOutbound();
                     ProcessSSHData();
                     break;
                 default:
@@ -266,6 +339,9 @@ void SSHTerminalContainer::OnSocketEvent(wxSocketEvent& event) {
                     break;
                 case SSH_SHELL_REQUESTING:
                     RequestShell();
+                    break;
+                case SSH_READY:
+                    FlushOutbound();
                     break;
                 default:
                     break;
@@ -300,6 +376,7 @@ void SSHTerminalContainer::OnExceptionWaiting() {
 #endif
 
 void SSHTerminalContainer::DriveStateMachine() {
+    ArmConnectTimeout(); // any fd activity counts as progress
     switch (m_sshState) {
         case SSH_HANDSHAKING:
             ContinueHandshake();
@@ -317,6 +394,7 @@ void SSHTerminalContainer::DriveStateMachine() {
             RequestShell();
             break;
         case SSH_READY:
+            FlushOutbound();
             ProcessSSHData();
             break;
         default:
@@ -451,6 +529,7 @@ void SSHTerminalContainer::RequestShell() {
     if (rc == 0) {
         SSH_LOG("SSH Shell successfully initiated. Connection fully ready.");
         m_sshState = SSH_READY;
+        m_connectTimer.Stop();
 
         // Send initial resize
         libssh2_channel_request_pty_size_ex(m_sshChannel, m_cols, m_rows, 0, 0);
@@ -459,8 +538,9 @@ void SSHTerminalContainer::RequestShell() {
         libssh2_keepalive_config(m_sshSession, 1, 10);
         m_keepAliveTimer.Start(10000);
 
-        // Bind normal socket input and output events for regular SSH operations
-        m_socket->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
+        // Steady state: monitor inbound data only. Outbound interest is
+        // re-registered on demand by HandleDirections() when writes block.
+        WatchInboundOnly();
         // Process any data that might already be waiting
         ProcessSSHData();
     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
@@ -497,6 +577,11 @@ void SSHTerminalContainer::ProcessSSHData() {
         }
     }
 
+    // Drain stderr/extended data so it cannot starve the channel window.
+    // On a PTY shell this is normally empty (stderr is merged into stdout).
+    while (libssh2_channel_read_stderr(m_sshChannel, buffer, sizeof(buffer)) > 0) {
+    }
+
     if (has_data) {
         m_vtermManager.flush_damage();
         UpdateBackBuffer();
@@ -510,6 +595,54 @@ void SSHTerminalContainer::ProcessSSHData() {
     }
 }
 
+void SSHTerminalContainer::FlushOutbound() {
+    if (!m_sshChannel || m_outQueue.empty()) {
+        return;
+    }
+
+    while (!m_outQueue.empty()) {
+        int rc = libssh2_channel_write(m_sshChannel, m_outQueue.data(), (int)m_outQueue.size());
+        if (rc > 0) {
+            m_outQueue.erase(0, (size_t)rc);
+        } else if (rc == LIBSSH2_ERROR_EAGAIN) {
+            HandleDirections(); // registers outbound interest so we get woken up
+            return;
+        } else {
+            SSH_ERR("SSHTerminalContainer: Channel write failed: " << rc);
+            m_outQueue.clear();
+            return;
+        }
+    }
+
+    // Backlog fully drained: drop any stale outbound interest.
+    WatchInboundOnly();
+}
+
+void SSHTerminalContainer::WatchInboundOnly() {
+    if (!m_socket) return;
+
+#ifndef _WIN32
+    if (m_fdSource) {
+        int sockfd = m_socket->GetSocket();
+        if (sockfd >= 0) {
+            delete m_fdSource;
+            m_fdSource = nullptr;
+            wxEventLoopBase* loop = wxEventLoop::GetActive();
+            if (loop) {
+                m_fdSource = loop->AddSourceForFD(sockfd, this, wxEVENT_SOURCE_INPUT);
+            }
+            if (m_fdSource) {
+                return;
+            }
+            // Re-registration failed: fall through to wxSocket notifications
+        }
+    }
+#endif
+
+    m_socket->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
+    m_socket->Notify(true);
+}
+
 void SSHTerminalContainer::SendStatusMessage(const std::string& msg) {
     m_vtermManager.write_input(msg.c_str(), msg.length());
     UpdateBackBuffer();
@@ -518,6 +651,7 @@ void SSHTerminalContainer::SendStatusMessage(const std::string& msg) {
 
 void SSHTerminalContainer::Cleanup() {
     m_keepAliveTimer.Stop();
+    m_connectTimer.Stop();
 
 #ifndef _WIN32
     if (m_fdSource) {
@@ -547,6 +681,7 @@ void SSHTerminalContainer::Cleanup() {
 
     m_sshState = SSH_DISCONNECTED;
     m_pendingInput.clear();
+    m_outQueue.clear();
 }
 
 void SSHTerminalContainer::HandleDirections() {
@@ -599,7 +734,10 @@ void SSHTerminalContainer::HandleDirections() {
         flags |= wxSOCKET_INPUT_FLAG;
     }
 
+    // Reached only when there is no FD source (Windows always, or as a Unix
+    // fallback) — socket notifications may have been disabled, so re-enable.
     m_socket->SetNotify(flags);
+    m_socket->Notify(true);
 }
 
 void SSHTerminalContainer::SwapBuffers() {

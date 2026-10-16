@@ -16,12 +16,47 @@
 
 wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_REQUEST, wxCommandEvent);
 
+namespace {
+
+void AppendFileRow(wxDataViewListCtrl* list, const wxString& name,
+                   const wxIcon& icon, const wxString& size,
+                   const wxString& date) {
+    wxVector<wxVariant> row;
+    row.push_back(wxVariant(wxDataViewIconText(name, icon)));
+    row.push_back(wxVariant(size));
+    row.push_back(wxVariant(date));
+    list->AppendItem(row);
+}
+
+// Column 0 holds wxDataViewIconText, not a plain string — GetTextValue would
+// return empty on it. Extract the label from the variant.
+wxString GetItemName(wxDataViewListCtrl* list, int row) {
+    wxVariant value;
+    list->GetValue(value, row, 0);
+    wxDataViewIconText data;
+    data << value;
+    return data.GetText();
+}
+
+wxString GenerateUUID() {
+    wxString uuid;
+    for (int i = 0; i < 32; i++) {
+        if (i == 8 || i == 12 || i == 16 || i == 20) uuid += "-";
+        int digit = rand() % 16;
+        uuid += digit < 10 ? wxString::Format("%d", digit)
+                         : wxString::Format("%c", 'a' + (digit - 10));
+    }
+    return uuid;
+}
+
+} // namespace
+
 FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, const DeviceConfig& deviceConfig)
     : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize,
                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-      m_deviceConfig(deviceConfig), m_imageList(nullptr),
+      m_deviceConfig(deviceConfig),
       m_localList(nullptr), m_remoteList(nullptr), m_taskList(nullptr), m_localPathLabel(nullptr),
-      m_remotePathLabel(nullptr), m_remoteDropTarget(nullptr), m_localDropTarget(nullptr),
+      m_remotePathLabel(nullptr),
       m_localCurrentPath(
 #ifdef _WIN32
           wxEmptyString
@@ -42,7 +77,7 @@ FileTransferDialog::FileTransferDialog(wxWindow* parent, const wxString& title, 
     Bind(wxEVT_FILE_TRANSFER_PROGRESS, &FileTransferDialog::OnFileTransferProgress, this);
     Bind(wxEVT_FILE_TRANSFER_COMPLETE, &FileTransferDialog::OnFileTransferComplete, this);
     
-    CreateImageList();
+    CreateIcons();
     CreateControls();
     LayoutControls();
     
@@ -74,38 +109,13 @@ FileTransferDialog::~FileTransferDialog() {
         m_taskTimer->Stop();
         delete m_taskTimer;
     }
-    
-    // Dissociate image list from list controls to prevent crash during their destruction
-    if (m_localList) {
-        m_localList->SetImageList(nullptr, wxIMAGE_LIST_SMALL);
-    }
-    if (m_remoteList) {
-        m_remoteList->SetImageList(nullptr, wxIMAGE_LIST_SMALL);
-    }
-    
-    if (m_imageList) {
-        delete m_imageList;
-    }
-    // Do not manually delete m_remoteDropTarget and m_localDropTarget.
-    // In wxWidgets, SetDropTarget transfers ownership to the wxWindow (m_remoteList and m_localList),
-    // which will automatically delete them when they are destroyed.
 }
 
-void FileTransferDialog::CreateImageList() {
-    // Create image list with folder, file, and loading icons
-    m_imageList = new wxImageList(16, 16, true);
-    
-    // Add folder icon
-    wxIcon folderIcon = wxArtProvider::GetIcon(wxART_FOLDER, wxART_OTHER, wxSize(16, 16));
-    m_imageList->Add(folderIcon);
-    
-    // Add file icon
-    wxIcon fileIcon = wxArtProvider::GetIcon(wxART_NORMAL_FILE, wxART_OTHER, wxSize(16, 16));
-    m_imageList->Add(fileIcon);
-    
-    // Add loading icon (use a different icon for loading state)
-    wxIcon loadingIcon = wxArtProvider::GetIcon(wxART_EXECUTABLE_FILE, wxART_OTHER, wxSize(16, 16));
-    m_imageList->Add(loadingIcon);
+void FileTransferDialog::CreateIcons() {
+    const wxSize sz(16, 16);
+    m_folderIcon = wxArtProvider::GetIcon(wxART_FOLDER, wxART_OTHER, sz);
+    m_fileIcon = wxArtProvider::GetIcon(wxART_NORMAL_FILE, wxART_OTHER, sz);
+    m_loadingIcon = wxArtProvider::GetIcon(wxART_EXECUTABLE_FILE, wxART_OTHER, sz);
 }
 
 void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
@@ -138,11 +148,11 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
     
     // Clear existing items
     m_remoteList->DeleteAllItems();
-    
+    m_remoteFileSizes.clear();
+
     // Add parent directory entry
-    long parentIndex = m_remoteList->InsertItem(0, "..", ICON_FOLDER);
-    m_remoteList->SetItem(parentIndex, 1, "");
-    m_remoteList->SetItem(parentIndex, 2, "");
+    AppendFileRow(m_remoteList, "..", m_folderIcon, "", "");
+    m_remoteFileSizes.push_back(0);
     
     // Parse ls -la output
     wxArrayString contentLines = wxSplit(dirContent, '\n');
@@ -171,23 +181,17 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
             }
             
             SSH_LOG("Adding item: " << name);
-            int iconIndex = isDirectory ? ICON_FOLDER : ICON_FILE;
-            long index = m_remoteList->InsertItem(itemsAdded + 1, name, iconIndex);
-            
-            // Set size column (empty for directories)
-            if (isDirectory) {
-                m_remoteList->SetItem(index, 1, "");
-            } else {
-                long long size = 0;
+            wxString displaySize;
+            long long size = 0;
+            if (!isDirectory) {
                 sizeStr.ToLongLong(&size);
-                m_remoteList->SetItem(index, 1, FormatFileSize(size));
-                // Store actual size in item data
-                m_remoteList->SetItemData(index, size);
+                displaySize = FormatFileSize(size);
             }
-            
-            // Set date column (simplified format from ls -la)
             wxString dateStr = month + " " + day + " " + time;
-            m_remoteList->SetItem(index, 2, dateStr);
+            AppendFileRow(m_remoteList, name,
+                          isDirectory ? m_folderIcon : m_fileIcon,
+                          displaySize, dateStr);
+            m_remoteFileSizes.push_back(size);
             
             itemsAdded++;
         }
@@ -198,15 +202,10 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
     // Update path label (use full path if available)
     if (targetPath == "~" && !m_remoteCurrentPath.IsEmpty() && m_remoteCurrentPath != "~") {
         // Already have full path from pwd, don't override
-        m_remotePathLabel->SetLabel(TranslationHelper::Tr("remoteDirectory") + m_remoteCurrentPath);
+        m_remotePathLabel->SetLabel(m_remoteCurrentPath);
     } else {
-        m_remotePathLabel->SetLabel(TranslationHelper::Tr("remoteDirectory") + targetPath);
+        m_remotePathLabel->SetLabel(targetPath);
         m_remoteCurrentPath = targetPath;
-    }
-    
-    // Update drop target remote path
-    if (m_remoteDropTarget) {
-        m_remoteDropTarget->UpdateRemotePath(m_remoteCurrentPath);
     }
     
     SSH_LOG("OnSSHFileList called - END");
@@ -223,13 +222,8 @@ void FileTransferDialog::OnSSHCommandOutput(wxCommandEvent& event) {
     // If this is a pwd output, update the remote current path
     if (!output.IsEmpty() && output.StartsWith("/")) {
         m_remoteCurrentPath = output;
-        m_remotePathLabel->SetLabel(TranslationHelper::Tr("remoteDirectory") + m_remoteCurrentPath);
+        m_remotePathLabel->SetLabel(m_remoteCurrentPath);
         SSH_LOG("Updated remote current path to: " << m_remoteCurrentPath);
-        
-        // Update drop target remote path
-        if (m_remoteDropTarget) {
-            m_remoteDropTarget->UpdateRemotePath(m_remoteCurrentPath);
-        }
         
         // Also request the directory listing for the full path
         RequestRemoteDirectory(m_remoteCurrentPath);
@@ -251,13 +245,11 @@ void FileTransferDialog::PopulateLocalList(const wxString& path) {
         for (int i = 0; i < 26; i++) {
             if (drives & (1 << i)) {
                 wxString driveLabel = wxString::Format("%c:", 'A' + i);
-                long index = m_localList->InsertItem(itemIndex, driveLabel, ICON_FOLDER);
-                m_localList->SetItem(index, 1, "");
-                m_localList->SetItem(index, 2, "");
+                AppendFileRow(m_localList, driveLabel, m_folderIcon, "", "");
                 itemIndex++;
             }
         }
-        m_localPathLabel->SetLabel(TranslationHelper::Tr("localDirectory") + "Computer");
+        m_localPathLabel->SetLabel("Computer");
         m_localCurrentPath = wxEmptyString;
         return;
     }
@@ -276,9 +268,7 @@ void FileTransferDialog::PopulateLocalList(const wxString& path) {
     }
 #endif
     if (showParent) {
-        long parentIndex = m_localList->InsertItem(0, "..", ICON_FOLDER);
-        m_localList->SetItem(parentIndex, 1, "");
-        m_localList->SetItem(parentIndex, 2, "");
+        AppendFileRow(m_localList, "..", m_folderIcon, "", "");
     }
     
     wxDir dir(path);
@@ -293,46 +283,40 @@ void FileTransferDialog::PopulateLocalList(const wxString& path) {
     while (hasFiles) {
         wxString fullPath = path + wxFileName::GetPathSeparator() + filename;
         bool isDirectory = wxDirExists(fullPath);
-        int iconIndex = isDirectory ? ICON_FOLDER : ICON_FILE;
-        
-        long index = m_localList->InsertItem(itemIndex, filename, iconIndex);
-        
-        if (isDirectory) {
-            m_localList->SetItem(index, 1, "");
-        } else {
+
+        wxString displaySize;
+        if (!isDirectory) {
             wxFileName fn(fullPath);
-            long long fileSize = fn.GetSize().GetValue();
-            m_localList->SetItem(index, 1, FormatFileSize(fileSize));
+            displaySize = FormatFileSize(fn.GetSize().GetValue());
         }
-        
-        // Get file modification time
+
+        wxString dateStr;
         wxDateTime modTime = wxFileName(fullPath).GetModificationTime();
         if (modTime.IsValid()) {
-            m_localList->SetItem(index, 2, FormatFileDate(modTime));
-        } else {
-            m_localList->SetItem(index, 2, "");
+            dateStr = FormatFileDate(modTime);
         }
+
+        AppendFileRow(m_localList, filename,
+                      isDirectory ? m_folderIcon : m_fileIcon,
+                      displaySize, dateStr);
         
         itemIndex++;
         hasFiles = dir.GetNext(&filename);
     }
     
     // Update path label
-    m_localPathLabel->SetLabel(TranslationHelper::Tr("localDirectory") + path);
+    m_localPathLabel->SetLabel(path);
     m_localCurrentPath = path;
     
-    // Update local drop target path
-    if (m_localDropTarget) {
-        m_localDropTarget->UpdateLocalPath(path);
-    }
 }
 
 void FileTransferDialog::PopulateRemoteList() {
     // Remote list is populated lazily via SSH thread
     if (m_remoteList) {
         m_remoteList->DeleteAllItems();
-        long index = m_remoteList->InsertItem(0, "Loading...", ICON_LOADING);
-        m_remoteList->SetItem(index, 1, "");
+        m_remoteFileSizes.clear();
+        AppendFileRow(m_remoteList, "Loading...", m_loadingIcon, "", "");
+        m_remoteFileSizes.push_back(0);
     }
 }
 
@@ -360,44 +344,151 @@ wxString FileTransferDialog::FormatFileDate(const wxDateTime& date) {
 void FileTransferDialog::CreateControls() {
     // Create main panel
     wxPanel* mainPanel = new wxPanel(this, wxID_ANY);
-    
+    mainPanel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+
+    auto makePathRow = [mainPanel](wxStaticText*& label, const wxString& path,
+                                   std::function<void()> onRefresh) -> wxSizer* {
+        label = new wxStaticText(mainPanel, wxID_ANY, path, wxDefaultPosition,
+                                 wxDefaultSize, wxST_ELLIPSIZE_MIDDLE);
+        label->SetFont(label->GetFont().Bold());
+
+        wxButton* refreshBtn = new wxButton(mainPanel, wxID_ANY,
+                                            TranslationHelper::Tr("refresh"),
+                                            wxDefaultPosition, wxDefaultSize,
+                                            wxBU_EXACTFIT);
+        refreshBtn->SetToolTip(TranslationHelper::Tr("refresh"));
+        refreshBtn->Bind(wxEVT_BUTTON, [onRefresh](wxCommandEvent&) { onRefresh(); });
+
+        wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
+        row->Add(label, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 4);
+        row->Add(refreshBtn, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 4);
+        return row;
+    };
+
     // Create local section
-    m_localPathLabel = new wxStaticText(mainPanel, wxID_ANY, TranslationHelper::Tr("localDirectory") + m_localCurrentPath);
-    
-    m_localList = new wxListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                 wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER);
-    m_localList->SetImageList(m_imageList, wxIMAGE_LIST_SMALL);
-    
-    // Add columns to local list
-    m_localList->AppendColumn(TranslationHelper::Tr("name"), wxLIST_FORMAT_LEFT, 300);
-    m_localList->AppendColumn(TranslationHelper::Tr("size"), wxLIST_FORMAT_RIGHT, 100);
-    m_localList->AppendColumn(TranslationHelper::Tr("changed"), wxLIST_FORMAT_LEFT, 150);
+    wxSizer* localPathRow = makePathRow(m_localPathLabel, m_localCurrentPath,
+                                        [this]() { PopulateLocalList(m_localCurrentPath); });
+
+    m_localList = new wxDataViewListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                         wxDV_ROW_LINES | wxDV_SINGLE);
+    m_localList->AppendIconTextColumn(TranslationHelper::Tr("name"),
+                                      wxDATAVIEW_CELL_INERT, -1, wxALIGN_LEFT,
+                                      wxDATAVIEW_COL_RESIZABLE);
+    m_localList->AppendTextColumn(TranslationHelper::Tr("size"),
+                                  wxDATAVIEW_CELL_INERT, 60, wxALIGN_RIGHT,
+                                  wxDATAVIEW_COL_RESIZABLE);
+    m_localList->AppendTextColumn(TranslationHelper::Tr("changed"),
+                                  wxDATAVIEW_CELL_INERT, 93, wxALIGN_LEFT,
+                                  wxDATAVIEW_COL_RESIZABLE);
     
     // Create remote section
-    m_remotePathLabel = new wxStaticText(mainPanel, wxID_ANY, TranslationHelper::Tr("remoteDirectory") + m_remoteCurrentPath);
+    wxSizer* remotePathRow = makePathRow(m_remotePathLabel, m_remoteCurrentPath,
+                                         [this]() { RequestRemoteDirectory(m_remoteCurrentPath); });
+
+    m_remoteList = new wxDataViewListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                          wxDV_ROW_LINES | wxDV_SINGLE);
     
-    m_remoteList = new wxListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                  wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER);
-    m_remoteList->SetImageList(m_imageList, wxIMAGE_LIST_SMALL);
-    
-    // Set drop target for remote list (for upload from local)
-    m_remoteDropTarget = new FileDropTarget(GetParent(), wxString(m_deviceConfig.id.c_str(), wxConvUTF8), m_remoteCurrentPath, false);
-    m_remoteList->SetDropTarget(m_remoteDropTarget);
-    
-    // Set drop target for local list (for download from remote)
-    m_localDropTarget = new FileDropTarget(GetParent(), wxString(m_deviceConfig.id.c_str(), wxConvUTF8), m_localCurrentPath, true);
-    m_localList->SetDropTarget(m_localDropTarget);
+    // Drag & drop: local files -> remote list = upload; remote "path|size"
+    // text -> local list = download. wxDataViewCtrl needs explicit
+    // EnableDragSource/EnableDropTarget for the given formats.
+    m_localList->EnableDragSource(wxDF_FILENAME);
+    m_remoteList->EnableDragSource(wxDF_TEXT);
+    m_remoteList->EnableDropTarget(wxDF_FILENAME);
+    m_localList->EnableDropTarget(wxDF_TEXT);
+
+    auto queueTransfer = [this](const wxString& localPath, const wxString& remotePath,
+                                const wxString& action, long long size) {
+        nlohmann::json j;
+        j["id"] = GenerateUUID().ToStdString();
+        j["device_id"] = m_deviceConfig.id;
+        j["create_date"] = wxDateTime::Now().FormatISOCombined().ToStdString();
+        j["local"] = localPath.ToStdString();
+        j["remote"] = remotePath.ToStdString();
+        j["action"] = action.ToStdString();
+        j["size"] = size;
+        wxCommandEvent event(wxEVT_FILE_TRANSFER_REQUEST);
+        event.SetString(wxString(j.dump().c_str(), wxConvUTF8));
+        wxQueueEvent(GetParent(), event.Clone());
+    };
+
+    // Upload: OS file dropped onto the remote list.
+    m_remoteList->Bind(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, [](wxDataViewEvent& e) {
+        if (e.GetDataFormat() == wxDF_FILENAME) e.SetDropEffect(wxDragCopy);
+    });
+    m_remoteList->Bind(wxEVT_DATAVIEW_ITEM_DROP,
+        [this, queueTransfer](wxDataViewEvent& e) {
+            if (e.GetDataFormat() != wxDF_FILENAME) return;
+            wxFileDataObject data;
+            data.SetData(wxDF_FILENAME, e.GetDataSize(), e.GetDataBuffer());
+            const wxArrayString& files = data.GetFilenames();
+            if (files.IsEmpty()) return;
+
+            wxString localPath = files[0];
+            wxFileName fn(localPath);
+            wxString remotePath = m_remoteCurrentPath;
+            if (!remotePath.EndsWith("/")) remotePath += "/";
+            remotePath += fn.GetFullName();
+            long long size = 0;
+            if (fn.FileExists()) size = fn.GetSize().GetValue();
+            queueTransfer(localPath, remotePath, "upload", size);
+        });
+
+    // Download: remote "path|size" text dropped onto the local list.
+    // Accept both TEXT and UNICODETEXT — macOS delivers the latter.
+    m_localList->EnableDropTarget(wxDF_UNICODETEXT);
+    m_localList->Bind(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, [](wxDataViewEvent& e) {
+        if (e.GetDataFormat() == wxDF_TEXT || e.GetDataFormat() == wxDF_UNICODETEXT)
+            e.SetDropEffect(wxDragCopy);
+    });
+    m_localList->Bind(wxEVT_DATAVIEW_ITEM_DROP,
+        [this, queueTransfer](wxDataViewEvent& e) {
+            SSH_LOG("Drop on local list: format=" << e.GetDataFormat().GetType()
+                    << " size=" << e.GetDataSize());
+            if (e.GetDataFormat() != wxDF_TEXT &&
+                e.GetDataFormat() != wxDF_UNICODETEXT) return;
+            wxTextDataObject data;
+            data.SetData(e.GetDataFormat(), e.GetDataSize(), e.GetDataBuffer());
+            wxString dragData = data.GetText();
+            SSH_LOG("Drop text: '" << dragData << "'");
+
+            wxString remotePath = dragData;
+            long long fileSize = 0;
+            size_t pipePos = dragData.find('|');
+            if (pipePos != wxString::npos && pipePos + 1 < dragData.length()) {
+                remotePath = dragData.substr(0, pipePos);
+                dragData.substr(pipePos + 1).ToLongLong(&fileSize);
+            }
+
+            wxString localPath = m_localCurrentPath;
+            size_t lastSlash = remotePath.rfind('/');
+            if (lastSlash != wxString::npos && lastSlash + 1 < remotePath.length()) {
+                wxString fileName = remotePath.substr(lastSlash + 1);
+                if (!localPath.EndsWith(wxFileName::GetPathSeparator())) {
+                    localPath += wxFileName::GetPathSeparator();
+                }
+                localPath += fileName;
+            }
+            SSH_LOG("Queue download: local=" << localPath << " remote=" << remotePath);
+            queueTransfer(localPath, remotePath, "download", fileSize);
+        });
     
     // Add columns to remote list
-    m_remoteList->AppendColumn(TranslationHelper::Tr("name"), wxLIST_FORMAT_LEFT, 300);
-    m_remoteList->AppendColumn(TranslationHelper::Tr("size"), wxLIST_FORMAT_RIGHT, 100);
-    m_remoteList->AppendColumn(TranslationHelper::Tr("changed"), wxLIST_FORMAT_LEFT, 150);
+    m_remoteList->AppendIconTextColumn(TranslationHelper::Tr("name"),
+                                       wxDATAVIEW_CELL_INERT, -1, wxALIGN_LEFT,
+                                       wxDATAVIEW_COL_RESIZABLE);
+    m_remoteList->AppendTextColumn(TranslationHelper::Tr("size"),
+                                   wxDATAVIEW_CELL_INERT, 60, wxALIGN_RIGHT,
+                                   wxDATAVIEW_COL_RESIZABLE);
+    m_remoteList->AppendTextColumn(TranslationHelper::Tr("changed"),
+                                   wxDATAVIEW_CELL_INERT, 93, wxALIGN_LEFT,
+                                   wxDATAVIEW_COL_RESIZABLE);
     
     // Bind double-click event for local list (navigate into directory)
-    m_localList->Bind(wxEVT_LIST_ITEM_ACTIVATED, [this](wxListEvent& event) {
-        long index = event.GetIndex();
-        wxString name = m_localList->GetItemText(index);
-        wxString size = m_localList->GetItemText(index, 1);
+    m_localList->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, [this](wxDataViewEvent& event) {
+        int index = m_localList->ItemToRow(event.GetItem());
+        if (index < 0) return;
+        wxString name = GetItemName(m_localList, index);
+        wxString size = m_localList->GetTextValue(index, 1);
         
         // Check if it's a directory (empty size) or parent directory
         if (size.IsEmpty() || name == "..") {
@@ -443,47 +534,43 @@ void FileTransferDialog::CreateControls() {
             if (newPath != m_localCurrentPath) {
                 m_localCurrentPath = newPath;
                 wxString labelPath = m_localCurrentPath.IsEmpty() ? wxString("Computer") : m_localCurrentPath;
-                m_localPathLabel->SetLabel(TranslationHelper::Tr("localDirectory") + labelPath);
+                m_localPathLabel->SetLabel(labelPath);
                 PopulateLocalList(m_localCurrentPath);
             }
         }
     });
     
-    // Bind begin drag event to only allow dragging files (not directories)
-    m_localList->Bind(wxEVT_LIST_BEGIN_DRAG, [this](wxListEvent& event) {
-        long index = event.GetIndex();
-        wxString name = m_localList->GetItemText(index);
-        wxString size = m_localList->GetItemText(index, 1);
-        
+    // Bind begin drag event to only allow dragging files (not directories).
+    // A data object must be provided or the drag does not start.
+    m_localList->Bind(wxEVT_DATAVIEW_ITEM_BEGIN_DRAG, [this](wxDataViewEvent& event) {
+        int index = m_localList->ItemToRow(event.GetItem());
+        if (index < 0) return;
+        wxString name = GetItemName(m_localList, index);
+        wxString size = m_localList->GetTextValue(index, 1);
+
         // Only allow dragging if it's a file (size is not empty)
         if (size.IsEmpty()) {
-            event.Veto();
             return;
         }
-        
+
         // Create file path with proper separator
         wxString fullPath = m_localCurrentPath;
         if (!fullPath.EndsWith(wxFileName::GetPathSeparator())) {
             fullPath += wxFileName::GetPathSeparator();
         }
         fullPath += name;
-        
-        // Create file data object
-        wxFileDataObject fileData;
-        fileData.AddFile(fullPath);
-        
-        // Create drop source and start drag
-        wxDropSource source(fileData, m_localList);
-        wxDragResult result = source.DoDragDrop(wxDragCopy);
-        
-        event.Skip();
+
+        wxFileDataObject* fileData = new wxFileDataObject();
+        fileData->AddFile(fullPath);
+        event.SetDataObject(fileData);
     });
     
     // Bind double-click event for remote list (navigate into directory)
-    m_remoteList->Bind(wxEVT_LIST_ITEM_ACTIVATED, [this](wxListEvent& event) {
-        long index = event.GetIndex();
-        wxString name = m_remoteList->GetItemText(index);
-        wxString size = m_remoteList->GetItemText(index, 1);
+    m_remoteList->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, [this](wxDataViewEvent& event) {
+        int index = m_remoteList->ItemToRow(event.GetItem());
+        if (index < 0) return;
+        wxString name = GetItemName(m_remoteList, index);
+        wxString size = m_remoteList->GetTextValue(index, 1);
         
         // Check if it's a directory (empty size) or parent directory
         if (size.IsEmpty() || name == "..") {
@@ -509,43 +596,38 @@ void FileTransferDialog::CreateControls() {
             
             if (!newPath.IsEmpty()) {
                 m_remoteCurrentPath = newPath;
-                m_remotePathLabel->SetLabel(TranslationHelper::Tr("remoteDirectory") + m_remoteCurrentPath);
+                m_remotePathLabel->SetLabel(m_remoteCurrentPath);
                 RequestRemoteDirectory(m_remoteCurrentPath);
             }
         }
     });
     
     // Bind begin drag event for remote list (only allow dragging files for download)
-    m_remoteList->Bind(wxEVT_LIST_BEGIN_DRAG, [this](wxListEvent& event) {
-        long index = event.GetIndex();
-        wxString name = m_remoteList->GetItemText(index);
-        wxString size = m_remoteList->GetItemText(index, 1);
-        
+    m_remoteList->Bind(wxEVT_DATAVIEW_ITEM_BEGIN_DRAG, [this](wxDataViewEvent& event) {
+        int index = m_remoteList->ItemToRow(event.GetItem());
+        if (index < 0) return;
+        wxString name = GetItemName(m_remoteList, index);
+        wxString size = m_remoteList->GetTextValue(index, 1);
+
         // Only allow dragging if it's a file (size is not empty)
         if (size.IsEmpty()) {
-            event.Veto();
             return;
         }
-        
+
         // Create remote file path
         wxString remotePath = m_remoteCurrentPath;
         if (!remotePath.EndsWith("/")) {
             remotePath += "/";
         }
         remotePath += name;
-        
-        // Get actual file size in bytes from item data
-        long long sizeBytes = m_remoteList->GetItemData(index);
-        
-        // Create file data object with remote path and size (format: "path|size")
+
+        // Actual file size in bytes tracked in parallel to the rows
+        long long sizeBytes =
+            index < (int)m_remoteFileSizes.size() ? m_remoteFileSizes[index] : 0;
+
+        // Drag data encodes remote path and size (format: "path|size")
         wxString dragData = remotePath + "|" + wxString::Format("%lld", sizeBytes);
-        wxTextDataObject textData(dragData);
-        
-        // Create drop source and start drag
-        wxDropSource source(textData, m_remoteList);
-        wxDragResult result = source.DoDragDrop(wxDragCopy);
-        
-        event.Skip();
+        event.SetDataObject(new wxTextDataObject(dragData));
     });
     
     // Create task list (height for 4 rows)
@@ -561,29 +643,36 @@ void FileTransferDialog::CreateControls() {
     
     // Layout main panel
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
-    
+
     // Local section
-    wxBoxSizer* localSizer = new wxBoxSizer(wxVERTICAL);
-    localSizer->Add(m_localPathLabel, 0, wxALL, 5);
-    localSizer->Add(m_localList, 1, wxEXPAND | wxALL, 5);
-    
+    wxStaticBoxSizer* localBox = new wxStaticBoxSizer(
+        wxVERTICAL, mainPanel, TranslationHelper::Tr("localDirectory"));
+    localBox->Add(localPathRow, 0, wxEXPAND | wxALL, 4);
+    localBox->Add(m_localList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
     // Remote section
-    wxBoxSizer* remoteSizer = new wxBoxSizer(wxVERTICAL);
-    remoteSizer->Add(m_remotePathLabel, 0, wxALL, 5);
-    remoteSizer->Add(m_remoteList, 1, wxEXPAND | wxALL, 5);
-    
+    wxStaticBoxSizer* remoteBox = new wxStaticBoxSizer(
+        wxVERTICAL, mainPanel, TranslationHelper::Tr("remoteDirectory"));
+    remoteBox->Add(remotePathRow, 0, wxEXPAND | wxALL, 4);
+    remoteBox->Add(m_remoteList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
     // Split local and remote horizontally
     wxBoxSizer* splitSizer = new wxBoxSizer(wxHORIZONTAL);
-    splitSizer->Add(localSizer, 1, wxEXPAND);
-    splitSizer->Add(remoteSizer, 1, wxEXPAND);
-    
-    mainSizer->Add(splitSizer, 1, wxEXPAND);
+    splitSizer->Add(localBox, 1, wxEXPAND | wxRIGHT, 4);
+    splitSizer->Add(remoteBox, 1, wxEXPAND | wxLEFT, 4);
+
+    mainSizer->Add(splitSizer, 1, wxEXPAND | wxALL, 8);
     mainPanel->SetSizer(mainSizer);
-    
+
+    // Task list section
+    wxStaticBoxSizer* taskBox = new wxStaticBoxSizer(
+        wxVERTICAL, this, TranslationHelper::Tr("transferTasks"));
+    taskBox->Add(m_taskList, 1, wxEXPAND | wxALL, 4);
+
     // Dialog layout
     wxBoxSizer* dialogSizer = new wxBoxSizer(wxVERTICAL);
-    dialogSizer->Add(mainPanel, 1, wxEXPAND | wxALL, 5);
-    dialogSizer->Add(m_taskList, 0, wxEXPAND | wxALL, 5);
+    dialogSizer->Add(mainPanel, 1, wxEXPAND);
+    dialogSizer->Add(taskBox, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
     SetSizer(dialogSizer);
 }
 
@@ -600,12 +689,13 @@ void FileTransferDialog::AdjustTaskListColumns() {
     int totalWidth = m_taskList->GetClientSize().GetWidth();
     if (totalWidth <= 0) return;
     
-    // Fixed widths for other columns
-    int actionWidth = 200;
-    int sizeWidth = 200;
-    int progressWidth = 200;
-    int statusWidth = 150;
-    int resultWidth = 250;
+    // Fixed-width columns: Action / Size / Progress / Status / Result, each
+    // sized to ~10 characters of the list font.
+    int actionWidth = m_taskList->GetTextExtent("0123456789").x;
+    int sizeWidth = actionWidth;
+    int progressWidth = actionWidth;
+    int statusWidth = actionWidth;
+    int resultWidth = actionWidth;
     
     int fixedWidth = actionWidth + sizeWidth + progressWidth + statusWidth + resultWidth;
     int remainingWidth = totalWidth - fixedWidth;
@@ -628,31 +718,19 @@ void FileTransferDialog::AdjustFileListColumns() {
     int localWidth = m_localList->GetClientSize().GetWidth();
     int remoteWidth = m_remoteList->GetClientSize().GetWidth();
     
-    if (localWidth > 0) {
-        // Calculate proportional column widths for local list
-        int sizeWidth = 120;
-        int dateWidth = 140;
-        int nameWidth = localWidth - sizeWidth - dateWidth - 40; // 40 for scrollbar padding
-        
+    auto adjust = [](wxDataViewListCtrl* list, int totalWidth) {
+        if (totalWidth <= 0) return;
+        int sizeWidth = 60;
+        int dateWidth = 93;
+        int nameWidth = totalWidth - sizeWidth - dateWidth - 40;
         if (nameWidth > 50) {
-            m_localList->SetColumnWidth(0, nameWidth);  // Name
-            m_localList->SetColumnWidth(1, sizeWidth);  // Size
-            m_localList->SetColumnWidth(2, dateWidth);  // Changed
+            list->GetColumn(0)->SetWidth(nameWidth);
+            list->GetColumn(1)->SetWidth(sizeWidth);
+            list->GetColumn(2)->SetWidth(dateWidth);
         }
-    }
-    
-    if (remoteWidth > 0) {
-        // Calculate proportional column widths for remote list
-        int sizeWidth = 120;
-        int dateWidth = 140;
-        int nameWidth = remoteWidth - sizeWidth - dateWidth - 40; // 40 for scrollbar padding
-        
-        if (nameWidth > 50) {
-            m_remoteList->SetColumnWidth(0, nameWidth);  // Name
-            m_remoteList->SetColumnWidth(1, sizeWidth);  // Size
-            m_remoteList->SetColumnWidth(2, dateWidth);  // Changed
-        }
-    }
+    };
+    adjust(m_localList, localWidth);
+    adjust(m_remoteList, remoteWidth);
 }
 
 void FileTransferDialog::OnTimer(wxTimerEvent& event) {
@@ -666,20 +744,8 @@ void FileTransferDialog::OnSize(wxSizeEvent& event) {
 }
 
 void FileTransferDialog::OnFileTransferProgress(wxCommandEvent& event) {
-    wxString json = event.GetString();
-    SSH_LOG("File Transfer Progress: " << json);
-    
-    try {
-        nlohmann::json j = nlohmann::json::parse(json.ToStdString());
-        std::string taskId = j["id"];
-        int progress = j["progress"];
-        std::string status = j["status"];
-        
-        // Update task list in real-time
-        LoadAndDisplayTasks();
-    } catch (const std::exception& e) {
-        SSH_LOG("Failed to parse file transfer progress: " << e.what());
-    }
+    // Progress events can arrive many times per second — don't rebuild the
+    // task list here, the 3s timer refresh covers it.
 }
 
 void FileTransferDialog::OnFileTransferComplete(wxCommandEvent& event) {

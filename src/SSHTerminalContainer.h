@@ -7,6 +7,8 @@
 #include <libssh2.h>
 #include <string>
 #include <mutex>
+#include <atomic>
+#include <memory>
 #ifndef _WIN32
 #include <wx/evtloopsrc.h>
 #endif
@@ -14,6 +16,8 @@
 #include "DeviceConfig.h"
 #include "VTermManager.h"
 #include "ScreenBuffer.h"
+
+wxDECLARE_EVENT(wxEVT_SSH_DNS_RESOLVED, wxCommandEvent);
 
 class SSHTerminalContainer : public wxEvtHandler, public ITerminalContainer
 #ifndef _WIN32
@@ -67,6 +71,8 @@ private:
     // Socket and Timer Event Handlers
     void OnSocketEvent(wxSocketEvent& event);
     void OnKeepAliveTimer(wxTimerEvent& event);
+    void OnConnectTimeout(wxTimerEvent& event);
+    void OnDnsResolved(wxCommandEvent& event);
     void DriveStateMachine();
 
     // SSH Connection Step Handlers
@@ -78,11 +84,15 @@ private:
     void RequestPTY();
     void RequestShell();
     void ProcessSSHData();
+    void FlushOutbound();
     void SendStatusMessage(const std::string& msg);
     
     // Internal Utilities
     void Cleanup();
     void HandleDirections();
+    void WatchInboundOnly();
+    void ArmConnectTimeout();
+    void ConnectSocket(const std::string& ip);
     void SwapBuffers();
     void UpdateBackBuffer();
     void TriggerDamage();
@@ -102,6 +112,7 @@ private:
 
     // Timers
     wxTimer m_keepAliveTimer;
+    wxTimer m_connectTimer;
 
     // Terminal Emulator
     VTermManager m_vtermManager;
@@ -113,6 +124,12 @@ private:
     std::string m_pendingInput;
     bool m_hasDamage;
 
+    // Outbound data queued when the SSH channel applies backpressure
+    std::string m_outQueue;
+
+    // Liveness sentinel for detached DNS worker threads
+    std::shared_ptr<std::atomic<bool>> m_alive = std::make_shared<std::atomic<bool>>(true);
+
 #ifndef _WIN32
     wxEventLoopSource* m_fdSource = nullptr;
 #endif
@@ -120,6 +137,8 @@ private:
     // Socket Event Identifier
     static const int SOCKET_ID = 10001;
     static const int KEEPALIVE_TIMER_ID = 10003;
+    static const int CONNECT_TIMER_ID = 10004;
+    static const int CONNECT_TIMEOUT_MS = 30000;
 };
 
 #endif // SSH_TERMINAL_CONTAINER_H

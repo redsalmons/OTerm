@@ -51,6 +51,12 @@ msgstr "状态"
 msgid "result"
 msgstr "结果"
 
+msgid "refresh"
+msgstr "刷新"
+
+msgid "transferTasks"
+msgstr "传输任务"
+
 # ConnectionDialog
 msgid "deviceName"
 msgstr "设备名称"

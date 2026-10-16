@@ -2,15 +2,21 @@
 #define SSHMANAGER_H
 
 #include <libssh2.h>
-#include <uv.h>
 #include <string>
-#include <functional>
 #include <fstream>
 #include <iostream>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
 #include <filesystem>
+#ifndef _WIN32
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#else
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
 
 // Logging macros for SSH operations
 static std::string timestamp() {
@@ -54,117 +60,51 @@ extern bool ssh_log_initialized;
 #define SSH_ERR(msg) ((void)0)
 #endif
 
-class SSHManager {
-public:
-    // SSH connection states
-    enum SSHState {
-        SSH_DISCONNECTED,
-        SSH_CONNECTING,
-        SSH_HANDSHAKING,
-        SSH_PROMPTING_USERNAME,
-        SSH_PROMPTING_PASSWORD,
-        SSH_AUTHENTICATING,
-        SSH_CHANNEL_OPENING,
-        SSH_PTY_REQUESTING,
-        SSH_SHELL_REQUESTING,
-        SSH_READY
-    };
+// Open the per-session SSH log file. Safe to call more than once.
+void InitSSHLogFile();
 
-    // Callback type for data received from SSH
-    using DataCallback = std::function<void(const char* data, int length)>;
+// libssh2 requires one global initialization (WSAStartup on Windows) before
+// any session is created. Safe to call from anywhere; runs exactly once.
+inline bool EnsureLibssh2Init() {
+    static bool ok = (libssh2_init(0) == 0);
+    return ok;
+}
 
-public:
-    SSHManager();
-    ~SSHManager();
+// True if host is already a numeric dotted-quad IPv4 address, in which case
+// no DNS lookup is needed and wxIPV4address::Hostname will not block.
+inline bool IsNumericIPv4(const std::string& host) {
+#ifdef _WIN32
+    IN_ADDR a{};
+    return InetPtonA(AF_INET, host.c_str(), &a) == 1;
+#else
+    in_addr a{};
+    return inet_pton(AF_INET, host.c_str(), &a) == 1;
+#endif
+}
 
-    // Initialize SSH manager with libuv loop
-    bool initialize(uv_loop_t* loop);
-    
-    // Connect to SSH server
-    bool connect(const std::string& host, int port,
-                const std::string& username, const std::string& password,
-                const std::string& auth_method = "password");
-    
-    // Send data to SSH channel
-    bool send_data(const char* data, int length);
-    
-    // Check if SSH is ready for communication
-    bool is_ready() const { return ssh_state_ == SSH_READY && ssh_channel_ != nullptr; }
-    
-    // Get current SSH state
-    SSHState get_state() const { return ssh_state_; }
-    
-    // Set data callback for received SSH data
-    void set_data_callback(DataCallback callback) { data_callback_ = callback; }
-
-    // Set resize callback for SSH ready events
-    void set_resize_callback(std::function<void(int, int)> callback) { resize_callback_ = callback; }
-
-    // Set status callback for connection status messages
-    void set_status_callback(DataCallback callback) { status_callback_ = callback; }
-
-    // Provide username/password from interactive terminal input
-    void provide_username(const std::string& username);
-    void provide_password(const std::string& password);
-
-    // Initialize log file
-    static void init_log_file();
-    
-    // Resize SSH channel terminal size
-    bool resize_terminal(int rows, int cols);
-    
-    // Cleanup SSH connection
-    void cleanup();
-
-private:
-    // SSH event handling
-    void handle_ssh_events(int status, int events);
-    void process_ssh_data();
-    void continue_ssh_connection();
-    void start_login_prompt();
-    void start_password_prompt();
-    void perform_authentication();
-    void open_ssh_channel();
-    void request_pty();
-    void request_locale();
-    void request_shell();
-    void start_polling();
-    void stop_polling();
-    static void on_poll_event(uv_poll_t* handle, int status, int events);
-    
-    
-private:
-    // libuv components
-    uv_loop_t* loop_;
-    uv_tcp_t tcp_handle_;
-    uv_connect_t connect_req_;
-    uv_poll_t* poll_handle_;
-    bool poll_active_;
-    bool tcp_handle_initialized_;
-    
-    // libssh2 components
-    LIBSSH2_SESSION* ssh_session_;
-    LIBSSH2_CHANNEL* ssh_channel_;
-    
-    // Connection state
-    SSHState ssh_state_;
-    
-    // Connection parameters
-    std::string host_;
-    int port_;
-    std::string username_;
-    std::string password_;
-    std::string auth_method_;
-    int auth_retry_count_;
-    
-    // Data callback
-    DataCallback data_callback_;
-
-    // Resize callback for SSH ready events
-    std::function<void(int, int)> resize_callback_;
-
-    // Status callback for connection status messages
-    DataCallback status_callback_;
-};
+// Blocking DNS resolution to an IPv4 dotted-quad string ("" on failure).
+// Must only be called from a worker thread, never the UI thread.
+inline std::string ResolveIPv4(const std::string& host) {
+    struct addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo* res = nullptr;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &res) != 0 || !res) {
+        return {};
+    }
+    char buf[INET_ADDRSTRLEN]{};
+    auto* sin = reinterpret_cast<sockaddr_in*>(res->ai_addr);
+#ifdef _WIN32
+    if (!InetNtopA(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
+        buf[0] = '\0';
+    }
+#else
+    if (!inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
+        buf[0] = '\0';
+    }
+#endif
+    freeaddrinfo(res);
+    return buf;
+}
 
 #endif // SSHMANAGER_H

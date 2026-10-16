@@ -12,31 +12,37 @@ wxDEFINE_EVENT(wxEVT_DEVICE_DELETE_REQUEST, wxCommandEvent);
 DeviceRowPanel::DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, int index, float dpiScale)
     : wxPanel(parent, wxID_ANY), m_deviceId(deviceId), m_device(device) {
 
-    SetBackgroundColour(wxColour(20, 20, 20));
+    // Alternating row colours for a subtle zebra effect on the dark theme.
+    const wxColour rowBg = (index % 2) ? wxColour(32, 32, 36) : wxColour(26, 26, 30);
+    const wxColour dimText(168, 168, 174);
+
+    SetBackgroundColour(rowBg);
+    SetMinSize(wxSize(-1, static_cast<int>(38 * dpiScale)));
 
     wxBoxSizer* rowSizer = new wxBoxSizer(wxHORIZONTAL);
 
     // Index (sequential number)
     wxStaticText* indexText = new wxStaticText(this, wxID_ANY, wxString::Format("%d", index));
-    indexText->SetForegroundColour(wxColour(255, 255, 255));
+    indexText->SetForegroundColour(wxColour(110, 110, 116));
     indexText->SetMinSize(wxSize(static_cast<int>(30 * dpiScale), -1));
     rowSizer->Add(indexText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
 
-    // Device name
+    // Device name — the primary column, bold and bright.
     wxStaticText* nameText = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(device.name.c_str()));
-    nameText->SetForegroundColour(wxColour(255, 255, 255));
+    nameText->SetForegroundColour(wxColour(235, 235, 240));
+    nameText->SetFont(nameText->GetFont().Bold());
     nameText->SetMinSize(wxSize(static_cast<int>(100 * dpiScale), -1));
     rowSizer->Add(nameText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
 
     // Category
     wxStaticText* categoryText = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(device.group.c_str()));
-    categoryText->SetForegroundColour(wxColour(255, 255, 255));
+    categoryText->SetForegroundColour(dimText);
     categoryText->SetMinSize(wxSize(static_cast<int>(133 * dpiScale), -1));
     rowSizer->Add(categoryText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
 
     // Address
     wxStaticText* addressText = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(device.address.c_str()));
-    addressText->SetForegroundColour(wxColour(255, 255, 255));
+    addressText->SetForegroundColour(dimText);
     addressText->SetMinSize(wxSize(static_cast<int>(133 * dpiScale), -1));
     rowSizer->Add(addressText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
 
@@ -44,7 +50,7 @@ DeviceRowPanel::DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, con
     wxString portStr = wxString::FromUTF8(device.port.c_str());
     portStr.Replace(":", "");
     wxStaticText* portText = new wxStaticText(this, wxID_ANY, portStr);
-    portText->SetForegroundColour(wxColour(255, 255, 255));
+    portText->SetForegroundColour(dimText);
     portText->SetMinSize(wxSize(static_cast<int>(33 * dpiScale), -1));
     rowSizer->Add(portText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
 
@@ -58,28 +64,25 @@ DeviceRowPanel::DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, con
         authType = TranslationHelper::Tr("noAuth");
     }
     wxStaticText* authText = new wxStaticText(this, wxID_ANY, authType);
-    authText->SetForegroundColour(wxColour(255, 255, 255));
+    authText->SetForegroundColour(dimText);
     authText->SetMinSize(wxSize(static_cast<int>(100 * dpiScale), -1));
     rowSizer->Add(authText, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
 
-    // Operation column with both buttons
+    // Operation column with both buttons — native button style reads better
+    // on the dark rows than hand-picked colours (which macOS ignores anyway).
     wxPanel* operationPanel = new wxPanel(this, wxID_ANY);
-    operationPanel->SetBackgroundColour(wxColour(20, 20, 20));
+    operationPanel->SetBackgroundColour(rowBg);
     wxBoxSizer* operationSizer = new wxBoxSizer(wxHORIZONTAL);
 
     wxButton* openButton = new wxButton(operationPanel, wxID_ANY, TranslationHelper::Tr("open"));
-    openButton->SetBackgroundColour(wxColour(60, 100, 180));
-    openButton->SetForegroundColour(wxColour(255, 255, 255));
     openButton->SetMinSize(wxSize(static_cast<int>(55 * dpiScale), static_cast<int>(25 * dpiScale)));
     openButton->Bind(wxEVT_BUTTON, &DeviceRowPanel::OnOpenButton, this);
-    operationSizer->Add(openButton, 0, wxALL, 2);
+    operationSizer->Add(openButton, 0, wxALL | wxALIGN_CENTER_VERTICAL, 2);
 
     wxButton* deleteButton = new wxButton(operationPanel, wxID_ANY, TranslationHelper::Tr("delete"));
-    deleteButton->SetBackgroundColour(wxColour(180, 60, 60));
-    deleteButton->SetForegroundColour(wxColour(255, 255, 255));
     deleteButton->SetMinSize(wxSize(static_cast<int>(55 * dpiScale), static_cast<int>(25 * dpiScale)));
     deleteButton->Bind(wxEVT_BUTTON, &DeviceRowPanel::OnDeleteButton, this);
-    operationSizer->Add(deleteButton, 0, wxALL, 2);
+    operationSizer->Add(deleteButton, 0, wxALL | wxALIGN_CENTER_VERTICAL, 2);
 
     operationPanel->SetSizer(operationSizer);
     operationPanel->SetMinSize(wxSize(static_cast<int>(120 * dpiScale), -1));
@@ -131,7 +134,7 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     if (m_dpiScale <= 0.0f) m_dpiScale = 1.0f;
 #endif
 
-    SetBackgroundColour(wxColour(10, 10, 10));
+    SetBackgroundColour(wxColour(16, 16, 18));
 
     // Create main sizer for centering
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
@@ -150,7 +153,7 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
 
     // Create a centered panel with DPI-scaled width
     wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, -1), wxTAB_TRAVERSAL);
-    centerPanel->SetBackgroundColour(wxColour(10, 10, 10));
+    centerPanel->SetBackgroundColour(wxColour(16, 16, 18));
     centerPanel->SetMinSize(wxSize(panelWidth, -1));
     centerPanel->SetMaxSize(wxSize(panelWidth, -1));
     centerPanel->SetCanFocus(true);
@@ -166,15 +169,14 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     m_searchCtrl->ShowSearchButton(false); // Hide built-in search button to reduce left margin
     m_searchCtrl->SetCanFocus(true);
     // Don't set descriptive text as it may interfere with input
-    m_searchCtrl->SetBackgroundColour(wxColour(0, 0, 0));
-    m_searchCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_searchCtrl->SetBackgroundColour(wxColour(38, 38, 42));
+    m_searchCtrl->SetForegroundColour(wxColour(235, 235, 240));
     m_searchCtrl->SetFont(wxFont(static_cast<int>(12 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
 
-    // Add button with DPI-scaled dimensions
+    // Add button with DPI-scaled dimensions — keep the native button look,
+    // just a slightly bolder "+" glyph.
     m_addButton = new wxButton(centerPanel, ID_ADD_BUTTON, "+",
                                wxDefaultPosition, wxSize(buttonWidth, controlHeight));
-    m_addButton->SetBackgroundColour(wxColour(60, 100, 180));
-    m_addButton->SetForegroundColour(wxColour(255, 255, 255));
     m_addButton->SetFont(wxFont(static_cast<int>(14 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
 
     // Add to search sizer
@@ -183,12 +185,12 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
 
     // Device list - use wxScrolledWindow with DPI-scaled dimensions
     m_scrolledWindow = new wxScrolledWindow(centerPanel, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, scrollHeight));
-    m_scrolledWindow->SetBackgroundColour(wxColour(10, 10, 10));
+    m_scrolledWindow->SetBackgroundColour(wxColour(26, 26, 30));
     m_scrolledWindow->SetScrollRate(0, static_cast<int>(30 * m_dpiScale)); // Vertical scroll only
 
     // Content panel inside scrolled window
     m_contentPanel = new wxPanel(m_scrolledWindow, wxID_ANY);
-    m_contentPanel->SetBackgroundColour(wxColour(10, 10, 10));
+    m_contentPanel->SetBackgroundColour(wxColour(26, 26, 30));
     wxBoxSizer* contentSizer = new wxBoxSizer(wxVERTICAL);
     m_contentPanel->SetSizer(contentSizer);
 
@@ -261,49 +263,31 @@ void DeviceListPanel::RefreshDeviceList(const std::string& filter) {
     if (contentSizer) {
         contentSizer->Clear(false); // Don't delete children, we handle that above
 
-        // Add header row
+        // Add header row — flat dark strip with muted labels, visually
+        // separated from the zebra rows below.
         wxPanel* headerPanel = new wxPanel(m_contentPanel, wxID_ANY);
-        headerPanel->SetBackgroundColour(wxColour(60, 100, 180));
+        headerPanel->SetBackgroundColour(wxColour(40, 40, 46));
         wxBoxSizer* headerSizer = new wxBoxSizer(wxHORIZONTAL);
 
-        // Header labels with DPI scaling
-        wxStaticText* indexHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("index"));
-        indexHeader->SetForegroundColour(wxColour(255, 255, 255));
-        indexHeader->SetMinSize(wxSize(static_cast<int>(30 * m_dpiScale), -1));
-        headerSizer->Add(indexHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-        wxStaticText* nameHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("deviceNameHeader"));
-        nameHeader->SetForegroundColour(wxColour(255, 255, 255));
-        nameHeader->SetMinSize(wxSize(static_cast<int>(100 * m_dpiScale), -1));
-        headerSizer->Add(nameHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-        wxStaticText* categoryHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("category"));
-        categoryHeader->SetForegroundColour(wxColour(255, 255, 255));
-        categoryHeader->SetMinSize(wxSize(static_cast<int>(133 * m_dpiScale), -1));
-        headerSizer->Add(categoryHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-        wxStaticText* addressHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("address"));
-        addressHeader->SetForegroundColour(wxColour(255, 255, 255));
-        addressHeader->SetMinSize(wxSize(static_cast<int>(133 * m_dpiScale), -1));
-        headerSizer->Add(addressHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-        wxStaticText* portHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("port"));
-        portHeader->SetForegroundColour(wxColour(255, 255, 255));
-        portHeader->SetMinSize(wxSize(static_cast<int>(33 * m_dpiScale), -1));
-        headerSizer->Add(portHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-        wxStaticText* authHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("authType"));
-        authHeader->SetForegroundColour(wxColour(255, 255, 255));
-        authHeader->SetMinSize(wxSize(static_cast<int>(100 * m_dpiScale), -1));
-        headerSizer->Add(authHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-        wxStaticText* operationHeader = new wxStaticText(headerPanel, wxID_ANY, TranslationHelper::Tr("operation"));
-        operationHeader->SetForegroundColour(wxColour(255, 255, 255));
-        operationHeader->SetMinSize(wxSize(static_cast<int>(120 * m_dpiScale), -1));
-        headerSizer->Add(operationHeader, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+        const wxColour headerText(150, 150, 158);
+        auto addHeader = [&](const wxString& key, int width) {
+            wxStaticText* t = new wxStaticText(headerPanel, wxID_ANY,
+                                               TranslationHelper::Tr(key));
+            t->SetForegroundColour(headerText);
+            t->SetFont(t->GetFont().Bold());
+            t->SetMinSize(wxSize(static_cast<int>(width * m_dpiScale), -1));
+            headerSizer->Add(t, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+        };
+        addHeader("index", 30);
+        addHeader("deviceNameHeader", 100);
+        addHeader("category", 133);
+        addHeader("address", 133);
+        addHeader("port", 33);
+        addHeader("authType", 100);
+        addHeader("operation", 120);
 
         headerPanel->SetSizer(headerSizer);
-        contentSizer->Add(headerPanel, 0, wxEXPAND | wxALL, 2);
+        contentSizer->Add(headerPanel, 0, wxEXPAND);
 
         for (size_t i = 0; i < filteredDevices.size(); ++i) {
             DeviceRowPanel* rowPanel = new DeviceRowPanel(
@@ -313,7 +297,7 @@ void DeviceListPanel::RefreshDeviceList(const std::string& filter) {
                 static_cast<int>(i + 1),
                 m_dpiScale
             );
-            contentSizer->Add(rowPanel, 0, wxEXPAND | wxALL, 2);
+            contentSizer->Add(rowPanel, 0, wxEXPAND);
             m_rowPanels.push_back(rowPanel);
         }
 

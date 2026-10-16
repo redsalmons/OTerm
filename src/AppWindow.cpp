@@ -159,6 +159,14 @@ bool MyApp::OnInit() {
 
         wxLog::SetActiveTarget(new wxLogFileAndStderr((std::filesystem::temp_directory_path() / "oterm_wx.log").string()));
 
+#if defined(__WXMAC__)
+        // Activate as early as possible — before the master-password dialog.
+        // A bundled app launched via Finder may not be frontmost/activated,
+        // and any window shown before activation can end up ordered out on
+        // an invisible space (modal dialog => app looks dead).
+        MacActivateApp();
+#endif
+
 #ifndef _WIN32
         // Register SIGCHLD handler to reap zombie child processes
         struct sigaction sa;
@@ -185,8 +193,13 @@ bool MyApp::OnInit() {
             TranslationHelper::Load("en");
         }
 
+        const bool skipPasswordCheck = getenv("OTERM_SKIP_PASSWORD") != nullptr;
+        const bool devAutoLogin = getenv("OTERM_DEV_AUTOLOGIN") != nullptr;
+
         // Master password authentication
-        if (!GlobalConfig::HasMasterPassword()) {
+        if (skipPasswordCheck) {
+            // dev: skip
+        } else if (!GlobalConfig::HasMasterPassword()) {
             // No master password set, show setup dialog
             MasterPasswordDialog setupDialog(nullptr, true);
             if (setupDialog.ShowModal() != wxID_OK) {
@@ -221,7 +234,7 @@ bool MyApp::OnInit() {
             while (attempts < maxAttempts) {
                 MasterPasswordDialog loginDialog(nullptr, false);
                 loginDialog.SetPasswordVerifier([&](const wxString& password, wxString& errorMsg, bool& shouldClose) {
-                    if (GlobalConfig::VerifyMasterPassword(password.ToStdString())) {
+                    if (devAutoLogin || GlobalConfig::VerifyMasterPassword(password.ToStdString())) {
                         return true;
                     } else {
                         attempts++;
@@ -297,6 +310,7 @@ bool MyApp::OnInit() {
 
         AppWindow* frame = new AppWindow("OceanTerm", wxPoint(50, 50), initialSize);
         frame->Show(true);
+        frame->Raise();
         SSH_LOG("Main window created and shown with DPI scale: " << dpiScale << ", size: " << initialSize.GetWidth() << "x" << initialSize.GetHeight());
         return true;
     } catch (const std::exception& e) {
@@ -389,6 +403,12 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     // Delay until after window is shown
     CallAfter([this]() {
         SetupMacTitleBar(GetHandle());
+        // Bring the window forward — when the app is launched while another
+        // app owns a fullscreen space, the new window can end up ordered out
+        // on the desktop space without this.
+        MacWindowMoveToActiveSpace(GetHandle());
+        MacActivateApp();
+        Raise();
     });
 #endif
 }
@@ -419,8 +439,15 @@ void AppWindow::CreateTerminalTab(const DeviceConfig& device) {
     TermGLCanvas* terminalCanvas = new TermGLCanvas(terminalPanel, false);
     terminalPanel->SetCanvas(terminalCanvas);
     
-    // Create tab label as "tab+index"
-    wxString tabLabel = wxString::Format("%s%d", TranslationHelper::Tr("tab"), ++s_globalTabCounter);
+    // Tab label defaults to username@address; fall back to generic name
+    wxString tabLabel;
+    if (!newDevice.username.empty() && !newDevice.address.empty()) {
+        tabLabel = wxString::FromUTF8(newDevice.username) + "@" + wxString::FromUTF8(newDevice.address);
+    } else if (!newDevice.name.empty()) {
+        tabLabel = wxString::FromUTF8(newDevice.name);
+    } else {
+        tabLabel = wxString::Format("%s%d", TranslationHelper::Tr("tab"), ++s_globalTabCounter);
+    }
     ConnectInfo* newTab = m_titleBar->AddTab(tabLabel, terminalPanel, newDevice);
     SSH_LOG("Tab added to title bar");
 
@@ -556,6 +583,9 @@ void AppWindow::OnClose(wxCloseEvent& event) {
     
     SSH_LOG("All threads stopped, proceeding with close");
     event.Skip();
+    // Ensure the whole program exits when the window's close button is
+    // clicked (don't linger as a background/dock process).
+    wxExit();
     auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
     SSH_LOG("AppWindow::OnClose completed, total time: " << totalDuration << "ms");
 }
@@ -643,13 +673,14 @@ void AppWindow::OnSSHDirectConnect(wxCommandEvent& event) {
     // Update tab label to show the device
     wxString newLabel = wxString::FromUTF8(device.username.c_str()) + "@" + wxString::FromUTF8(device.address.c_str());
     // Find the ConnectInfo for this panel and update its label
-    for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
-        wxWindow* page = m_notebook->GetPage(i);
-        if (page == panel) {
-            // Update the corresponding tab label
-            // This would require finding the ConnectInfo, but for now just log
-            SSH_LOG("Would update tab label to: " << newLabel.ToStdString());
-            break;
+    if (m_titleBar) {
+        for (auto* tab : m_titleBar->GetTabs()) {
+            if (tab->GetContentPanel() == panel) {
+                tab->SetTabLabel(newLabel);
+                m_titleBar->RelayoutTabs();
+                SSH_LOG("Tab label updated to: " << newLabel.ToStdString());
+                break;
+            }
         }
     }
 }

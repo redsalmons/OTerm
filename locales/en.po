@@ -51,6 +51,12 @@ msgstr "Status"
 msgid "result"
 msgstr "Result"
 
+msgid "refresh"
+msgstr "Refresh"
+
+msgid "transferTasks"
+msgstr "Transfer Tasks"
+
 # ConnectionDialog
 msgid "deviceName"
 msgstr "Device Name"

@@ -147,12 +147,17 @@ bool LocalTerminalManager::Start(const std::string& shell) {
         cmdLine += L" -NoExit -Command \"$host.UI.RawUI.WindowTitle='OceanTerm Local'\"";
     }
 
+    // Start in the user's home directory (install dir is not useful)
+    wchar_t homeDir[MAX_PATH] = {};
+    DWORD homeLen = ExpandEnvironmentStringsW(L"%USERPROFILE%", homeDir, MAX_PATH);
+    const wchar_t* workingDir = (homeLen > 0 && homeLen < MAX_PATH) ? homeDir : nullptr;
+
     // Create the child process attached to the pseudo console
     PROCESS_INFORMATION pi = {};
     BOOL created = CreateProcessW(
         nullptr, &cmdLine[0], nullptr, nullptr, FALSE,
         EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-        nullptr, nullptr, &siEx.StartupInfo, &pi);
+        nullptr, workingDir, &siEx.StartupInfo, &pi);
 
     // Cleanup attribute list regardless of result
     DeleteProcThreadAttributeList(siEx.lpAttributeList);
@@ -220,6 +225,12 @@ bool LocalTerminalManager::Start(const std::string& shell) {
         dup2(m_slaveFd, STDOUT_FILENO);
         dup2(m_slaveFd, STDERR_FILENO);
         close(m_slaveFd);
+
+        // Start in the user's home directory (bundle/install dir is not useful)
+        const char* home = getenv("HOME");
+        if (home) {
+            chdir(home);
+        }
 
         // Set TERM environment variable
         setenv("TERM", "xterm-256color", 1);

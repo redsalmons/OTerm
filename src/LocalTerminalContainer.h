@@ -7,6 +7,9 @@
 #ifndef _WIN32
 #include <wx/evtloopsrc.h>
 #endif
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 #include "ITerminalContainer.h"
 #include "LocalTerminalManager.h"
 #include "VTermManager.h"
@@ -76,6 +79,11 @@ private:
 
     // Timer Event Identifier
     static const int READ_TIMER_ID = 20001;
+#elif defined(__APPLE__)
+    // CFSocket on the main run loop — wxEventLoopSource needs an "active"
+    // wxEventLoop which is unavailable during CallAfter dispatch/startup.
+    CFSocketRef m_cfSocket = nullptr;
+    static void OnFdReady(CFSocketRef s, CFSocketCallBackType t, CFDataRef a, const void* d, void* info);
 #else
     wxEventLoopSource* m_fdSource = nullptr;
 #endif

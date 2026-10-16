@@ -22,6 +22,11 @@ public:
     static int GetFontSize();
     static void SetFontSize(int fontSize);
 
+    // Session-level font zoom (in-memory only, not persisted)
+    static int GetEffectiveFontSize();
+    static void AdjustFontZoom(int deltaSteps);
+    static void ResetFontZoom();
+
     static std::string GetMasterPassword();
     static void SetMasterPassword(const std::string& password);
     static bool HasMasterPassword();
@@ -45,6 +50,7 @@ private:
     static std::string s_language;
     static std::string s_fontName;
     static int s_fontSize;
+    static int s_zoomSteps;
     static std::string s_masterPassword;
     static std::string x7f3a9k2m5p8q1r4; // Random variable name for active master password
     static double s_dpiScaleFactor;

@@ -10,6 +10,8 @@
 
 #include <wx/clipbrd.h>
 
+#include <wx/popupwin.h>
+
 #include <iostream>
 
 #include <iomanip>
@@ -33,6 +35,8 @@
 #include "SSHManager.h"
 
 #include "GlobalConfig.h"
+#include "MacIMEProxy.h"
+#include "MacKeyMonitor.h"
 #include "SSHTerminalContainer.h"
 #include "TranslationHelper.h"
 
@@ -80,10 +84,16 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
       m_imeInputBox(nullptr),
 
+      m_imePopup(nullptr),
+
       m_imeInputBoxVisible(false),
+#ifdef __APPLE__
+      m_macKeyMonitorToken(nullptr),
+#endif
       m_ownsThreads(false),
       m_threadsStopped(false),
-      m_wheelRotationAccumulator(0) {
+      m_wheelRotationAccumulator(0),
+      m_zoomWheelAccumulator(0) {
 
     // Calculate DPI scale
 
@@ -160,11 +170,35 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
     // wxTE_RICH2 uses Rich Edit 2.0 which has better borderless support on Windows
 
+#ifdef _WIN32
+
+    // On Windows a native child window cannot be composited over the OpenGL
+
+    // surface, so host the box in a non-activating top-level popup instead.
+
+    m_imePopup = new wxPopupTransientWindow(this, wxBORDER_NONE);
+
+    m_imeInputBox = new wxTextCtrl(m_imePopup, wxID_ANY, wxEmptyString,
+
+                                   wxDefaultPosition, wxSize(12, 18),
+
+                                   wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
+
+    wxBoxSizer* imeSizer = new wxBoxSizer(wxHORIZONTAL);
+
+    imeSizer->Add(m_imeInputBox, 1, wxEXPAND);
+
+    m_imePopup->SetSizer(imeSizer);
+
+#else
+
     m_imeInputBox = new wxTextCtrl(this, wxID_ANY, wxEmptyString,
 
                                    wxDefaultPosition, wxSize(12, 18),
 
                                    wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
+
+#endif
 
     // Set background to blue to match cursor color
 
@@ -197,6 +231,11 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
     m_imeInputBox->Bind(wxEVT_KEY_DOWN, &TermGLCanvas::OnProxyKeyDown, this);
 
     m_imeInputBox->Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnIMETextLostFocus, this);
+
+    // CHAR_HOOK fires before the native text view consumes navigation keys;
+    // bound on the proxy itself so it is seen even when the box has focus.
+
+    m_imeInputBox->Bind(wxEVT_CHAR_HOOK, &TermGLCanvas::OnCharHook, this);
 
 
 
@@ -250,6 +289,12 @@ TermGLCanvas::~TermGLCanvas() {
 
     SSH_LOG("TermGLCanvas destructor start, this=" << this << ", m_ownsThreads=" << m_ownsThreads << ", m_threadsStopped=" << m_threadsStopped);
 
+#ifdef __APPLE__
+    MacKeyMonitor::Unregister(m_macKeyMonitorToken);
+    m_macKeyMonitorToken = nullptr;
+    MacIME::Disable(this);
+#endif
+
     // Only call StopThreads if not already called
     if (!m_threadsStopped) {
         StopThreads();
@@ -261,7 +306,15 @@ TermGLCanvas::~TermGLCanvas() {
 
     delete m_glContext;
 
-    if (m_imeInputBox) {
+    if (m_imePopup) {
+
+        m_imePopup->Destroy();
+
+        m_imePopup = nullptr;
+
+        m_imeInputBox = nullptr;
+
+    } else if (m_imeInputBox) {
 
         delete m_imeInputBox;
 
@@ -270,6 +323,328 @@ TermGLCanvas::~TermGLCanvas() {
     }
 
     SSH_LOG("TermGLCanvas destructor end, this=" << this);
+
+}
+
+
+
+float TermGLCanvas::GLPixelScale() const {
+
+#ifdef __WXMAC__
+
+    return 1.0f;
+
+#else
+
+    return m_dpiScale;
+
+#endif
+
+}
+
+#ifdef __APPLE__
+
+void TermGLCanvas::EnsureMacKeyMonitor() {
+
+    if (!m_macKeyMonitorToken) {
+        m_macKeyMonitorToken = MacKeyMonitor::Register(this,
+            [this](unsigned short keyCode, unsigned long modifierFlags) {
+                return HandleMacRawKey(keyCode, modifierFlags);
+            });
+    }
+
+    // Make the canvas's NSView the IME client so the proxy text control never
+    // has to take focus (which is what eats navigation keys under an IME).
+    MacIME::Handlers ime;
+    ime.commit = [this](const std::string& s) { OnIMECommit(s); };
+    ime.cursorRect = [this](double& x, double& y, double& w, double& h) {
+        x = m_cursorRect.x; y = m_cursorRect.y;
+        w = m_cursorRect.width; h = m_cursorRect.height;
+    };
+    MacIME::Enable(this, ime);
+
+}
+
+// Raw macOS virtual key codes for keys that NSTextView consumes via
+// doCommandBySelector before wx can generate key events.
+bool TermGLCanvas::HandleMacRawKey(unsigned short keyCode, unsigned long modifierFlags) {
+
+    // Nav-key range seen at AppKit level — log even when we decline so the
+    // log shows whether events died in the focus check or before the monitor.
+    const bool isNavKey = (keyCode >= 114 && keyCode <= 126) || keyCode == 53;
+
+    if (!m_imeInputBox || wxWindow::FindFocus() != m_imeInputBox) {
+        if (isNavKey) {
+            SSH_LOG("MacKeyMonitor: nav key " << keyCode << " NOT consumed (focus="
+                    << wxWindow::FindFocus() << " box=" << m_imeInputBox << ")");
+        }
+        return false;
+    }
+
+    const bool ctrl = (modifierFlags & (1UL << 18)) != 0; // NSEventModifierFlagControl
+    const char* seq = nullptr;
+
+    switch (keyCode) {
+
+        case 126: seq = "\x1b[A";  break; // Up
+        case 125: seq = "\x1b[B";  break; // Down
+        case 124: seq = "\x1bOC";  break; // Right
+        case 123: seq = "\x1bOD";  break; // Left
+        case 116: seq = "\x1b[5~"; break; // PageUp
+        case 121: seq = "\x1b[6~"; break; // PageDown
+        case 117: seq = "\x1b[3~"; break; // Forward delete
+        case 114: seq = "\x1b[2~"; break; // Insert/Help
+        case 53:  seq = "\x1b";    break; // Escape
+        case 115:                          // Home
+            if (ctrl) {
+                if (scroll_callback_) scroll_callback_(10000);
+                return true;
+            }
+            seq = "\x1b[H";
+            break;
+        case 119:                          // End
+            if (ctrl) {
+                if (scroll_callback_) scroll_callback_(-10000);
+                return true;
+            }
+            seq = "\x1b[F";
+            break;
+        default:
+            return false;
+    }
+
+    SSH_LOG("MacKeyMonitor: nav key " << keyCode << " delivered from AppKit monitor");
+
+    if (key_callback_) {
+        key_callback_(seq, static_cast<int>(strlen(seq)));
+    }
+
+    return true; // consume — keep the event away from the text view
+}
+
+#endif // __APPLE__
+
+
+
+bool TermGLCanvas::CreateFontAtlas() {
+
+    if (m_fontAtlas) {
+
+        delete m_fontAtlas;
+
+        m_fontAtlas = nullptr;
+
+    }
+
+    m_fontAtlas = new FontAtlas();
+
+    std::string fontName = GlobalConfig::GetFontName();
+
+    int fontSize = GlobalConfig::GetEffectiveFontSize();
+
+    // Rasterize glyphs at the physical pixel size for the current DPI scale
+
+    int terminalFontSize = static_cast<int>(fontSize * m_dpiScale + 0.5f);
+
+    if (terminalFontSize <= 0) terminalFontSize = fontSize;
+
+    if (terminalFontSize < 8) terminalFontSize = 8;
+
+    if (terminalFontSize > 72) terminalFontSize = 72;
+
+    m_fontSize = terminalFontSize;
+
+    if (!m_fontAtlas->InitializeSystemFont(terminalFontSize, wxString::FromUTF8(fontName.c_str()))) {
+
+        SSH_LOG("Failed to initialize font atlas with configured font");
+
+        return false;
+
+    }
+
+    // Get actual character rendering height from font atlas
+
+    m_charHeight = m_fontAtlas->GetCharHeight();
+
+    if (m_charHeight == 0) {
+
+        m_charHeight = terminalFontSize; // Fallback to font size
+
+    }
+
+    SSH_LOG("Font atlas initialized: texture ID=" << m_fontAtlas->GetTextureID()
+
+            << ", size=" << m_fontAtlas->GetTextureWidth() << "x" << m_fontAtlas->GetTextureHeight()
+
+            << ", charHeight=" << m_charHeight);
+
+    return true;
+
+}
+
+
+
+void TermGLCanvas::ApplyFontZoom() {
+
+    if (!m_glInitialized || !m_glContext) return;
+
+    m_glContext->SetCurrent(*this);
+
+    if (CreateFontAtlas()) {
+
+        InitializeFontMetrics();
+
+        // Ask the parent panel to recompute vterm rows/cols with the new cell size
+
+        wxWindow* parent = GetParent();
+
+        if (parent) {
+
+            wxSizeEvent sizeEvent(parent->GetSize(), parent->GetId());
+
+            wxPostEvent(parent, sizeEvent);
+
+        }
+
+    }
+
+    Refresh();
+
+}
+
+
+
+static void CollectTermCanvases(wxWindow* root, std::vector<TermGLCanvas*>& out) {
+
+    if (!root) return;
+
+    if (TermGLCanvas* canvas = dynamic_cast<TermGLCanvas*>(root)) {
+
+        out.push_back(canvas);
+
+        return;
+
+    }
+
+    for (wxWindow* child : root->GetChildren()) {
+
+        CollectTermCanvases(child, out);
+
+    }
+
+}
+
+
+
+void TermGLCanvas::BroadcastFontZoom() {
+
+    wxWindow* top = wxGetTopLevelParent(this);
+
+    if (!top) top = wxTheApp->GetTopWindow();
+
+    std::vector<TermGLCanvas*> canvases;
+
+    CollectTermCanvases(top, canvases);
+
+    for (TermGLCanvas* canvas : canvases) {
+
+        canvas->ApplyFontZoom();
+
+    }
+
+}
+
+
+
+bool TermGLCanvas::HandleZoomInput(const wxKeyEvent& event) {
+
+#ifdef __WXMAC__
+
+    const bool zoomMod = event.CmdDown();
+
+#else
+
+    const bool zoomMod = event.MetaDown();
+
+#endif
+
+    if (!zoomMod || event.AltDown()) return false;
+
+    int keycode = event.GetKeyCode();
+
+    // Some paths (IME/proxy controls, Cmd+Shift combos on macOS) deliver the
+
+    // key with keycode 0; fall back to Unicode and raw virtual key codes.
+
+    if (keycode == 0) {
+
+        const long uni = static_cast<long>(event.GetUnicodeKey());
+
+        if (uni > 0 && uni != WXK_NONE) keycode = static_cast<int>(uni);
+
+    }
+
+    if (keycode == 0) {
+
+        switch (event.GetRawKeyCode()) {
+
+#ifdef __WXMAC__
+
+            case 0x1B: keycode = '-'; break;
+
+            case 0x18: keycode = '='; break;
+
+            case 0x1D: keycode = '0'; break;
+
+            case 0x4E: keycode = WXK_NUMPAD_SUBTRACT; break;
+
+            case 0x45: keycode = WXK_NUMPAD_ADD; break;
+
+            case 0x52: keycode = WXK_NUMPAD0; break;
+
+#else
+
+            case 0xBD: keycode = '-'; break;
+
+            case 0xBB: keycode = '='; break;
+
+            case 0x30: keycode = '0'; break;
+
+#endif
+
+        }
+
+    }
+
+    int delta = 0;
+
+    if (keycode == WXK_ADD || keycode == WXK_NUMPAD_ADD || keycode == '=' || keycode == '+') {
+
+        delta = 1;
+
+    } else if (keycode == WXK_SUBTRACT || keycode == WXK_NUMPAD_SUBTRACT || keycode == '-' || keycode == '_') {
+
+        delta = -1;
+
+    } else if (keycode == '0' || keycode == WXK_NUMPAD0) {
+
+        GlobalConfig::ResetFontZoom();
+
+        BroadcastFontZoom();
+
+        return true;
+
+    } else {
+
+        return false;
+
+    }
+
+    GlobalConfig::AdjustFontZoom(delta);
+
+    BroadcastFontZoom();
+
+    return true;
 
 }
 
@@ -291,8 +666,11 @@ void TermGLCanvas::InitializeGL() {
 
     // Set up OpenGL state
     wxSize size = GetSize();
-    if (size.GetWidth() > 0 && size.GetHeight() > 0) {
-        glViewport(0, 0, size.GetWidth(), size.GetHeight());
+    float glScale = GLPixelScale();
+    int physW = static_cast<int>(size.GetWidth() * glScale);
+    int physH = static_cast<int>(size.GetHeight() * glScale);
+    if (physW > 0 && physH > 0) {
+        glViewport(0, 0, physW, physH);
     }
 
     glClearColor(0.04f, 0.04f, 0.04f, 1.0f);
@@ -305,66 +683,11 @@ void TermGLCanvas::InitializeGL() {
     
 
     // Create font atlas with configured font and size
-    if (m_fontAtlas) {
-        delete m_fontAtlas;
-    }
-    m_fontAtlas = new FontAtlas();
-
-    std::string fontName = GlobalConfig::GetFontName();
-
-    int fontSize = GlobalConfig::GetFontSize();
-
-
-
-    // Apply x2 scaling if DPI scaling is detected (high DPI screen)
-
-    int terminalFontSize = fontSize;
-
-    if (m_dpiScale > 1.0f) {
-
-        terminalFontSize = static_cast<int>(fontSize * 2);
-
-    }
-
-    if (terminalFontSize < 8) terminalFontSize = 8;
-
-    if (terminalFontSize > 72) terminalFontSize = 72;
-
-
-
-    m_fontSize = terminalFontSize;
-
-    
-
-    if (!m_fontAtlas->InitializeSystemFont(terminalFontSize, wxString::FromUTF8(fontName.c_str()))) {
-
-        SSH_LOG("Failed to initialize font atlas with configured font");
-
+    if (!CreateFontAtlas()) {
         return;
-
     }
 
-    
 
-    // Get actual character rendering height from font atlas
-
-    m_charHeight = m_fontAtlas->GetCharHeight();
-
-    if (m_charHeight == 0) {
-
-        m_charHeight = terminalFontSize; // Fallback to font size
-
-    }
-
-    
-
-    SSH_LOG("Font atlas initialized: texture ID=" << m_fontAtlas->GetTextureID()
-
-            << ", size=" << m_fontAtlas->GetTextureWidth() << "x" << m_fontAtlas->GetTextureHeight()
-
-            << ", charHeight=" << m_charHeight);
-
-    
 
     // Initialize font metrics (cell width/height calculations)
 
@@ -423,6 +746,10 @@ void TermGLCanvas::InitializeGL() {
     
 
     m_glInitialized = true;
+
+#ifdef __APPLE__
+    EnsureMacKeyMonitor();
+#endif
 
     SSH_LOG("OpenGL initialized successfully");
 
@@ -519,7 +846,7 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
         // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
         wxSize size = GetSize();
         int scroll_margin_y = static_cast<int>(4 * m_dpiScale);
-        int availableHeight = size.GetHeight() - scroll_margin_y * 2;
+        int availableHeight = static_cast<int>(size.GetHeight() * GLPixelScale()) - scroll_margin_y * 2;
         int visible_rows = availableHeight / m_cached_cell_height;
         
         // Calculate scroll offset to keep cursor at bottom
@@ -562,31 +889,59 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     // 4. Update IME input box position and size if visible
     if (m_imeInputBox && m_imeInputBoxVisible) {
         if (m_cursor_out_of_bounds) {
+#ifdef _WIN32
+            if (m_imePopup) m_imePopup->Dismiss();
+#else
             m_imeInputBox->Hide();
+#endif
         } else {
+            UpdateIMEBoxPlacement();
+#ifdef _WIN32
+            if (m_imePopup && !m_imePopup->IsShown()) m_imePopup->Popup(m_imeInputBox);
+#else
             m_imeInputBox->Show();
-            wxSize size = GetSize();
-            wxRect imeRect = m_cursorRect;
-
-            if (imeRect.x < 0) imeRect.x = 0;
-            if (imeRect.y < 0) imeRect.y = 0;
-            if (imeRect.x + imeRect.width > size.GetWidth()) imeRect.x = size.GetWidth() - imeRect.width;
-            if (imeRect.y + imeRect.height > size.GetHeight()) imeRect.y = size.GetHeight() - imeRect.height;
-
-            // Update m_cursorRect so Render() stays in sync
-            m_cursorRect = imeRect;
-
-            // Set input box size and position to match cursor exactly
-            m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
-
-            // On macOS, notify input method about position
-#ifdef __WXMAC__
-            // Use NSTextInputClient to set first rect for line
-            // This is a simplified approach - for production you might need more sophisticated handling
-            // The SetSize call above should help with basic alignment
 #endif
         }
     }
+}
+
+
+
+void TermGLCanvas::UpdateIMEBoxPlacement() {
+
+    if (!m_imeInputBox) return;
+
+    const float glScale = GLPixelScale();
+
+    // m_cursorRect is in GL pixel space; clamp it there first
+
+    wxSize physSize(static_cast<int>(GetSize().GetWidth() * glScale),
+                    static_cast<int>(GetSize().GetHeight() * glScale));
+
+    wxRect imeRect = m_cursorRect;
+
+    if (imeRect.x < 0) imeRect.x = 0;
+    if (imeRect.y < 0) imeRect.y = 0;
+    if (imeRect.x + imeRect.width > physSize.GetWidth()) imeRect.x = physSize.GetWidth() - imeRect.width;
+    if (imeRect.y + imeRect.height > physSize.GetHeight()) imeRect.y = physSize.GetHeight() - imeRect.height;
+
+    // Update m_cursorRect so Render() stays in sync
+    m_cursorRect = imeRect;
+
+    // Convert back to logical pixels for native window placement
+    wxRect logicalRect(static_cast<int>(imeRect.x / glScale),
+                       static_cast<int>(imeRect.y / glScale),
+                       static_cast<int>(imeRect.width / glScale),
+                       static_cast<int>(imeRect.height / glScale));
+
+#ifdef _WIN32
+    if (m_imePopup) {
+        m_imePopup->Position(ClientToScreen(logicalRect.GetPosition()), logicalRect.GetSize());
+    }
+#else
+    m_imeInputBox->SetSize(logicalRect);
+#endif
+
 }
 
 
@@ -609,11 +964,17 @@ void TermGLCanvas::Render() {
 
     wxSize size = GetSize();
 
+    float glScale = GLPixelScale();
+
+    int physW = static_cast<int>(size.GetWidth() * glScale);
+
+    int physH = static_cast<int>(size.GetHeight() * glScale);
+
     glMatrixMode(GL_PROJECTION);
 
     glLoadIdentity();
 
-    glOrtho(0, size.GetWidth(), size.GetHeight(), 0, -1, 1);
+    glOrtho(0, physW, physH, 0, -1, 1);
 
     glMatrixMode(GL_MODELVIEW);
 
@@ -978,20 +1339,24 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
     static int paintCount = 0;
 
-    if (paintCount == 0 || paintCount % 30 == 0) {
-
-        // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-        // if (f.is_open()) {
-        //     wxSize size = GetSize();
-        //     f << "[CANVAS] OnPaint count=" << paintCount
-        //       << " size=" << size.GetWidth() << "x" << size.GetHeight()
-        //       << " cells=" << m_screen_cells.size()
-        //       << " first_char=" << (m_screen_cells.empty() ? 0 : m_screen_cells[0].char_code) << std::endl;
-        // }
-
+    {
+        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
+        wxSize size = GetSize();
+        dbg << "[CANVAS] OnPaint count=" << paintCount
+            << " size=" << size.GetWidth() << "x" << size.GetHeight()
+            << " cells=" << m_screen_cells.size()
+            << " first_char=" << (m_screen_cells.empty() ? 0 : m_screen_cells[0].char_code) << "\n";
     }
 
     paintCount++;
+
+    // Must be created even though it is unused: on Windows it validates the
+
+    // update region, otherwise WM_PAINT repeats and the canvas repaints in
+
+    // incomplete patches.
+
+    wxPaintDC dc(this);
 
     
 
@@ -1051,7 +1416,9 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 
         wxSize size = GetSize();
 
-        glViewport(0, 0, size.GetWidth(), size.GetHeight());
+        float glScale = GLPixelScale();
+
+        glViewport(0, 0, static_cast<int>(size.GetWidth() * glScale), static_cast<int>(size.GetHeight() * glScale));
 
     }
 
@@ -1068,6 +1435,8 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
     SSH_LOG("OnKeyDown: keycode=" << event.GetKeyCode() << ", key_callback=" << (key_callback_ ? "set" : "NULL"));
+
+    if (HandleZoomInput(event)) return;
 
     // Check for Ctrl+C to copy selection (only if there's a selection)
 
@@ -1533,6 +1902,84 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
 void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
+    // When the IME proxy box holds focus, the native text view swallows
+
+    // navigation keys (arrows, Home/End, PageUp/Down, Delete, Escape) before a
+
+    // wxEVT_KEY_DOWN is generated. Deliver them from the hook stage instead.
+
+    if (m_imeInputBox && wxWindow::FindFocus() == m_imeInputBox) {
+
+        const char* seq = nullptr;
+
+        switch (event.GetKeyCode()) {
+
+            case WXK_UP: seq = "\x1b[A"; break;
+
+            case WXK_DOWN: seq = "\x1b[B"; break;
+
+            case WXK_RIGHT: seq = "\x1bOC"; break;
+
+            case WXK_LEFT: seq = "\x1bOD"; break;
+
+            case WXK_PAGEUP: seq = "\x1b[5~"; break;
+
+            case WXK_PAGEDOWN: seq = "\x1b[6~"; break;
+
+            case WXK_DELETE: seq = "\x1b[3~"; break;
+
+            case WXK_INSERT: seq = "\x1b[2~"; break;
+
+            case WXK_ESCAPE: seq = "\x1b"; break;
+
+            case WXK_HOME:
+
+                if (event.ControlDown()) {
+
+                    if (scroll_callback_) scroll_callback_(10000);
+
+                    return;
+
+                }
+
+                seq = "\x1b[H";
+
+                break;
+
+            case WXK_END:
+
+                if (event.ControlDown()) {
+
+                    if (scroll_callback_) scroll_callback_(-10000);
+
+                    return;
+
+                }
+
+                seq = "\x1b[F";
+
+                break;
+
+            default: break;
+
+        }
+
+        if (seq) {
+
+            SSH_LOG("OnCharHook: nav key " << event.GetKeyCode() << " sent from hook stage");
+
+            if (key_callback_) {
+
+                key_callback_(seq, static_cast<int>(strlen(seq)));
+
+            }
+
+            return;
+
+        }
+
+    }
+
     // Handle RETURN key for command interception
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
         SSH_LOG("OnCharHook: RETURN pressed, checking for command interception");
@@ -1634,6 +2081,23 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
 
 void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
+#ifdef __WXMAC__
+    const bool zoomMod = event.CmdDown();
+#else
+    const bool zoomMod = event.MetaDown();
+#endif
+    if (zoomMod) {
+        int wheelDelta = event.GetWheelDelta();
+        if (wheelDelta <= 0) wheelDelta = 120;
+        m_zoomWheelAccumulator += event.GetWheelRotation();
+        int steps = m_zoomWheelAccumulator / wheelDelta;
+        m_zoomWheelAccumulator %= wheelDelta;
+        if (steps != 0) {
+            GlobalConfig::AdjustFontZoom(steps);
+            BroadcastFontZoom();
+        }
+        return;
+    }
     int delta = event.GetWheelRotation();
     int wheelDelta = event.GetWheelDelta();
     if (wheelDelta <= 0) wheelDelta = 120; // fallback safety
@@ -1699,9 +2163,9 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
 
     // Convert pixel position to cell coordinates
 
-    int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
+    int col = std::max(0, static_cast<int>((pos.x * GLPixelScale() - margin_x) / cell_width));
 
-    int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
+    int row = std::max(0, static_cast<int>((pos.y * GLPixelScale() - margin_y) / cell_height));
 
     
 
@@ -1773,9 +2237,9 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
 
         // Convert pixel position to cell coordinates
 
-        int col = std::max(0, static_cast<int>((pos.x - margin_x) / cell_width));
+        int col = std::max(0, static_cast<int>((pos.x * GLPixelScale() - margin_x) / cell_width));
 
-        int row = std::max(0, static_cast<int>((pos.y - margin_y) / cell_height));
+        int row = std::max(0, static_cast<int>((pos.y * GLPixelScale() - margin_y) / cell_height));
 
         
 
@@ -2114,6 +2578,10 @@ void TermGLCanvas::ShowIMEInputBox() {
 
     }
 
+#ifdef __APPLE__
+    EnsureMacKeyMonitor();
+#endif
+
     if (m_imeInputBoxVisible) {
 
         SSH_LOG("IME input box already visible, skipping");
@@ -2210,47 +2678,32 @@ void TermGLCanvas::ShowIMEInputBox() {
 
     SSH_LOG("IME callback set");
 
+#ifdef __APPLE__
+    // On macOS the canvas's own NSView is the NSTextInputClient target
+    // (MacIMEProxy). The proxy text control is never shown or focused here —
+    // that is what made the text system swallow navigation keys under an IME.
+    return;
+#endif
 
+    // Position the box on the cursor (clamps m_cursorRect to canvas bounds)
 
-    // Use pre-calculated cursor rect so IME matches rendered cursor exactly
+    UpdateIMEBoxPlacement();
 
-    wxRect imeRect = m_cursorRect;
-
-
-
-    // Ensure it stays within canvas bounds (same logic as SetCursorPosition)
-
-    wxSize canvasSize = GetSize();
-
-    if (imeRect.x < 0) imeRect.x = 0;
-
-    if (imeRect.y < 0) imeRect.y = 0;
-
-    if (imeRect.x + imeRect.width > canvasSize.GetWidth()) imeRect.x = canvasSize.GetWidth() - imeRect.width;
-
-    if (imeRect.y + imeRect.height > canvasSize.GetHeight()) imeRect.y = canvasSize.GetHeight() - imeRect.height;
-
-
-
-    // Update m_cursorRect with bounded values so Render() stays in sync
-
-    m_cursorRect = imeRect;
-
-
-
-    // Set input box size and position to match cursor exactly
-
-    m_imeInputBox->SetSize(imeRect.x, imeRect.y, imeRect.width, imeRect.height);
-
+#ifdef _WIN32
+    if (m_imePopup) {
+        m_imePopup->Popup(m_imeInputBox);
+        m_imeInputBox->SetFocus();
+    }
+#else
     m_imeInputBox->Show();
-
     m_imeInputBox->SetFocus();
+#endif
 
     m_imeInputBoxVisible = true;
 
 
 
-    SSH_LOG("IME input box shown at position: " << imeRect.x << ", " << imeRect.y << " with size: " << imeRect.width << "x" << imeRect.height);
+    SSH_LOG("IME input box shown at position: " << m_cursorRect.x << ", " << m_cursorRect.y << " with size: " << m_cursorRect.width << "x" << m_cursorRect.height);
 
 }
 
@@ -2262,7 +2715,11 @@ void TermGLCanvas::HideIMEInputBox() {
 
     if (m_imeInputBox && m_imeInputBoxVisible) {
 
+#ifdef _WIN32
+        if (m_imePopup) m_imePopup->Dismiss();
+#else
         m_imeInputBox->Hide();
+#endif
 
         m_imeInputBox->Clear();
 
@@ -2277,6 +2734,31 @@ void TermGLCanvas::HideIMEInputBox() {
         SSH_LOG("IME input box not visible or null, skipping hide");
 
     }
+
+}
+
+
+
+void TermGLCanvas::OnIMECommit(const std::string& utf8) {
+
+    if (utf8.empty()) return;
+
+    if (m_imeCallback) {
+
+        m_imeCallback(utf8.c_str(), static_cast<int>(utf8.size()));
+
+    } else if (key_callback_) {
+
+        key_callback_(utf8.c_str(), static_cast<int>(utf8.size()));
+
+    }
+
+    TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+    if (panel && panel->IsLocalTerminal()) {
+        panel->AppendToInputBuffer(utf8);
+    }
+
+    Refresh(false);
 
 }
 
@@ -2332,6 +2814,9 @@ void TermGLCanvas::OnProxyTextReceived(wxCommandEvent& event) {
 void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
 
     int keycode = event.GetKeyCode();
+
+    if (HandleZoomInput(event)) return;
+
     SSH_LOG("OnProxyKeyDown called, keycode=" << keycode
               << " ctrl=" << event.ControlDown()
               << " rawctrl=" << event.RawControlDown()

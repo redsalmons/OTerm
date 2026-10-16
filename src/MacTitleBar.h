@@ -7,6 +7,8 @@ extern "C" {
 
 void SetupMacTitleBar(void* windowHandle);
 void SetMacTitleBarVisible(void* windowHandle, bool visible);
+void MacActivateApp();
+void MacWindowMoveToActiveSpace(void* windowHandle);
 
 #ifdef __cplusplus
 }

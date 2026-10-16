@@ -20,6 +20,7 @@
 #include "GlobalConfig.h"
 
 #include "SplitManager.h"
+#include "CustomTitleBar.h"
 
 #include <wx/display.h>
 
@@ -482,6 +483,12 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
                 if (container) {
                     container->QueueInput(std::string(data, length));
+                    if (container->GetScrollOffset() > 0) {
+                        container->ResetScrollToBottom();
+                        if (panel) {
+                            panel->UpdateCanvasFromTerminal();
+                        }
+                    }
                 }
             });
             
@@ -1286,11 +1293,58 @@ void ConnectInfo::HandleSplit(wxSplitMode mode, TerminalPanel* sourcePanel) {
 
 
 
+void ConnectInfo::SetTabLabel(const wxString& label) {
+    if (m_label) {
+        m_label->SetLabel(label);
+        m_cachedWidth = 0;
+        Layout();
+        Refresh();
+    }
+    // Keep the notebook page text in sync, and ask the title bar to
+    // re-layout so the tab width adapts to the new label.
+    wxWindow* current = GetParent();
+    while (current) {
+        wxSimplebook* notebook = dynamic_cast<wxSimplebook*>(current);
+        if (notebook) {
+            if (m_contentPanel) {
+                for (size_t i = 0; i < notebook->GetPageCount(); ++i) {
+                    if (notebook->GetPage(i) == m_contentPanel) {
+                        notebook->SetPageText(i, label);
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        current = current->GetParent();
+    }
+    current = GetParent();
+    while (current) {
+        CustomTitleBar* titleBar = dynamic_cast<CustomTitleBar*>(current);
+        if (titleBar) {
+            titleBar->RelayoutTabs();
+            break;
+        }
+        current = current->GetParent();
+    }
+}
+
 void ConnectInfo::SwitchToSSH(const DeviceConfig& deviceConfig) {
     SSH_LOG("ConnectInfo::SwitchToSSH called");
     m_isLocalTerminal = false;
     m_terminalThread = nullptr;
     m_deviceConfig = deviceConfig;
+
+    // Rename the tab to username@address
+    wxString label;
+    if (!deviceConfig.username.empty() && !deviceConfig.address.empty()) {
+        label = wxString::FromUTF8(deviceConfig.username) + "@" + wxString::FromUTF8(deviceConfig.address);
+    } else if (!deviceConfig.name.empty()) {
+        label = wxString::FromUTF8(deviceConfig.name);
+    }
+    if (!label.empty()) {
+        SetTabLabel(label);
+    }
 
     // Refresh the tab layout
     Layout();

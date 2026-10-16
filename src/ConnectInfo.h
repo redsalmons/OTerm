@@ -64,6 +64,8 @@ public:
 
     wxString GetLabel() const { return m_label->GetLabel(); }
 
+    void SetTabLabel(const wxString& label);
+
     int GetPreferredWidth() const;
 
     int GetCachedWidth() const { return m_cachedWidth; }

@@ -31,7 +31,7 @@ FontAtlas::~FontAtlas() {
 }
 
 bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
-    SSHManager::init_log_file();
+    InitSSHLogFile();
     SSH_LOG("FontAtlas::InitializeSystemFont called with fontSize=" << fontSize << ", fontName='" << fontName << "'");
 
     m_fontSize = fontSize;

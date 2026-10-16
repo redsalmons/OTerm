@@ -1,15 +1,18 @@
 #include "AsynchronousSFTPTask.h"
+#include "SSHManager.h"
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
 #include <wx/app.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <iostream>
+#include <thread>
 
 wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_PROGRESS, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_COMPLETE, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_SSH_FILE_LIST, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_SSH_COMMAND_OUTPUT, wxCommandEvent);
+wxDEFINE_EVENT(wxEVT_SFTP_DNS_RESOLVED, wxCommandEvent);
 
 // Initialize static members
 std::vector<AsynchronousSFTPTask*> AsynchronousSFTPTask::s_activeTasks;
@@ -28,13 +31,18 @@ AsynchronousSFTPTask::AsynchronousSFTPTask(wxEvtHandler* handler, const DeviceCo
       m_sshChannel(nullptr),
       m_localFile(nullptr),
       m_bytesTransferred(0),
-      m_timer(this, TIMER_ID) {
-    
+      m_timer(this, TIMER_ID),
+      m_timeoutTimer(this, TIMEOUT_TIMER_ID) {
+
     Bind(wxEVT_TIMER, &AsynchronousSFTPTask::OnTimer, this, TIMER_ID);
+    Bind(wxEVT_TIMER, &AsynchronousSFTPTask::OnTimeout, this, TIMEOUT_TIMER_ID);
+    Bind(wxEVT_SFTP_DNS_RESOLVED, &AsynchronousSFTPTask::OnDnsResolved, this);
 }
 
 AsynchronousSFTPTask::~AsynchronousSFTPTask() {
+    m_alive->store(false);
     m_timer.Stop();
+    m_timeoutTimer.Stop();
     Cleanup();
 }
 
@@ -75,18 +83,50 @@ void AsynchronousSFTPTask::QueueTransferTask(wxEvtHandler* handler, const Device
 }
 
 void AsynchronousSFTPTask::Start() {
+    if (!EnsureLibssh2Init()) {
+        Fail("Failed to initialize libssh2");
+        return;
+    }
+
     m_state = SFTPState::CONNECTING;
     m_socket = new wxSocketClient(wxSOCKET_NOWAIT);
     m_socket->SetEventHandler(*this, SOCKET_ID);
     m_socket->SetNotify(wxSOCKET_CONNECTION_FLAG | wxSOCKET_LOST_FLAG);
     m_socket->Notify(true);
-    
+
     Bind(wxEVT_SOCKET, &AsynchronousSFTPTask::OnSocketEvent, this, SOCKET_ID);
-    
-    wxIPaddress* addr;
-    wxIPV4address addr4;
-    addr = &addr4;
-    
+
+    m_sshSession = libssh2_session_init();
+    if (!m_sshSession) {
+        Fail("Failed to initialize libssh2 session");
+        return;
+    }
+
+    // Arm the stall watchdog; DoStateMachineStep re-arms it on progress.
+    m_timeoutTimer.Start(STALL_TIMEOUT_MS, wxTIMER_ONE_SHOT);
+
+    if (IsNumericIPv4(m_deviceConfig.address)) {
+        ConnectSocket(m_deviceConfig.address);
+    } else {
+        // Resolve on a worker thread so DNS cannot stall the UI
+        std::string host = m_deviceConfig.address;
+        auto alive = m_alive;
+        std::thread([this, host, alive]() {
+            std::string ip = ResolveIPv4(host);
+            if (!alive->load()) return;
+            wxCommandEvent evt(wxEVT_SFTP_DNS_RESOLVED);
+            evt.SetString(wxString::FromUTF8(ip));
+            wxQueueEvent(this, evt.Clone());
+        }).detach();
+    }
+}
+
+void AsynchronousSFTPTask::ConnectSocket(const std::string& ip) {
+    if (!m_socket) return;
+
+    wxIPV4address addr;
+    addr.Hostname(ip); // numeric IP — does not block
+
     long portLong = 22;
     if (!m_deviceConfig.port.empty()) {
         try {
@@ -95,22 +135,33 @@ void AsynchronousSFTPTask::Start() {
             portLong = 22;
         }
     }
-    
-    addr->Hostname(m_deviceConfig.address);
-    addr->Service(portLong);
-    
-    m_socket->Connect(*addr, false); // non-blocking connect
-    
-    m_sshSession = libssh2_session_init();
-    if (!m_sshSession) {
-        Fail("Failed to initialize libssh2 session");
-        return;
-    }
-    
+    addr.Service(portLong);
+
+    m_socket->Connect(addr, false); // non-blocking connect
+
 #ifdef _WIN32
-    // Start timer for polling loop (15ms tick) on Windows
+    // Start the polling loop (15ms tick) now that connect is in flight
     m_timer.Start(15);
 #endif
+}
+
+void AsynchronousSFTPTask::OnDnsResolved(wxCommandEvent& event) {
+    if (!m_socket || m_state != SFTPState::CONNECTING) return;
+
+    std::string ip = event.GetString().ToStdString();
+    if (ip.empty()) {
+        Fail("Could not resolve host: " + m_deviceConfig.address);
+        return;
+    }
+
+    m_timeoutTimer.Start(STALL_TIMEOUT_MS, wxTIMER_ONE_SHOT);
+    ConnectSocket(ip);
+}
+
+void AsynchronousSFTPTask::OnTimeout(wxTimerEvent& event) {
+    if (!IsFinished()) {
+        Fail("Operation timed out (no progress)");
+    }
 }
 
 void AsynchronousSFTPTask::Cancel() {
@@ -136,11 +187,15 @@ void AsynchronousSFTPTask::OnSocketEvent(wxSocketEvent& event) {
         case wxSOCKET_CONNECTION: {
             m_state = SFTPState::HANDSHAKE;
 #ifndef _WIN32
-            // Move to wxEventLoopSourceHandler for pure OS events
+            // Move to wxEventLoopSourceHandler for pure OS events.
+            // If FD source registration fails, fall back to the polling timer.
             m_socket->Notify(false);
             wxEventLoopBase* loop = wxEventLoop::GetActive();
             if (loop && m_socket->GetSocket() >= 0) {
                 m_fdSource = loop->AddSourceForFD(m_socket->GetSocket(), this, wxEVENT_SOURCE_INPUT | wxEVENT_SOURCE_OUTPUT);
+            }
+            if (!m_fdSource) {
+                m_timer.Start(15);
             }
 #else
             m_timer.Start(15);
@@ -208,7 +263,17 @@ void AsynchronousSFTPTask::OnExceptionWaiting() {
 void AsynchronousSFTPTask::DoStateMachineStep() {
     if (IsFinished()) {
         m_timer.Stop();
+        m_timeoutTimer.Stop();
         return;
+    }
+
+    // Reset the stall watchdog only on real progress (state transition or
+    // bytes moved) — a bare poll tick must not keep it alive.
+    long long progress = m_bytesTransferred + (long long)m_cmdOutput.size();
+    if (m_state != m_watchState || progress != m_watchProgress) {
+        m_watchState = m_state;
+        m_watchProgress = progress;
+        m_timeoutTimer.Start(STALL_TIMEOUT_MS, wxTIMER_ONE_SHOT);
     }
 
     switch (m_state) {
@@ -306,6 +371,17 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
         case SFTPState::READ_CMD: {
             char buffer[4096];
             while (true) {
+                // Drain stderr first so its window cannot stall the channel.
+                // For command tasks the text is kept; for `ls` output it would
+                // corrupt the listing, so it is discarded.
+                while (true) {
+                    int src = libssh2_channel_read_stderr(m_sshChannel, buffer, sizeof(buffer));
+                    if (src <= 0) break;
+                    if (m_isCommand) {
+                        m_cmdOutput.append(buffer, (size_t)src);
+                    }
+                }
+
                 int rc = libssh2_channel_read(m_sshChannel, buffer, sizeof(buffer));
                 if (rc > 0) {
                     m_cmdOutput.append(buffer, rc);
@@ -514,6 +590,7 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
 void AsynchronousSFTPTask::Fail(const std::string& errorMsg) {
     m_state = SFTPState::FAILED;
     m_timer.Stop();
+    m_timeoutTimer.Stop();
     
     Cleanup();
     
@@ -533,16 +610,21 @@ void AsynchronousSFTPTask::Fail(const std::string& errorMsg) {
         event.SetString(m_task.to_json().dump().c_str());
         wxQueueEvent(m_handler, event.Clone());
     }
-    
+
     // Manage pending queue
     if (!m_isList && !m_isCommand) {
         ManageQueue();
+    } else {
+        // List/command tasks are not tracked in s_activeTasks — nobody else
+        // owns this object, so schedule self-deletion.
+        wxTheApp->CallAfter([this]() { delete this; });
     }
 }
 
 void AsynchronousSFTPTask::Succeed() {
     m_state = SFTPState::FINISHED;
     m_timer.Stop();
+    m_timeoutTimer.Stop();
     
     Cleanup();
     
@@ -559,15 +641,19 @@ void AsynchronousSFTPTask::Succeed() {
         m_task.status = "completed";
         m_task.progress = 100;
         m_task.result = "success";
-        
+
         wxCommandEvent event(wxEVT_FILE_TRANSFER_COMPLETE);
         event.SetString(m_task.to_json().dump().c_str());
         wxQueueEvent(m_handler, event.Clone());
     }
-    
+
     // Manage pending queue
     if (!m_isList && !m_isCommand) {
         ManageQueue();
+    } else {
+        // List/command tasks are not tracked in s_activeTasks — nobody else
+        // owns this object, so schedule self-deletion.
+        wxTheApp->CallAfter([this]() { delete this; });
     }
 }
 
@@ -621,8 +707,15 @@ void AsynchronousSFTPTask::ManageQueue() {
     while (s_activeTasks.size() < MAX_ACTIVE_TRANSFERS && !s_pendingTasks.empty()) {
         AsynchronousSFTPTask* nextTask = s_pendingTasks.front();
         s_pendingTasks.pop();
+
+        // A task may have been cancelled/failed while still queued
+        if (nextTask->IsFinished()) {
+            wxTheApp->CallAfter([nextTask]() { delete nextTask; });
+            continue;
+        }
+
         s_activeTasks.push_back(nextTask);
-        
+
         // Start next task
         nextTask->Start();
     }
