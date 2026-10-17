@@ -436,12 +436,14 @@ std::vector<DeviceConfig> DeviceConfig::LoadFromFile() {
 
         // Get master password for decryption
         std::string masterPassword = GlobalConfig::GetActiveMasterPassword();
+        bool migratedToVault = false;
 
         for (const auto& item : data["root"]) {
             DeviceConfig dev;
             dev.id = item.value("id", "");
             dev.name = item.value("name", "");
             dev.group = item.value("group", "");
+            std::string encryptedPassword;
             
             // Handle both nested "config" structure and flat structure
             if (item.contains("config") && item["config"].is_object()) {
@@ -450,7 +452,7 @@ std::vector<DeviceConfig> DeviceConfig::LoadFromFile() {
                 dev.address = config.value("address", "");
                 dev.port = config.value("port", "22");
                 dev.auth_method = config.value("authMethod", "password");
-                std::string encryptedPassword = config.value("password", "");
+                encryptedPassword = config.value("password", "");
                 dev.password = DecodeStoredPassword(encryptedPassword, dev.id, masterPassword);
             } else {
                 // Flat structure (fallback)
@@ -458,12 +460,24 @@ std::vector<DeviceConfig> DeviceConfig::LoadFromFile() {
                 dev.address = item.value("address", "");
                 dev.port = item.value("port", "22");
                 dev.auth_method = item.value("authType", "password");
-                std::string encryptedPassword = item.value("password", "");
+                encryptedPassword = item.value("password", "");
                 dev.password = DecodeStoredPassword(encryptedPassword, dev.id, masterPassword);
             }
 
+#if defined(__APPLE__) || defined(_WIN32)
+            if (!encryptedPassword.empty() && encryptedPassword != kKeychainMarker && !dev.password.empty()) {
+                migratedToVault = true;
+            }
+#endif
+
             devices.push_back(dev);
         }
+
+#if defined(__APPLE__) || defined(_WIN32)
+        if (migratedToVault) {
+            SaveToFile(devices);
+        }
+#endif
     } catch (const std::exception& e) {
     }
     return devices;

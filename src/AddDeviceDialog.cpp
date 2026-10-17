@@ -172,7 +172,10 @@ void AddDeviceDialog::OnSave(wxCommandEvent& event) {
         m_deviceConfig.password = m_passwordCtrl->GetValue().ToStdString();
     } else {
         m_deviceConfig.auth_method = "key";
-        m_deviceConfig.key = m_keyTextCtrl->GetValue().ToStdString();
+        wxString keyContent = m_keyTextCtrl->GetValue();
+        keyContent.Replace("——", "-----");
+        m_deviceConfig.password = keyContent.ToStdString();
+        m_deviceConfig.key = m_deviceConfig.password;
     }
     
     // Generate ID

@@ -113,6 +113,7 @@ private:
     LIBSSH2_CHANNEL* m_sshChannel;
     FILE* m_localFile;
     long long m_bytesTransferred;
+    int m_lastReportedProgress = -1;
     std::string m_cmdOutput;
     std::vector<char> m_cacheBuffer; // For uploading partial block management
     

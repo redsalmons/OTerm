@@ -248,8 +248,7 @@ int VTermManager::vterm_damage_callback(VTermRect rect, void *user) {
             // Only cleanup once per 100 frames to avoid excessive redraws
             if (last_cleanup_frame < frame_counter - 100) {
                 // Force full screen redraw to clear any remaining vim content
-                VTermPos end_pos = {manager->rows_ - 1, manager->cols_ - 1};
-                VTermRect full_screen = {0, 0, end_pos.row, end_pos.col};
+                VTermRect full_screen = {0, manager->rows_, 0, manager->cols_};
                 manager->update_cell_buffer(full_screen);
                 
                 // Trigger damage callback to force full redraw
@@ -312,8 +311,7 @@ int VTermManager::vterm_settermprop_callback(VTermProp prop, VTermValue *val, vo
                     manager->current_scroll_offset_ = 0;
                     
                     // Force a full screen damage to ensure proper redraw
-                    VTermPos end_pos = {manager->rows_ - 1, manager->cols_ - 1};
-                    VTermRect full_screen = {0, 0, end_pos.row, end_pos.col};
+                    VTermRect full_screen = {0, manager->rows_, 0, manager->cols_};
                     manager->update_cell_buffer(full_screen);
                     
                     // Trigger damage callback to force full redraw
@@ -502,27 +500,9 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
 void VTermManager::refresh_cell_buffer() {
     if (!vts_) return;
     
-    SSH_LOG("refresh_cell_buffer: reading entire screen from VTerm, rows=" << rows_ << ", cols=" << cols_);
-    
     // Read entire screen from VTerm
-    VTermRect full_screen = {0, 0, cols_, rows_};
+    VTermRect full_screen = {0, rows_, 0, cols_};
     update_cell_buffer(full_screen);
-    
-    // Log sample cells to verify data was read
-    if (cell_buffer_.size() > 0 && cell_buffer_[0].size() > 0) {
-        SSH_LOG("refresh_cell_buffer: sample cell[0][0] char_code=" << cell_buffer_[0][0].char_code << ", fg_color=0x" << std::hex << cell_buffer_[0][0].fg_color << std::dec);
-    }
-    if (cell_buffer_.size() > 1 && cell_buffer_[1].size() > 0) {
-        SSH_LOG("refresh_cell_buffer: sample cell[1][0] char_code=" << cell_buffer_[1][0].char_code);
-    }
-    if (cell_buffer_.size() > 44 && cell_buffer_[44].size() > 0) {
-        SSH_LOG("refresh_cell_buffer: sample cell[44][0] char_code=" << cell_buffer_[44][0].char_code);
-    }
-    if (cell_buffer_.size() > 81 && cell_buffer_[81].size() > 0) {
-        SSH_LOG("refresh_cell_buffer: sample cell[81][0] char_code=" << cell_buffer_[81][0].char_code);
-    } else {
-        SSH_LOG("refresh_cell_buffer: cell_buffer_ size=" << cell_buffer_.size() << ", cannot access cell[81]");
-    }
 }
 
 void VTermManager::initialize_cell_buffer() {

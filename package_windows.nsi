@@ -1,14 +1,31 @@
-!define APP_NAME "OceanTerm"
-!define APP_VERSION "1.0.3"
+﻿!define APP_NAME "OceanTerm"
 !define APP_PUBLISHER "OceanTerm"
 !define APP_EXE "OceanTerm.exe"
-!define APP_ARCH "ARM64"
 
-!define INSTALL_DIR "$PROGRAMFILES64\${APP_NAME}"
+; Overridable via makensis /D switches, e.g.:
+;   makensis /DAPP_ARCH=x64 /DAPP_VERSION=1.0.3 /DSTAGING_DIR=package_staging_x64 package_windows.nsi
+!ifndef APP_ARCH
+    !define APP_ARCH "arm64"
+!endif
+!ifndef APP_VERSION
+    !define APP_VERSION "1.0.3"
+!endif
+!ifndef STAGING_DIR
+    !define STAGING_DIR "package_staging_${APP_ARCH}"
+!endif
+
+!if "${APP_ARCH}" == "x86"
+    !define INSTALL_DIR "$PROGRAMFILES\${APP_NAME}"
+!else
+    !define INSTALL_DIR "$PROGRAMFILES64\${APP_NAME}"
+!endif
 !define STARTMENU_DIR "$SMPROGRAMS\${APP_NAME}"
 
 ; Request admin rights
 RequestExecutionLevel admin
+
+; Unicode installer (required to parse the UTF-8 SimpChinese strings below)
+Unicode true
 
 ; Modern UI
 !include "MUI2.nsh"
@@ -57,22 +74,8 @@ Section "Main Application" SecMain
     
     SetOutPath "$INSTDIR"
     
-    ; Main executable
-    File "build\bin\Release\${APP_EXE}"
-    
-    ; Required DLLs from vcpkg
-    File "vcpkg_installed\arm64-windows\bin\libcrypto-3-arm64.dll"
-    File "vcpkg_installed\arm64-windows\bin\libssl-3-arm64.dll"
-    File "vcpkg_installed\arm64-windows\bin\libssh2.dll"
-    File "vcpkg_installed\arm64-windows\bin\uv.dll"
-    File "vcpkg_installed\arm64-windows\bin\z.dll"
-    File "vcpkg_installed\arm64-windows\bin\legacy.dll"
-    
-    ; Icon file
-    File "src\OceanTerm.ico"
-    
-    ; wxWidgets DLLs
-    File "wxWidgets-3.3.1\build\lib\vc_arm64_dll\wxmsw331u_vc_arm64_custom.dll"
+    ; All payload files (exe + DLLs + locales\) staged per-arch by build_installer.ps1
+    File /r "${STAGING_DIR}\*"
     
     ; Create uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -92,23 +95,18 @@ Section "Main Application" SecMain
     CreateShortCut "${STARTMENU_DIR}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
-Section "Internationalization Files" SecI18n
-    SetOutPath "$INSTDIR\locales"
-    File /r "locales\*"
-SectionEnd
-
 Section "Desktop Shortcut" SecDesktop
     CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\OceanTerm.ico" 0
 SectionEnd
 
 ; Section Descriptions
 LangString DESC_SecMain ${LANG_ENGLISH} "The main application files and required libraries."
-LangString DESC_SecI18n ${LANG_ENGLISH} "Internationalization files for multi-language support."
+LangString DESC_SecMain ${LANG_SIMPCHINESE} "主程序文件及所需运行库。"
 LangString DESC_SecDesktop ${LANG_ENGLISH} "Create a desktop shortcut."
+LangString DESC_SecDesktop ${LANG_SIMPCHINESE} "在桌面创建快捷方式。"
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
     !insertmacro MUI_DESCRIPTION_TEXT ${SecMain} $(DESC_SecMain)
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecI18n} $(DESC_SecI18n)
     !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} $(DESC_SecDesktop)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 

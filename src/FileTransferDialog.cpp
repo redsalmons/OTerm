@@ -13,6 +13,7 @@
 #include <wx/dnd.h>
 #include <fstream>
 #include <sstream>
+#include <random>
 
 wxDEFINE_EVENT(wxEVT_FILE_TRANSFER_REQUEST, wxCommandEvent);
 
@@ -39,10 +40,20 @@ wxString GetItemName(wxDataViewListCtrl* list, int row) {
 }
 
 wxString GenerateUUID() {
+    static std::mt19937 rng([]() {
+        std::random_device rd;
+        std::seed_seq seq{
+            rd(), rd(), rd(), rd(),
+            static_cast<unsigned int>(std::chrono::high_resolution_clock::now().time_since_epoch().count())
+        };
+        return std::mt19937(seq);
+    }());
+    std::uniform_int_distribution<int> dist(0, 15);
+
     wxString uuid;
     for (int i = 0; i < 32; i++) {
         if (i == 8 || i == 12 || i == 16 || i == 20) uuid += "-";
-        int digit = rand() % 16;
+        int digit = dist(rng);
         uuid += digit < 10 ? wxString::Format("%d", digit)
                          : wxString::Format("%c", 'a' + (digit - 10));
     }
@@ -180,7 +191,6 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
                 continue;
             }
             
-            SSH_LOG("Adding item: " << name);
             wxString displaySize;
             long long size = 0;
             if (!isDirectory) {
@@ -460,6 +470,9 @@ void FileTransferDialog::CreateControls() {
             }
 
             wxString localPath = m_localCurrentPath;
+            if (localPath.IsEmpty()) {
+                localPath = wxGetHomeDir();
+            }
             size_t lastSlash = remotePath.rfind('/');
             if (lastSlash != wxString::npos && lastSlash + 1 < remotePath.length()) {
                 wxString fileName = remotePath.substr(lastSlash + 1);
@@ -744,8 +757,8 @@ void FileTransferDialog::OnSize(wxSizeEvent& event) {
 }
 
 void FileTransferDialog::OnFileTransferProgress(wxCommandEvent& event) {
-    // Progress events can arrive many times per second — don't rebuild the
-    // task list here, the 3s timer refresh covers it.
+    // Progress events are deduplicated to fire only when percentage or state changes.
+    LoadAndDisplayTasks();
 }
 
 void FileTransferDialog::OnFileTransferComplete(wxCommandEvent& event) {
@@ -777,12 +790,8 @@ void FileTransferDialog::LoadAndDisplayTasks() {
     wxString deviceDir = workspaceDir + wxFileName::GetPathSeparator() + deviceId;
     wxString taskFilePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
     
-    SSH_LOG("Loading task list from: " << taskFilePath.ToStdString());
-    
-    // Load task file
     std::ifstream file(taskFilePath.ToStdString());
     if (!file.is_open()) {
-        SSH_LOG("Task file not found: " << taskFilePath.ToStdString());
         m_taskList->DeleteAllItems();
         return;
     }

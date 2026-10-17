@@ -463,11 +463,7 @@ void TerminalPanel::OnSize(wxSizeEvent& event) {
 }
 
 void TerminalPanel::UpdateCanvasFromTerminal() {
-    if (!m_canvas) {
-        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
-        dbg << "UpdateCanvasFromTerminal: m_canvas is null\n";
-        return;
-    }
+    if (!m_canvas) return;
     
     ScreenBuffer local_buffer;
     bool in_alt_screen = false;
@@ -485,12 +481,7 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
         has_buffer = true;
     }
     
-    if (!has_buffer) {
-        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
-        dbg << "UpdateCanvasFromTerminal: no buffer (alive="
-            << (m_terminalContainer ? m_terminalContainer->IsSessionAlive() : false) << ")\n";
-        return;
-    }
+    if (!has_buffer) return;
     
     // 将 buffer 中的数据转换为 canvas 需要的格式
     std::vector<CellInstance> instances;
@@ -515,14 +506,6 @@ void TerminalPanel::UpdateCanvasFromTerminal() {
     static int updateCount = 0;
     if (updateCount++ % 60 == 0) {
         SPLIT_LOG("UpdateCanvasFromTerminal: sending " << instances.size() << " cells (" << rows << "x" << cols << ") to canvas");
-    }
-    {
-        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
-        int nonempty = 0;
-        for (const auto& inst : instances) if (inst.char_code != 0) ++nonempty;
-        dbg << "UpdateCanvasFromTerminal #" << updateCount << " rows=" << rows << " cols=" << cols
-            << " cells=" << instances.size() << " nonempty=" << nonempty
-            << " has_buffer=" << has_buffer << "\n";
     }
     
     m_canvas->UpdateScreenData(instances);
@@ -629,6 +612,68 @@ void TerminalPanel::ConvertToSSH(const DeviceConfig& device) {
     SPLIT_LOG("TerminalPanel::ConvertToSSH completed, SSHTerminalContainer started successfully");
 }
 
+bool TerminalPanel::CheckAndHandleLocalCommand() {
+    if (!IsLocalTerminal()) {
+        return false;
+    }
+
+    std::string candidate = m_inputBuffer;
+    auto trim = [](const std::string& s) -> std::string {
+        size_t first = s.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) return "";
+        size_t last = s.find_last_not_of(" \t\r\n");
+        return s.substr(first, last - first + 1);
+    };
+
+    std::string trimmed = trim(candidate);
+
+    if (m_commandInterceptor.ShouldIntercept(trimmed) != CommandInterceptor::InterceptionResult::Intercepted && m_terminalContainer) {
+        std::string screenLine = m_terminalContainer->GetCurrentLineText();
+        for (const auto& prefix : m_commandInterceptor.GetInterceptedPrefixes()) {
+            size_t pos = screenLine.find(prefix);
+            if (pos != std::string::npos) {
+                if (pos == 0 || screenLine[pos - 1] == ' ' || screenLine[pos - 1] == '>' ||
+                    screenLine[pos - 1] == '$' || screenLine[pos - 1] == '#' || screenLine[pos - 1] == '%') {
+                    trimmed = trim(screenLine.substr(pos));
+                    break;
+                }
+            }
+        }
+    }
+
+    if (m_commandInterceptor.ShouldIntercept(trimmed) != CommandInterceptor::InterceptionResult::Intercepted) {
+        return false;
+    }
+
+    ClearInputBuffer();
+
+    // Clear the typed command on the local shell prompt (Ctrl+C cancels the current input line)
+    if (m_terminalContainer) {
+        m_terminalContainer->QueueInput("\x03");
+    }
+
+    if (trimmed.find("oc device") == 0) {
+        wxCommandEvent deviceEvent(wxEVT_DEVICE_SHOW_REQUEST);
+        deviceEvent.SetEventObject(this);
+        wxWindow* topWindow = wxTheApp->GetTopWindow();
+        if (topWindow) {
+            wxQueueEvent(topWindow, deviceEvent.Clone());
+        }
+        return true;
+    } else if (trimmed.find("oc ssh") == 0) {
+        wxCommandEvent sshEvent(wxEVT_SSH_DIRECT_CONNECT);
+        sshEvent.SetString(wxString::FromUTF8(trimmed.c_str()));
+        sshEvent.SetEventObject(this);
+        wxWindow* topWindow = wxTheApp->GetTopWindow();
+        if (topWindow) {
+            wxQueueEvent(topWindow, sshEvent.Clone());
+        }
+        return true;
+    }
+
+    return true;
+}
+
 void TerminalPanel::OnKeyDown(wxKeyEvent& event) {
     SSH_LOG("TerminalPanel::OnKeyDown: keycode=" << event.GetKeyCode());
 
@@ -642,44 +687,8 @@ void TerminalPanel::OnKeyDown(wxKeyEvent& event) {
             return;
         }
         SSH_LOG("TerminalPanel::OnKeyDown: session alive, normal Enter handling");
-        if (IsLocalTerminal()) {
-            SPLIT_LOG("TerminalPanel::OnKeyDown: RETURN pressed on local terminal, checking command interception");
-            SPLIT_LOG("TerminalPanel::OnKeyDown: inputBuffer='" << m_inputBuffer << "'");
-            auto result = m_commandInterceptor.ShouldIntercept(m_inputBuffer);
-            if (result == CommandInterceptor::InterceptionResult::Intercepted) {
-                SPLIT_LOG("TerminalPanel::OnKeyDown: Command intercepted, checking command type");
-                if (m_inputBuffer.find("oc device") == 0) {
-                    SPLIT_LOG("TerminalPanel::OnKeyDown: oc device command detected, triggering device show request");
-                    std::string cmd = m_inputBuffer;
-                    ClearInputBuffer();
-                    wxCommandEvent deviceEvent(wxEVT_DEVICE_SHOW_REQUEST);
-                    deviceEvent.SetEventObject(this);
-                    wxWindow* topWindow = wxTheApp->GetTopWindow();
-                    if (topWindow) {
-                        wxQueueEvent(topWindow, deviceEvent.Clone());
-                    }
-                    return;
-                } else if (m_inputBuffer.find("oc ssh") == 0) {
-                    SPLIT_LOG("TerminalPanel::OnKeyDown: oc ssh command detected, triggering direct SSH connect");
-                    std::string cmd = m_inputBuffer;
-                    ClearInputBuffer();
-                    wxCommandEvent sshEvent(wxEVT_SSH_DIRECT_CONNECT);
-                    sshEvent.SetString(wxString::FromUTF8(cmd.c_str()));
-                    sshEvent.SetEventObject(this);
-                    wxWindow* topWindow = wxTheApp->GetTopWindow();
-                    if (topWindow) {
-                        wxQueueEvent(topWindow, sshEvent.Clone());
-                    }
-                    return;
-                } else {
-                    SPLIT_LOG("TerminalPanel::OnKeyDown: Command intercepted, sending Ctrl+C instead of Enter");
-                    if (m_terminalContainer) {
-                        m_terminalContainer->QueueInput("\x03");
-                    }
-                    ClearInputBuffer();
-                    return;
-                }
-            }
+        if (CheckAndHandleLocalCommand()) {
+            return;
         }
     }
 

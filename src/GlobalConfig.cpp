@@ -244,9 +244,9 @@ bool GlobalConfig::WriteFileAtomic(const std::string& path, const std::string& c
     tmp += ".tmp";
 
     {
-        std::ofstream file(tmp, std::ios::out | std::ios::trunc);
+        std::ofstream file(tmp, std::ios::out | std::ios::binary | std::ios::trunc);
         if (!file.is_open()) return false;
-        file << content;
+        file.write(content.data(), static_cast<std::streamsize>(content.size()));
         file.flush();
         if (!file.good()) {
             file.close();

@@ -37,8 +37,8 @@ static std::string timestamp() {
 extern std::ofstream ssh_log_file;
 extern bool ssh_log_initialized;
 
-// Logging enable/disable switch - set to 1 to enable, 0 to disable
-#define ENABLE_SSH_LOG 1
+// Logging enable/disable switch - set to 1 to enable debug logs, 0 to disable
+#define ENABLE_SSH_LOG 0
 
 #if ENABLE_SSH_LOG
 #define SSH_LOG(msg) do { \

@@ -562,14 +562,33 @@ void ConnectInfo::HandleClosePanel(TerminalPanel* sourcePanel) {
 void ConnectInfo::ShowFileTransferDialog() {
     SSH_LOG("ConnectInfo::ShowFileTransferDialog called");
     
-    // Update our device config from the active SSHTerminalContainer
-    TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
-    if (panel && panel->GetTerminalContainer()) {
-        auto sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
-        if (sshContainer) {
-            m_deviceConfig = sshContainer->GetDeviceConfig();
-            SSH_LOG("ConnectInfo::ShowFileTransferDialog: updated m_deviceConfig from SSHTerminalContainer (username=" << m_deviceConfig.username << ", address=" << m_deviceConfig.address << ")");
+    // Update our device config from the active SSHTerminalContainer (including split panels)
+    auto findSSHContainer = [](SplitNode* node, auto& self) -> SSHTerminalContainer* {
+        if (!node) return nullptr;
+        if (node->type == SplitNodeType::Leaf) {
+            if (auto* p = dynamic_cast<TerminalPanel*>(node->content.get())) {
+                if (auto* ssh = dynamic_cast<SSHTerminalContainer*>(p->GetTerminalContainer())) {
+                    return ssh;
+                }
+            }
+            return nullptr;
         }
+        if (auto* left = self(node->left.get(), self)) return left;
+        return self(node->right.get(), self);
+    };
+
+    SSHTerminalContainer* sshContainer = nullptr;
+    if (m_splitManager && m_splitManager->GetTree()) {
+        sshContainer = findSSHContainer(m_splitManager->GetTree()->GetRoot(), findSSHContainer);
+    }
+    if (!sshContainer) {
+        if (auto* panel = dynamic_cast<TerminalPanel*>(m_contentPanel)) {
+            sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
+        }
+    }
+    if (sshContainer) {
+        m_deviceConfig = sshContainer->GetDeviceConfig();
+        SSH_LOG("ConnectInfo::ShowFileTransferDialog: updated m_deviceConfig from SSHTerminalContainer (username=" << m_deviceConfig.username << ", address=" << m_deviceConfig.address << ")");
     }
     
     if (!m_fileTransferDialog) {
@@ -577,6 +596,7 @@ void ConnectInfo::ShowFileTransferDialog() {
             TranslationHelper::Tr("fileTransfer"),
             m_deviceConfig);
     } else {
+        m_fileTransferDialog->SetDeviceConfig(m_deviceConfig);
         m_fileTransferDialog->Show();
         m_fileTransferDialog->Raise();
     }
@@ -647,10 +667,8 @@ void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
         task.result = "";
 
         SSH_LOG("Task created - ID: " << task.id << " Size: " << task.size << " Action: " << task.action);
-        AsynchronousSFTPTask::QueueTransferTask(this, m_deviceConfig, task);
-        SSH_LOG("Task queued asynchronously: " << task.id);
         
-        // Persist the new task to task.json
+        // Persist the new task to task.json BEFORE queuing the task
         wxString workspaceDir = wxString::FromUTF8(GlobalConfig::GetWorkspacePath().c_str());
         wxString wxDeviceId = wxString::FromUTF8(m_deviceConfig.id.c_str());
         wxDeviceId.Replace("/", "_"); // Replace slashes with underscores
@@ -696,6 +714,19 @@ void ConnectInfo::OnFileTransferRequest(wxCommandEvent& event) {
             SSH_LOG("Failed to save task list: " << e.what());
         }
 
+        if (m_fileTransferDialog) {
+            wxCommandEvent refreshEvt(wxEVT_FILE_TRANSFER_PROGRESS);
+            nlohmann::json pj;
+            pj["id"] = task.id;
+            pj["progress"] = 0;
+            pj["status"] = "pending";
+            refreshEvt.SetString(pj.dump().c_str());
+            wxQueueEvent(m_fileTransferDialog, refreshEvt.Clone());
+        }
+
+        AsynchronousSFTPTask::QueueTransferTask(this, m_deviceConfig, task);
+        SSH_LOG("Task queued asynchronously: " << task.id);
+
         
 
     } catch (const std::exception& e) {
@@ -712,36 +743,21 @@ void ConnectInfo::OnFileTransferProgress(wxCommandEvent& event) {
 
     wxString json = event.GetString();
 
-    SSH_LOG("File Transfer Progress: " << json);
-
-    
-
-    // Forward event to FileTransferDialog if it exists
-
-    if (m_fileTransferDialog) {
-
-        SSH_LOG("Forwarding progress event to FileTransferDialog");
-
-        wxQueueEvent(m_fileTransferDialog, event.Clone());
-
-    } else {
-
-        SSH_LOG("FileTransferDialog is null, cannot forward event");
-
-    }
-    
-    // Parse and update task file
+    // Parse and update task file first so FileTransferDialog reads updated state
     try {
         nlohmann::json j = nlohmann::json::parse(json.ToStdString());
         std::string taskId = j["id"];
         int progress = j["progress"];
         std::string status = j["status"];
-        SSH_LOG("Progress event parsed - TaskID: " << taskId << " Progress: " << progress << " Status: " << status);
         UpdateTaskFile(wxString::FromUTF8(taskId.c_str()), progress, wxString::FromUTF8(status.c_str()));
     } catch (const std::exception& e) {
         SSH_LOG("Failed to parse file transfer progress: " << e.what());
     }
 
+    // Forward event to FileTransferDialog if it exists
+    if (m_fileTransferDialog) {
+        wxQueueEvent(m_fileTransferDialog, event.Clone());
+    }
 }
 
 
@@ -752,25 +768,7 @@ void ConnectInfo::OnFileTransferComplete(wxCommandEvent& event) {
 
     SSH_LOG("File Transfer Complete: " << json);
 
-    
-
-    // Forward event to FileTransferDialog if it exists
-
-    if (m_fileTransferDialog) {
-
-        SSH_LOG("Forwarding complete event to FileTransferDialog");
-
-        wxQueueEvent(m_fileTransferDialog, event.Clone());
-
-    } else {
-
-        SSH_LOG("FileTransferDialog is null, cannot forward event");
-
-    }
-
-    
-
-    // Parse and update task file
+    // Parse and update task file first so FileTransferDialog reads updated state
     try {
         nlohmann::json j = nlohmann::json::parse(json.ToStdString());
         std::string taskId = j["id"];
@@ -780,6 +778,14 @@ void ConnectInfo::OnFileTransferComplete(wxCommandEvent& event) {
         UpdateTaskFile(wxString::FromUTF8(taskId.c_str()), progress, wxString::FromUTF8(status.c_str()), wxString::FromUTF8(result.c_str()));
     } catch (const std::exception& e) {
         SSH_LOG("Failed to parse file transfer complete: " << e.what());
+    }
+
+    // Forward event to FileTransferDialog if it exists
+    if (m_fileTransferDialog) {
+        SSH_LOG("Forwarding complete event to FileTransferDialog");
+        wxQueueEvent(m_fileTransferDialog, event.Clone());
+    } else {
+        SSH_LOG("FileTransferDialog is null, cannot forward event");
     }
 }
 
@@ -792,27 +798,21 @@ void ConnectInfo::UpdateTaskFile(const wxString& taskId, int progress, const wxS
     wxString taskFilePath = deviceDir + wxFileName::GetPathSeparator() + "task.json";
     
     // Check throttling - only update disk if 2 seconds have passed since last update
-    // Bypass throttling for completion events and first updates
-    bool isCompletion = (status == "completed" || status == "failed");
+    // Bypass throttling for completion events, initial processing transition, and first updates
+    bool bypassThrottle = (status == "completed" || status == "failed" || (status == "processing" && progress == 0));
     auto now = std::chrono::steady_clock::now();
     auto it = m_lastTaskUpdateTime.find(taskId);
     
-    if (!isCompletion && it != m_lastTaskUpdateTime.end()) {
+    if (!bypassThrottle && it != m_lastTaskUpdateTime.end()) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second).count();
-        if (elapsed < 2000) { // Less than 2 seconds
-            // Skip disk write but still update in-memory state if needed
-            SSH_LOG("Throttling task update - only " << elapsed << "ms since last update for task: " << taskId.ToStdString());
+        if (elapsed < 500) { // Less than 500ms
+            // Skip disk write
             return;
         }
     }
     
     // Update last update time
     m_lastTaskUpdateTime[taskId] = now;
-    
-    SSH_LOG("Updating task file - workspaceDir: " << workspaceDir.ToStdString());
-    SSH_LOG("Updating task file - wxDeviceId: " << wxDeviceId.ToStdString());
-    SSH_LOG("Updating task file - deviceDir: " << deviceDir.ToStdString());
-    SSH_LOG("Updating task file: " << taskFilePath.ToStdString() << " for task: " << taskId.ToStdString());
     
     // Load existing task file
     FileTransferTaskList taskList;
@@ -824,18 +824,17 @@ void ConnectInfo::UpdateTaskFile(const wxString& taskId, int progress, const wxS
             file.close();
             taskList = FileTransferTaskList::fromJson(j);
         } catch (const std::exception& e) {
-            SSH_LOG("Failed to load task list: " << e.what());
             file.close();
             return;
         }
     } else {
-        SSH_LOG("Task file not found, creating new one");
         taskList.device_id = m_deviceConfig.id;
     }
     
-    // Find and update the task
+    // Find and update the task (search from newest to oldest)
     bool taskFound = false;
-    for (auto& task : taskList.tasks) {
+    for (auto itTask = taskList.tasks.rbegin(); itTask != taskList.tasks.rend(); ++itTask) {
+        auto& task = *itTask;
         if (wxString::FromUTF8(task.id.c_str()) == taskId) {
             task.progress = progress;
             task.status = status.ToStdString();
@@ -843,13 +842,11 @@ void ConnectInfo::UpdateTaskFile(const wxString& taskId, int progress, const wxS
                 task.result = result.ToStdString();
             }
             taskFound = true;
-            SSH_LOG("Updated task: " << task.id << " progress: " << progress << " status: " << status.ToStdString());
             break;
         }
     }
     
     if (!taskFound) {
-        SSH_LOG("Task not found in list: " << taskId.ToStdString());
         return;
     }
     
@@ -863,12 +860,8 @@ void ConnectInfo::UpdateTaskFile(const wxString& taskId, int progress, const wxS
         if (outfile.is_open()) {
             outfile << j.dump(4);
             outfile.close();
-            SSH_LOG("Task file saved successfully");
-        } else {
-            SSH_LOG("Failed to open task file for writing: " << taskFilePath.ToStdString());
         }
     } catch (const std::exception& e) {
-        SSH_LOG("Failed to save task list: " << e.what());
     }
 }
 

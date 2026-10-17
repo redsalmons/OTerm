@@ -58,6 +58,7 @@ public:
 
     // Command interceptor for local terminals
     CommandInterceptor& GetCommandInterceptor() { return m_commandInterceptor; }
+    bool CheckAndHandleLocalCommand();
 
     // Convert local terminal to SSH terminal
     void ConvertToSSH(const DeviceConfig& device);

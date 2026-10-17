@@ -27,6 +27,7 @@ public:
     void OnSize(wxSizeEvent& event);
     void OnFileTransferProgress(wxCommandEvent& event);
     void OnFileTransferComplete(wxCommandEvent& event);
+    void SetDeviceConfig(const DeviceConfig& deviceConfig) { m_deviceConfig = deviceConfig; }
 
 private:
     void CreateControls();

@@ -158,7 +158,9 @@ bool MyApp::OnInit() {
         }
 #endif
 
+#if ENABLE_SSH_LOG
         wxLog::SetActiveTarget(new wxLogFileAndStderr((std::filesystem::temp_directory_path() / "oterm_wx.log").string()));
+#endif
 
 #if defined(__WXMAC__)
         // Activate as early as possible — before the master-password dialog.
@@ -196,7 +198,7 @@ bool MyApp::OnInit() {
 
 
 
-        // Master password is managed automatically via Keychain — no user
+        // Master password is managed automatically via Keychain/DPAPI — no user
         // prompt. On first launch a random key is generated and stored.
         std::string masterPassword = DeviceConfig::LoadCredential("master.password");
         if (masterPassword.empty()) {
@@ -231,9 +233,14 @@ bool MyApp::OnInit() {
             GlobalConfig::SetFontName("");
             GlobalConfig::SetFontSize(0);
             GlobalConfig::SaveSettings();
+        } else if (!GlobalConfig::VerifyMasterPassword(masterPassword)) {
+            // Keep settings.json hash synchronized with the vault-stored master password
+            GlobalConfig::SetMasterPassword(masterPassword);
+            GlobalConfig::SaveSettings();
         }
 
-        // Initialize SSH log file early
+        // Initialize SSH log file early if logging is enabled
+#if ENABLE_SSH_LOG
         try {
             std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetLogPath());
             std::filesystem::create_directories(log_dir);
@@ -261,6 +268,7 @@ bool MyApp::OnInit() {
         } catch (const std::exception& e) {
             // If log initialization fails, silently continue without logging
         }
+#endif
 
         // Get DPI scale factor after enabling DPI awareness and store globally
         double dpiScale = 1.0;
@@ -320,7 +328,7 @@ wxEND_EVENT_TABLE()
 
 AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& size)
 #ifdef __WXMSW__
-    : wxFrame(nullptr, wxID_ANY, title, pos, size, wxCLIP_CHILDREN | wxRESIZE_BORDER)
+    : wxFrame(nullptr, wxID_ANY, title, pos, size, wxCLIP_CHILDREN | wxRESIZE_BORDER | wxMAXIMIZE_BOX | wxMINIMIZE_BOX)
 #else
     // Mac: Use default frame style to show native title bar with traffic lights
     : wxFrame(nullptr, wxID_ANY, title, pos, size, wxDEFAULT_FRAME_STYLE)
@@ -340,7 +348,10 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     std::string lang = GlobalConfig::GetLanguage();
     TranslationHelper::Load(wxString::FromUTF8(lang.c_str()));
 
+#ifndef __WXMSW__
     SetDoubleBuffered(true);
+#endif
+    SetBackgroundColour(wxColour(10, 10, 10));
     this->SetThemeEnabled(false);
     m_notebook = new wxSimplebook(this, wxID_ANY);
     m_notebook->SetBackgroundColour(wxColour(10, 10, 10));
@@ -349,8 +360,13 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     m_titleBar = new CustomTitleBar(this, m_notebook, this);
 
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
+#ifdef __WXMSW__
+    sizer->Add(m_titleBar, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 2);
+    sizer->Add(m_notebook, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 3);
+#else
     sizer->Add(m_titleBar, 0, wxEXPAND);
     sizer->Add(m_notebook, 1, wxEXPAND);
+#endif
 
     SetSizer(sizer);
 
@@ -640,15 +656,12 @@ void AppWindow::OnSSHDirectConnect(wxCommandEvent& event) {
     // Convert the current local terminal panel to SSH
     panel->ConvertToSSH(device);
     
-    // Update tab label to show the device
-    wxString newLabel = wxString::FromUTF8(device.username.c_str()) + "@" + wxString::FromUTF8(device.address.c_str());
-    // Find the ConnectInfo for this panel and update its label
+    // Find the ConnectInfo for this panel and switch it to SSH
     if (m_titleBar) {
         for (auto* tab : m_titleBar->GetTabs()) {
             if (tab->GetContentPanel() == panel) {
-                tab->SetTabLabel(newLabel);
+                tab->SwitchToSSH(device);
                 m_titleBar->RelayoutTabs();
-                SSH_LOG("Tab label updated to: " << newLabel.ToStdString());
                 break;
             }
         }
@@ -732,6 +745,13 @@ void AppWindow::OnFileTransferRequest(wxCommandEvent& event) {
                     int pageIndex = m_notebook->FindPage(page);
                     SSH_LOG("AppWindow::OnFileTransferRequest: found notebook page index=" << pageIndex);
                     if (pageIndex != wxNOT_FOUND && pageIndex < (int)m_titleBar->GetTabs().size()) {
+                    for (auto* tab : m_titleBar->GetTabs()) {
+                        if (tab && (tab->GetContentPanel() == panel || tab->GetContentPanel() == page)) {
+                            SSH_LOG("AppWindow::OnFileTransferRequest: found ConnectInfo=" << tab << ", showing dialog");
+                            tab->ShowFileTransferDialog();
+                            return;
+                        }
+                    }
                         ConnectInfo* tab = m_titleBar->GetTabs()[pageIndex];
                         SSH_LOG("AppWindow::OnFileTransferRequest: found ConnectInfo=" << tab << ", showing dialog");
                         tab->ShowFileTransferDialog();
@@ -848,6 +868,30 @@ bool AppWindow::MSWHandleMessage(WXLRESULT* result, WXUINT message, WXWPARAM wPa
         // Remove standard frame to use custom title bar
         *result = 0;
         return true;
+    }
+    else if (message == WM_NCHITTEST) {
+        if (!IsMaximized() && !IsFullScreen()) {
+            POINT pt;
+            pt.x = (short)LOWORD(lParam);
+            pt.y = (short)HIWORD(lParam);
+            RECT rc;
+            if (::GetWindowRect(GetHWND(), &rc)) {
+                const int border = static_cast<int>(6 * GlobalConfig::GetDPIScaleFactor());
+                const bool left = (pt.x >= rc.left && pt.x < rc.left + border);
+                const bool right = (pt.x < rc.right && pt.x >= rc.right - border);
+                const bool top = (pt.y >= rc.top && pt.y < rc.top + border);
+                const bool bottom = (pt.y < rc.bottom && pt.y >= rc.bottom - border);
+
+                if (top && left) { *result = HTTOPLEFT; return true; }
+                if (top && right) { *result = HTTOPRIGHT; return true; }
+                if (bottom && left) { *result = HTBOTTOMLEFT; return true; }
+                if (bottom && right) { *result = HTBOTTOMRIGHT; return true; }
+                if (left) { *result = HTLEFT; return true; }
+                if (right) { *result = HTRIGHT; return true; }
+                if (top) { *result = HTTOP; return true; }
+                if (bottom) { *result = HTBOTTOM; return true; }
+            }
+        }
     }
     else if (message == WM_GETMINMAXINFO) {
         MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);

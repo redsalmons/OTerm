@@ -40,6 +40,7 @@ public:
     bool IsSessionAlive() const override;
     bool IsInAlternateScreen() const override;
     int GetScrollOffset() const override;
+    std::string GetCurrentLineText() const override;
 
 #ifndef _WIN32
     // wxEventLoopSourceHandler overrides

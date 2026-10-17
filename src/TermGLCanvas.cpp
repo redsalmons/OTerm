@@ -170,35 +170,11 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
     // wxTE_RICH2 uses Rich Edit 2.0 which has better borderless support on Windows
 
-#ifdef _WIN32
-
-    // On Windows a native child window cannot be composited over the OpenGL
-
-    // surface, so host the box in a non-activating top-level popup instead.
-
-    m_imePopup = new wxPopupTransientWindow(this, wxBORDER_NONE);
-
-    m_imeInputBox = new wxTextCtrl(m_imePopup, wxID_ANY, wxEmptyString,
-
-                                   wxDefaultPosition, wxSize(12, 18),
-
-                                   wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
-
-    wxBoxSizer* imeSizer = new wxBoxSizer(wxHORIZONTAL);
-
-    imeSizer->Add(m_imeInputBox, 1, wxEXPAND);
-
-    m_imePopup->SetSizer(imeSizer);
-
-#else
-
     m_imeInputBox = new wxTextCtrl(this, wxID_ANY, wxEmptyString,
 
                                    wxDefaultPosition, wxSize(12, 18),
 
                                    wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
-
-#endif
 
     // Set background to blue to match cursor color
 
@@ -330,7 +306,7 @@ TermGLCanvas::~TermGLCanvas() {
 
 float TermGLCanvas::GLPixelScale() const {
 
-#ifdef __WXMAC__
+#if defined(__WXMAC__) || defined(__WXMSW__)
 
     return 1.0f;
 
@@ -889,18 +865,10 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     // 4. Update IME input box position and size if visible
     if (m_imeInputBox && m_imeInputBoxVisible) {
         if (m_cursor_out_of_bounds) {
-#ifdef _WIN32
-            if (m_imePopup) m_imePopup->Dismiss();
-#else
             m_imeInputBox->Hide();
-#endif
         } else {
             UpdateIMEBoxPlacement();
-#ifdef _WIN32
-            if (m_imePopup && !m_imePopup->IsShown()) m_imePopup->Popup(m_imeInputBox);
-#else
             m_imeInputBox->Show();
-#endif
         }
     }
 }
@@ -934,13 +902,7 @@ void TermGLCanvas::UpdateIMEBoxPlacement() {
                        static_cast<int>(imeRect.width / glScale),
                        static_cast<int>(imeRect.height / glScale));
 
-#ifdef _WIN32
-    if (m_imePopup) {
-        m_imePopup->Position(ClientToScreen(logicalRect.GetPosition()), logicalRect.GetSize());
-    }
-#else
     m_imeInputBox->SetSize(logicalRect);
-#endif
 
 }
 
@@ -956,12 +918,6 @@ void TermGLCanvas::Render() {
 
     m_glContext->SetCurrent(*this);
 
-    
-
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    
-
     wxSize size = GetSize();
 
     float glScale = GLPixelScale();
@@ -969,6 +925,10 @@ void TermGLCanvas::Render() {
     int physW = static_cast<int>(size.GetWidth() * glScale);
 
     int physH = static_cast<int>(size.GetHeight() * glScale);
+
+    glViewport(0, 0, physW, physH);
+
+    glClear(GL_COLOR_BUFFER_BIT);
 
     glMatrixMode(GL_PROJECTION);
 
@@ -1204,12 +1164,6 @@ void TermGLCanvas::Render() {
 
             if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) {
 
-                if (cell.char_code > 127) {
-
-                    SSH_LOG("Character not found in font atlas: 0x" << std::hex << cell.char_code << std::dec);
-
-                }
-
                 continue;
 
             }
@@ -1337,19 +1291,6 @@ void TermGLCanvas::Render() {
 
 void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
-    static int paintCount = 0;
-
-    {
-        std::ofstream dbg("/tmp/oterm_debug.log", std::ios::app);
-        wxSize size = GetSize();
-        dbg << "[CANVAS] OnPaint count=" << paintCount
-            << " size=" << size.GetWidth() << "x" << size.GetHeight()
-            << " cells=" << m_screen_cells.size()
-            << " first_char=" << (m_screen_cells.empty() ? 0 : m_screen_cells[0].char_code) << "\n";
-    }
-
-    paintCount++;
-
     // Must be created even though it is unused: on Windows it validates the
 
     // update region, otherwise WM_PAINT repeats and the canvas repaints in
@@ -1434,14 +1375,11 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 
 void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
-    SSH_LOG("OnKeyDown: keycode=" << event.GetKeyCode() << ", key_callback=" << (key_callback_ ? "set" : "NULL"));
-
     if (HandleZoomInput(event)) return;
 
     // Check for Ctrl+C to copy selection (only if there's a selection)
 
     if (event.GetKeyCode() == WXK_CONTROL_C || (event.ControlDown() && event.GetKeyCode() == 'C')) {
-        SSH_LOG("OnKeyDown: Ctrl+C detected, keycode=" << event.GetKeyCode());
 
         if (m_selection_start_row != m_selection_end_row || m_selection_start_col != m_selection_end_col) {
 
@@ -1451,11 +1389,14 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
         }
 
-        // If no selection, clear SSH input buffer and let it fall through to send Ctrl+C to terminal
+        // If no selection, clear SSH/local input buffer and let it fall through to send Ctrl+C to terminal
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-        if (panel && !panel->IsLocalTerminal()) {
-            m_sshInputBuffer.clear();
-            SSH_LOG("OnKeyDown: Ctrl+C pressed on SSH terminal, clearing m_sshInputBuffer");
+        if (panel) {
+            if (panel->IsLocalTerminal()) {
+                panel->ClearInputBuffer();
+            } else {
+                m_sshInputBuffer.clear();
+            }
         }
 
     }
@@ -1555,44 +1496,12 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                         }
                     }
                     if (panel && panel->IsLocalTerminal()) {
-                        const std::string& inputBuffer = panel->GetInputBuffer();
-                        SSH_LOG("OnKeyDown: inputBuffer='" << inputBuffer << "'");
-                        auto result = panel->GetCommandInterceptor().ShouldIntercept(inputBuffer);
-                        SSH_LOG("OnKeyDown: ShouldIntercept result=" << (int)result);
-                        if (result == CommandInterceptor::InterceptionResult::Intercepted) {
-                            SSH_LOG("OnKeyDown: Command intercepted, checking command type, inputBuffer='" << inputBuffer << "'");
-                            if (inputBuffer.find("oc device") == 0) {
-                                SSH_LOG("OnKeyDown: oc device command detected, triggering device show request");
-                                panel->ClearInputBuffer();
-                                wxCommandEvent deviceEvent(wxEVT_DEVICE_SHOW_REQUEST);
-                                deviceEvent.SetEventObject(panel);
-                                wxWindow* topWindow = wxTheApp->GetTopWindow();
-                                if (topWindow) {
-                                    wxQueueEvent(topWindow, deviceEvent.Clone());
-                                }
-                                return;
-                            } else if (inputBuffer.find("oc ssh") == 0) {
-                                SSH_LOG("OnKeyDown: oc ssh command detected, triggering direct SSH connect");
-                                std::string cmd = inputBuffer;
-                                panel->ClearInputBuffer();
-                                wxCommandEvent sshEvent(wxEVT_SSH_DIRECT_CONNECT);
-                                sshEvent.SetString(wxString::FromUTF8(cmd.c_str()));
-                                sshEvent.SetEventObject(panel);
-                                wxWindow* topWindow = wxTheApp->GetTopWindow();
-                                if (topWindow) {
-                                    wxQueueEvent(topWindow, sshEvent.Clone());
-                                }
-                                return;
-                            } else {
-                                SSH_LOG("OnKeyDown: Command intercepted but not oc device or oc ssh, inputBuffer='" << inputBuffer << "'");
-                                sequence = "\x03";
-                                panel->ClearInputBuffer();
-                            }
-                        } else {
-                            SSH_LOG("OnKeyDown: Command not intercepted, sending Enter");
-                            sequence = "\r";
-                            panel->ClearInputBuffer();
+                        if (panel->CheckAndHandleLocalCommand()) {
+                            return;
                         }
+                        SSH_LOG("OnKeyDown: Command not intercepted, sending Enter");
+                        sequence = "\r";
+                        panel->ClearInputBuffer();
                     } else {
                         SSH_LOG("OnKeyDown: Not a local terminal (SSH), checking m_sshInputBuffer: '" << m_sshInputBuffer << "'");
                         // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
@@ -1763,43 +1672,10 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
             }
         }
         if (panel && panel->IsLocalTerminal()) {
-            const std::string& inputBuffer = panel->GetInputBuffer();
-            SSH_LOG("OnChar: inputBuffer='" << inputBuffer << "'");
-            auto result = panel->GetCommandInterceptor().ShouldIntercept(inputBuffer);
-            if (result == CommandInterceptor::InterceptionResult::Intercepted) {
-                SSH_LOG("OnChar: Command intercepted, checking command type");
-                if (inputBuffer.find("oc device") == 0) {
-                    SSH_LOG("OnChar: oc device command detected, triggering device show request");
-                    std::string cmd = inputBuffer;
-                    panel->ClearInputBuffer();
-                    wxCommandEvent deviceEvent(wxEVT_DEVICE_SHOW_REQUEST);
-                    deviceEvent.SetEventObject(panel);
-                    wxWindow* topWindow = wxTheApp->GetTopWindow();
-                    if (topWindow) {
-                        wxQueueEvent(topWindow, deviceEvent.Clone());
-                    }
-                    return;
-                } else if (inputBuffer.find("oc ssh") == 0) {
-                    SSH_LOG("OnChar: oc ssh command detected, triggering direct SSH connect");
-                    std::string cmd = inputBuffer;
-                    panel->ClearInputBuffer();
-                    wxCommandEvent sshEvent(wxEVT_SSH_DIRECT_CONNECT);
-                    sshEvent.SetString(wxString::FromUTF8(cmd.c_str()));
-                    sshEvent.SetEventObject(panel);
-                    wxWindow* topWindow = wxTheApp->GetTopWindow();
-                    if (topWindow) {
-                        wxQueueEvent(topWindow, sshEvent.Clone());
-                    }
-                    return;
-                } else {
-                    SSH_LOG("OnChar: Command intercepted, sending Ctrl+C instead of Enter");
-                    if (key_callback_) {
-                        key_callback_("\x03", 1);
-                    }
-                    panel->ClearInputBuffer();
-                    return;
-                }
+            if (panel->CheckAndHandleLocalCommand()) {
+                return;
             }
+            panel->ClearInputBuffer();
         } else if (panel && !panel->IsLocalTerminal()) {
             // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
             // if (f.is_open()) f << "[SSH_ONCHAR] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
@@ -1847,8 +1723,6 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
         int keycode = event.GetUnicodeKey();
 
-        SSH_LOG("OnChar unicode keycode=" << keycode);
-
         if (keycode != WXK_NONE) {
 
             wxString str;
@@ -1862,8 +1736,6 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
 
             if (len > 0) {
-
-                SSH_LOG("OnChar sending key: len=" << len << " first=" << (int)(unsigned char)buffer.data()[0]);
 
                 // Send UTF-8 encoded character to terminal
 
@@ -1882,7 +1754,6 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
                         if ((first_char >= 32 && first_char != 127) || first_char > 127) {
                             std::string utf8_str(buffer.data(), len);
                             m_sshInputBuffer += utf8_str;
-                            SSH_LOG("OnChar SSH input appended: '" << utf8_str << "', m_sshInputBuffer now='" << m_sshInputBuffer << "'");
                         }
                     }
                 }
@@ -1995,42 +1866,8 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
             }
         }
         if (panel && panel->IsLocalTerminal()) {
-            const std::string& inputBuffer = panel->GetInputBuffer();
-            SSH_LOG("OnCharHook: inputBuffer='" << inputBuffer << "'");
-            auto result = panel->GetCommandInterceptor().ShouldIntercept(inputBuffer);
-            if (result == CommandInterceptor::InterceptionResult::Intercepted) {
-                SSH_LOG("OnCharHook: Command intercepted, checking command type");
-                if (inputBuffer.find("oc device") == 0) {
-                    SSH_LOG("OnCharHook: oc device command detected, triggering device show request");
-                    std::string cmd = inputBuffer;
-                    panel->ClearInputBuffer();
-                    wxCommandEvent deviceEvent(wxEVT_DEVICE_SHOW_REQUEST);
-                    deviceEvent.SetEventObject(panel);
-                    wxWindow* topWindow = wxTheApp->GetTopWindow();
-                    if (topWindow) {
-                        wxQueueEvent(topWindow, deviceEvent.Clone());
-                    }
-                    return;
-                } else if (inputBuffer.find("oc ssh") == 0) {
-                    SSH_LOG("OnCharHook: oc ssh command detected, triggering direct SSH connect");
-                    std::string cmd = inputBuffer;
-                    panel->ClearInputBuffer();
-                    wxCommandEvent sshEvent(wxEVT_SSH_DIRECT_CONNECT);
-                    sshEvent.SetString(wxString::FromUTF8(cmd.c_str()));
-                    sshEvent.SetEventObject(panel);
-                    wxWindow* topWindow = wxTheApp->GetTopWindow();
-                    if (topWindow) {
-                        wxQueueEvent(topWindow, sshEvent.Clone());
-                    }
-                    return;
-                } else {
-                    SSH_LOG("OnCharHook: Command intercepted, sending Ctrl+C instead of Enter");
-                    if (key_callback_) {
-                        key_callback_("\x03", 1);
-                    }
-                    panel->ClearInputBuffer();
-                    return;
-                }
+            if (panel->CheckAndHandleLocalCommand()) {
+                return;
             }
         } else if (panel && !panel->IsLocalTerminal()) {
             // SSH terminal: check for upload/download commands
@@ -2111,14 +1948,9 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
 
     if (lines != 0) {
         if (scroll_callback_) {
-            scroll_callback_(lines);
-        } else {
-            SSH_LOG("  WARNING: scroll_callback_ is NULL, scroll will not work");
         }
         Refresh();
     }
-
-    event.Skip();
 }
 
 
@@ -2689,15 +2521,8 @@ void TermGLCanvas::ShowIMEInputBox() {
 
     UpdateIMEBoxPlacement();
 
-#ifdef _WIN32
-    if (m_imePopup) {
-        m_imePopup->Popup(m_imeInputBox);
-        m_imeInputBox->SetFocus();
-    }
-#else
     m_imeInputBox->Show();
     m_imeInputBox->SetFocus();
-#endif
 
     m_imeInputBoxVisible = true;
 
@@ -2715,11 +2540,7 @@ void TermGLCanvas::HideIMEInputBox() {
 
     if (m_imeInputBox && m_imeInputBoxVisible) {
 
-#ifdef _WIN32
-        if (m_imePopup) m_imePopup->Dismiss();
-#else
         m_imeInputBox->Hide();
-#endif
 
         m_imeInputBox->Clear();
 
@@ -2830,6 +2651,10 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
     bool isCmdC = event.CmdDown() && keycode == 'C';
     if (isControlC || isCmdC) {
         SSH_LOG("OnProxyKeyDown: Ctrl/Cmd+C detected, sending ETX");
+        TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+        if (panel && panel->IsLocalTerminal()) {
+            panel->ClearInputBuffer();
+        }
         std::string key_seq = "\x03";
         if (m_imeCallback) {
             m_imeCallback(key_seq.c_str(), key_seq.length());
@@ -2881,43 +2706,11 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
                     // Check if this is a local terminal and command should be intercepted
                     TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
                     if (panel && panel->IsLocalTerminal()) {
-                        const std::string& inputBuffer = panel->GetInputBuffer();
-                        SSH_LOG("OnProxyKeyDown: RETURN pressed, inputBuffer='" << inputBuffer << "'");
-                        auto result = panel->GetCommandInterceptor().ShouldIntercept(inputBuffer);
-                        if (result == CommandInterceptor::InterceptionResult::Intercepted) {
-                            SSH_LOG("OnProxyKeyDown: Command intercepted, checking command type");
-                            if (inputBuffer.find("oc device") == 0) {
-                                SSH_LOG("OnProxyKeyDown: oc device command detected, triggering device show request");
-                                std::string cmd = inputBuffer;
-                                panel->ClearInputBuffer();
-                                wxCommandEvent deviceEvent(wxEVT_DEVICE_SHOW_REQUEST);
-                                deviceEvent.SetEventObject(panel);
-                                wxWindow* topWindow = wxTheApp->GetTopWindow();
-                                if (topWindow) {
-                                    wxQueueEvent(topWindow, deviceEvent.Clone());
-                                }
-                                return;
-                            } else if (inputBuffer.find("oc ssh") == 0) {
-                                SSH_LOG("OnProxyKeyDown: oc ssh command detected, triggering direct SSH connect");
-                                std::string cmd = inputBuffer;
-                                panel->ClearInputBuffer();
-                                wxCommandEvent sshEvent(wxEVT_SSH_DIRECT_CONNECT);
-                                sshEvent.SetString(wxString::FromUTF8(cmd.c_str()));
-                                sshEvent.SetEventObject(panel);
-                                wxWindow* topWindow = wxTheApp->GetTopWindow();
-                                if (topWindow) {
-                                    wxQueueEvent(topWindow, sshEvent.Clone());
-                                }
-                                return;
-                            } else {
-                                SSH_LOG("OnProxyKeyDown: Command intercepted, sending Ctrl+C instead of Enter");
-                                key_seq = "\x03";
-                                panel->ClearInputBuffer();
-                            }
-                        } else {
-                            key_seq = "\r";
-                            panel->ClearInputBuffer();
+                        if (panel->CheckAndHandleLocalCommand()) {
+                            return;
                         }
+                        key_seq = "\r";
+                        panel->ClearInputBuffer();
                     } else {
                         key_seq = "\r";
                     }

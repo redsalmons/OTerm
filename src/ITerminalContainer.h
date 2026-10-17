@@ -45,6 +45,9 @@ public:
     
     // Get the current scrollback scroll offset
     virtual int GetScrollOffset() const = 0;
+
+    // Get the text on the current cursor row up to the cursor column
+    virtual std::string GetCurrentLineText() const { return ""; }
 };
 
 #endif // I_TERMINAL_CONTAINER_H

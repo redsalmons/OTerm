@@ -68,11 +68,12 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     m_maximizeButton->SetForegroundColour(wxColour(255, 255, 255));
     m_closeButton->SetBackgroundColour(wxColour(255, 0, 0));
     m_closeButton->SetForegroundColour(wxColour(255, 255, 255));
-    m_newTabButton->SetBackgroundColour(wxColour(0, 0, 0, 0));
+    m_newTabButton->SetBackgroundColour(wxColour(30, 30, 30));
     m_newTabButton->SetForegroundColour(wxColour(255, 255, 255));
     wxFont font = m_newTabButton->GetFont();
     font.SetWeight(wxFONTWEIGHT_BOLD);
     m_newTabButton->SetFont(font);
+    SetDoubleBuffered(true);
 #else
     // Mac: Native frame has window controls, so don't create custom ones
     m_drawerButton = new wxButton(this, wxID_ANY, wxString::FromUTF8("\u2630"), wxDefaultPosition, wxSize(scaledButtonSize, scaledButtonSize), wxBORDER_NONE);
@@ -789,10 +790,21 @@ void CustomTitleBar::OnMinimize(wxCommandEvent& event) {
 void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
     wxFrame* frame = (wxFrame*)GetParent();
 
+#ifdef __WXMSW__
     if (frame->IsFullScreen()) {
         frame->ShowFullScreen(false);
         m_isFullScreen = false;
-#ifndef __WXMSW__
+    } else {
+        bool maximize = !frame->IsMaximized();
+        frame->Maximize(maximize);
+        m_isFullScreen = maximize;
+    }
+    Layout();
+    Refresh();
+#else
+    if (frame->IsFullScreen()) {
+        frame->ShowFullScreen(false);
+        m_isFullScreen = false;
         // Hide native title bar title and restore left margin for traffic lights
         SetMacTitleBarVisible(GetParent()->GetHandle(), false);
         if (m_titleText) {
@@ -803,11 +815,9 @@ void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
         }
         Layout();
         Refresh();
-#endif
     } else {
         frame->ShowFullScreen(true);
         m_isFullScreen = true;
-#ifndef __WXMSW__
         // Use CallAfter to ensure this happens after fullscreen transition
         CallAfter([this]() {
             // Show native title bar title in fullscreen (traffic lights are hidden)
@@ -823,8 +833,8 @@ void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
             Layout();
             Refresh();
         });
-#endif
     }
+#endif
 }
 
 #ifdef __WXMAC__
@@ -873,8 +883,6 @@ void CustomTitleBar::OnPaint(wxPaintEvent& event) {
     dc.SetBackground(wxBrush(wxColour(45, 45, 45)));
     dc.Clear();
 #endif
-
-    event.Skip();
 }
 
 void CustomTitleBar::OnEraseBackground(wxEraseEvent& event) {

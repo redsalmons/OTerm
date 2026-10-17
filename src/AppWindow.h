@@ -5,7 +5,6 @@
 #include "CustomTitleBar.h"
 #include <memory>
 #include <vector>
-#include <uv.h>
 #include <queue>
 //#include "TerminalTab.h"
 

@@ -306,7 +306,18 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
         }
 
         case SFTPState::AUTHENTICATING: {
-            int rc = libssh2_userauth_password(m_sshSession, m_deviceConfig.username.c_str(), m_deviceConfig.password.c_str());
+            int rc = 0;
+            if (m_deviceConfig.auth_method == "key") {
+                rc = libssh2_userauth_publickey_frommemory(
+                    m_sshSession,
+                    m_deviceConfig.username.c_str(), m_deviceConfig.username.length(),
+                    nullptr, 0,
+                    m_deviceConfig.password.c_str(), m_deviceConfig.password.length(),
+                    nullptr
+                );
+            } else {
+                rc = libssh2_userauth_password(m_sshSession, m_deviceConfig.username.c_str(), m_deviceConfig.password.c_str());
+            }
             if (rc == 0) {
                 if (m_isList || m_isCommand) {
                     m_state = SFTPState::OPEN_CHANNEL;
@@ -422,10 +433,24 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                     LIBSSH2_SFTP_OPENFILE
                 );
                 if (m_sftpHandle) {
+#ifdef _WIN32
+                    wxString wxLocal = wxString::FromUTF8(m_task.local.c_str());
+                    m_localFile = _wfopen(wxLocal.wc_str(), L"rb");
+#else
                     m_localFile = fopen(m_task.local.c_str(), "rb");
+#endif
                     if (!m_localFile) {
                         Fail("Failed to open local file for reading: " + m_task.local);
                     } else {
+                        m_lastReportedProgress = 0;
+                        wxCommandEvent progressEvt(wxEVT_FILE_TRANSFER_PROGRESS);
+                        nlohmann::json pj;
+                        pj["id"] = m_task.id;
+                        pj["progress"] = 0;
+                        pj["status"] = "processing";
+                        progressEvt.SetString(pj.dump().c_str());
+                        wxQueueEvent(m_handler, progressEvt.Clone());
+
                         m_state = SFTPState::TRANSFERRING;
                         DoStateMachineStep();
                     }
@@ -443,10 +468,24 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                     LIBSSH2_FXF_READ, 0, LIBSSH2_SFTP_OPENFILE
                 );
                 if (m_sftpHandle) {
+#ifdef _WIN32
+                    wxString wxLocal = wxString::FromUTF8(m_task.local.c_str());
+                    m_localFile = _wfopen(wxLocal.wc_str(), L"wb");
+#else
                     m_localFile = fopen(m_task.local.c_str(), "wb");
+#endif
                     if (!m_localFile) {
                         Fail("Failed to open local file for writing: " + m_task.local);
                     } else {
+                        m_lastReportedProgress = 0;
+                        wxCommandEvent progressEvt(wxEVT_FILE_TRANSFER_PROGRESS);
+                        nlohmann::json pj;
+                        pj["id"] = m_task.id;
+                        pj["progress"] = 0;
+                        pj["status"] = "processing";
+                        progressEvt.SetString(pj.dump().c_str());
+                        wxQueueEvent(m_handler, progressEvt.Clone());
+
                         m_state = SFTPState::TRANSFERRING;
                         DoStateMachineStep();
                     }
@@ -484,17 +523,20 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                         m_bytesTransferred += rc;
                         m_cacheBuffer.erase(m_cacheBuffer.begin(), m_cacheBuffer.begin() + rc);
                         
-                        // Send progress event
+                        // Send progress event only when percentage changes
                         if (m_task.size > 0) {
                             int progress = static_cast<int>((m_bytesTransferred * 100) / m_task.size);
                             if (progress > 100) progress = 100;
-                            wxCommandEvent progressEvt(wxEVT_FILE_TRANSFER_PROGRESS);
-                            nlohmann::json pj;
-                            pj["id"] = m_task.id;
-                            pj["progress"] = progress;
-                            pj["status"] = "processing";
-                            progressEvt.SetString(pj.dump().c_str());
-                            wxQueueEvent(m_handler, progressEvt.Clone());
+                            if (progress != m_lastReportedProgress) {
+                                m_lastReportedProgress = progress;
+                                wxCommandEvent progressEvt(wxEVT_FILE_TRANSFER_PROGRESS);
+                                nlohmann::json pj;
+                                pj["id"] = m_task.id;
+                                pj["progress"] = progress;
+                                pj["status"] = "processing";
+                                progressEvt.SetString(pj.dump().c_str());
+                                wxQueueEvent(m_handler, progressEvt.Clone());
+                            }
                         }
                     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
                         HandleDirections();
@@ -514,17 +556,20 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
                         }
                         m_bytesTransferred += rc;
                         
-                        // Send progress event
+                        // Send progress event only when percentage changes
                         if (m_task.size > 0) {
                             int progress = static_cast<int>((m_bytesTransferred * 100) / m_task.size);
                             if (progress > 100) progress = 100;
-                            wxCommandEvent progressEvt(wxEVT_FILE_TRANSFER_PROGRESS);
-                            nlohmann::json pj;
-                            pj["id"] = m_task.id;
-                            pj["progress"] = progress;
-                            pj["status"] = "processing";
-                            progressEvt.SetString(pj.dump().c_str());
-                            wxQueueEvent(m_handler, progressEvt.Clone());
+                            if (progress != m_lastReportedProgress) {
+                                m_lastReportedProgress = progress;
+                                wxCommandEvent progressEvt(wxEVT_FILE_TRANSFER_PROGRESS);
+                                nlohmann::json pj;
+                                pj["id"] = m_task.id;
+                                pj["progress"] = progress;
+                                pj["status"] = "processing";
+                                progressEvt.SetString(pj.dump().c_str());
+                                wxQueueEvent(m_handler, progressEvt.Clone());
+                            }
                         }
                     } else if (rc == 0) {
                         // EOF remote file

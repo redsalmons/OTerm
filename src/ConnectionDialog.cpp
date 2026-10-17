@@ -12,7 +12,7 @@
 wxDEFINE_EVENT(wxEVT_DEVICE_LIST_UPDATE, wxCommandEvent);
 
 ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool disableConnect, bool modal)
-    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize), m_modal(modal) {
+    : wxDialog(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER), m_modal(modal) {
 
     double dpiScale = GlobalConfig::GetDPIScaleFactor();
 
@@ -351,6 +351,7 @@ void ConnectionDialog::OnDelete(wxCommandEvent& event) {
 
     wxString msg = TranslationHelper::Tr("delete") + " '" + m_devices[index].name + "'?";
     if (wxMessageBox(msg, TranslationHelper::Tr("delete"), wxYES_NO | wxICON_QUESTION, this) == wxYES) {
+        DeviceConfig::DeleteCredential(m_devices[index].id);
         m_devices.erase(m_devices.begin() + index);
         SaveConfig();
         RebuildTree();

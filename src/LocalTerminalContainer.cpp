@@ -175,6 +175,25 @@ int LocalTerminalContainer::GetScrollOffset() const {
     return m_vtermManager.get_scroll_offset();
 }
 
+std::string LocalTerminalContainer::GetCurrentLineText() const {
+    int r = m_frontBuffer.cursor_row;
+    if (r < 0 || r >= (int)m_frontBuffer.cells.size()) {
+        return "";
+    }
+    const auto& row = m_frontBuffer.cells[r];
+    wxString line;
+    for (const auto& cell : row) {
+        if (cell.char_code >= 32 && cell.char_code != 0xffffffff) {
+            line += wxUniChar(cell.char_code);
+        } else if (cell.width > 1 && cell.char_code == 0) {
+            continue;
+        } else {
+            line += ' ';
+        }
+    }
+    return line.ToStdString();
+}
+
 #if defined(__APPLE__)
 void LocalTerminalContainer::OnFdReady(CFSocketRef, CFSocketCallBackType, CFDataRef, const void*, void* info) {
     static_cast<LocalTerminalContainer*>(info)->ProcessRead();
@@ -211,9 +230,6 @@ void LocalTerminalContainer::ProcessRead() {
         return;
     }
 
-    static int processReadCalls = 0;
-    SSH_LOG("LocalTerminalContainer::ProcessRead call=" << ++processReadCalls);
-
     char buffer[8192];
     bool has_data = false;
 
@@ -240,7 +256,6 @@ void LocalTerminalContainer::ProcessRead() {
     }
 
     if (has_data) {
-        SSH_LOG("LocalTerminalContainer::ProcessRead got data, flushing damage");
         m_vtermManager.flush_damage();
     }
 
