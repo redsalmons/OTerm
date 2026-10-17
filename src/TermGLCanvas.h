@@ -58,6 +58,7 @@ public:
     // Scale factor between logical window size and OpenGL framebuffer pixels.
     // On macOS the GL drawable uses view (point) coordinates, so this is 1.
     float GLPixelScale() const;
+    float GLFramebufferScale() const;
 
 
 

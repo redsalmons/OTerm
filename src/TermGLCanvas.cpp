@@ -318,6 +318,18 @@ float TermGLCanvas::GLPixelScale() const {
 
 }
 
+// Physical framebuffer scale: on Retina displays the GL surface is 2x the
+// logical widget size. The viewport must be sized in physical pixels while
+// the ortho projection stays in logical coordinates.
+float TermGLCanvas::GLFramebufferScale() const {
+#ifdef __WXMAC__
+    float scale = GetContentScaleFactor();
+    return scale > 0.0f ? scale : 1.0f;
+#else
+    return 1.0f;
+#endif
+}
+
 #ifdef __APPLE__
 
 void TermGLCanvas::EnsureMacKeyMonitor() {
@@ -926,7 +938,8 @@ void TermGLCanvas::Render() {
 
     int physH = static_cast<int>(size.GetHeight() * glScale);
 
-    glViewport(0, 0, physW, physH);
+    int fbScale = static_cast<int>(GLFramebufferScale());
+    glViewport(0, 0, physW * fbScale, physH * fbScale);
 
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -1359,7 +1372,8 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 
         float glScale = GLPixelScale();
 
-        glViewport(0, 0, static_cast<int>(size.GetWidth() * glScale), static_cast<int>(size.GetHeight() * glScale));
+        int fbScale = static_cast<int>(GLFramebufferScale());
+        glViewport(0, 0, static_cast<int>(size.GetWidth() * glScale * fbScale), static_cast<int>(size.GetHeight() * glScale * fbScale));
 
     }
 
