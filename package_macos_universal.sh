@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_NAME="OceanTerm"
 APP_DISPLAY_NAME="OceanTerm"
-VERSION="1.0.4"
+VERSION="1.0.5"
 
 ARM64_BIN="build_mac/bin/OceanTerm"
 X86_BIN="build_x86/bin/OceanTerm"
