@@ -44,6 +44,10 @@ private:
 
     void OnTabLabelChanged(wxCommandEvent& event);
 
+#ifdef __WXMAC__
+    void OnFullScreenEvent(wxFullScreenEvent& event);
+#endif
+
     void OnTabLayoutRequest(wxCommandEvent& event);
 
     void LayoutTabs();

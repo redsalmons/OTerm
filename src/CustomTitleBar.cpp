@@ -159,6 +159,13 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 #endif
     m_newTabButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnNewTabClicked, this);
     m_drawerButton->Bind(wxEVT_BUTTON, &CustomTitleBar::OnDrawerClicked, this);
+#ifdef __WXMAC__
+    // Native green traffic-light fullscreen doesn't go through OnMaximize —
+    // catch the frame's fullscreen event so the left margin/title swap applies.
+    if (GetParent()) {
+        GetParent()->Bind(wxEVT_FULLSCREEN, &CustomTitleBar::OnFullScreenEvent, this);
+    }
+#endif
     Bind(wxEVT_TAB_CLOSE, &CustomTitleBar::OnTabClose, this);
     Bind(wxEVT_TAB_SELECTED, &CustomTitleBar::OnTabSelected, this);
     Bind(wxEVT_COMMAND_TEXT_UPDATED, &CustomTitleBar::OnTabLabelChanged, this);
@@ -187,10 +194,13 @@ void CustomTitleBar::UpdateMaxTabContainerWidth() {
     int closeBtnWidth = m_closeButton->GetSize().GetWidth();
     rightButtonsWidth = drawerWidth + minBtnWidth + maxBtnWidth + closeBtnWidth + buttonGap * 4;
 #else
-    // Mac: Include traffic light buttons (left side) in total width calculation
-    // Traffic light buttons typically occupy ~70-80px
-    int trafficLightWidth = 70;
-    totalWidth -= trafficLightWidth;
+    // Mac: traffic lights occupy ~70px at the left in windowed mode; in
+    // fullscreen they are hidden and the app-name label takes their place
+    if (m_isFullScreen) {
+        titleWidth = m_titleText->GetSize().GetWidth() + 40;
+    } else {
+        totalWidth -= 70;
+    }
 #endif
 
     // Tab container max width = total width - title - new tab button - right buttons - margins
@@ -403,25 +413,20 @@ void CustomTitleBar::OnNewTabClicked(wxCommandEvent& event) {
 void CustomTitleBar::OnDrawerClicked(wxCommandEvent& event) {
     wxMenu menu;
     menu.Append(ID_SETTINGS, TranslationHelper::Tr("settings"));
+    menu.Append(ID_NEW_TERMINAL, TranslationHelper::Tr("deviceList"));
 
-    // Build device list submenu: "Open device list" entry + hidden (overflow) tabs
-    wxMenu* deviceSubMenu = new wxMenu();
-    deviceSubMenu->Append(ID_NEW_TERMINAL, TranslationHelper::Tr("deviceList"));
-
+    // Hidden (overflow) tabs as flat entries — no submenu
     if (!m_overflowIndices.empty()) {
-        deviceSubMenu->AppendSeparator();
+        menu.AppendSeparator();
         for (size_t i = 0; i < m_overflowIndices.size(); ++i) {
             int tabIdx = m_overflowIndices[i];
             int menuId = ID_OVERFLOW_TAB_BASE + tabIdx;
             wxString tabLabel = wxString::FromUTF8(m_tabs[tabIdx]->GetDeviceConfig().name.c_str());
             if (tabLabel.empty()) tabLabel = wxString::Format("Tab %d", tabIdx + 1);
-            deviceSubMenu->Append(menuId, tabLabel);
+            menu.Append(menuId, tabLabel);
             Bind(wxEVT_MENU, &CustomTitleBar::OnOverflowTabClicked, this, menuId);
         }
     }
-
-    // Attach the submenu to the drawer menu
-    menu.AppendSubMenu(deviceSubMenu, TranslationHelper::Tr("deviceList"));
 
     Bind(wxEVT_MENU, &CustomTitleBar::OnSettings, this, ID_SETTINGS);
     Bind(wxEVT_MENU, &CustomTitleBar::OnNewTerminal, this, ID_NEW_TERMINAL);
@@ -496,7 +501,8 @@ void CustomTitleBar::OnSettings(wxCommandEvent& event) {
 }
 
 void CustomTitleBar::OnNewTerminal(wxCommandEvent& event) {
-    wxCommandEvent newTabEvent(wxEVT_MENU, ID_NEW_TAB);
+    // Open the device list dialog directly
+    wxCommandEvent newTabEvent(wxEVT_MENU, wxID_NEW);
     wxPostEvent(GetParent(), newTabEvent);
 }
 
@@ -789,6 +795,9 @@ void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
 #ifndef __WXMSW__
         // Hide native title bar title and restore left margin for traffic lights
         SetMacTitleBarVisible(GetParent()->GetHandle(), false);
+        if (m_titleText) {
+            m_titleText->Hide();
+        }
         if (m_leftMarginSpacer) {
             m_leftMarginSpacer->Show(true);
         }
@@ -803,7 +812,11 @@ void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
         CallAfter([this]() {
             // Show native title bar title in fullscreen (traffic lights are hidden)
             SetMacTitleBarVisible(GetParent()->GetHandle(), true);
-            // Remove left margin since traffic lights are hidden
+            // Show app name where the traffic-light margin was, so the area
+            // before the first tab isn't blank
+            if (m_titleText) {
+                m_titleText->Show();
+            }
             if (m_leftMarginSpacer) {
                 m_leftMarginSpacer->Show(false);
             }
@@ -813,6 +826,34 @@ void CustomTitleBar::OnMaximize(wxCommandEvent& event) {
 #endif
     }
 }
+
+#ifdef __WXMAC__
+void CustomTitleBar::OnFullScreenEvent(wxFullScreenEvent& event) {
+    m_isFullScreen = event.IsFullScreen();
+    CallAfter([this]() {
+        if (m_isFullScreen) {
+            SetMacTitleBarVisible(GetParent()->GetHandle(), true);
+            if (m_titleText) {
+                m_titleText->Show();
+            }
+            if (m_leftMarginSpacer) {
+                m_leftMarginSpacer->Show(false);
+            }
+        } else {
+            SetMacTitleBarVisible(GetParent()->GetHandle(), false);
+            if (m_titleText) {
+                m_titleText->Hide();
+            }
+            if (m_leftMarginSpacer) {
+                m_leftMarginSpacer->Show(true);
+            }
+        }
+        Layout();
+        LayoutTabs();
+        Refresh();
+    });
+}
+#endif
 
 void CustomTitleBar::OnClose(wxCommandEvent& event) {
     GetParent()->Close();
@@ -831,20 +872,6 @@ void CustomTitleBar::OnPaint(wxPaintEvent& event) {
     wxSize clientSize = GetClientSize();
     dc.SetBackground(wxBrush(wxColour(45, 45, 45)));
     dc.Clear();
-
-    // Mac: Draw title text in fullscreen mode (traffic lights are hidden)
-    if (m_isFullScreen) {
-        wxString titleText = TranslationHelper::Tr("oceanTerm");
-        wxFont titleFont = dc.GetFont();
-        titleFont.SetWeight(wxFONTWEIGHT_BOLD);
-        titleFont.SetStyle(wxFONTSTYLE_ITALIC);
-        dc.SetFont(titleFont);
-        dc.SetTextForeground(wxColour(255, 255, 255));
-        wxSize textSize = dc.GetTextExtent(titleText);
-        int x = 20;
-        int y = (clientSize.GetHeight() - textSize.GetHeight()) / 2;
-        dc.DrawText(titleText, x, y);
-    }
 #endif
 
     event.Skip();

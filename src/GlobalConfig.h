@@ -38,6 +38,13 @@ public:
     static void SaveSettings();
 
     static std::string ComputeMD5(const std::string& input);
+    static std::string ComputeSHA256(const std::string& input);
+
+    // Ensure config lives in the user data dir; migrate from legacy locations.
+    static void EnsureConfigMigration();
+
+    // Write file atomically (tmp + rename). Returns false on failure.
+    static bool WriteFileAtomic(const std::string& path, const std::string& content);
 
     static void SetDPIScaleFactor(double scale);
     static double GetDPIScaleFactor();

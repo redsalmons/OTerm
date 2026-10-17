@@ -4,6 +4,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <openssl/md5.h>
+#include <openssl/sha.h>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <cmath>
@@ -91,12 +93,38 @@ std::string GlobalConfig::GetConfigPath() {
         // If workspace path is specified, config goes to workspace/config
         return s_workspacePath + "/config";
     } else {
-        // Otherwise, config goes to user config directory (Preferences)
+        // User data directory: ~/Library/Application Support/OceanTerm on
+        // macOS, %APPDATA%\OceanTerm on Windows
         wxStandardPaths& stdPaths = wxStandardPaths::Get();
-        wxString configDir = stdPaths.GetUserConfigDir();
-        // Add app name as subdirectory
-        configDir += "/OceanTerm";
+        wxString configDir = stdPaths.GetUserDataDir();
         return configDir.ToStdString();
+    }
+}
+
+static std::string LegacyConfigPath() {
+    wxStandardPaths& stdPaths = wxStandardPaths::Get();
+    // Old location: Preferences dir + /OceanTerm
+    return stdPaths.GetUserConfigDir().ToStdString() + "/OceanTerm";
+}
+
+void GlobalConfig::EnsureConfigMigration() {
+    if (s_workspacePathSpecified) return;
+
+    std::string newDir = GetConfigPath();
+    std::string oldDir = LegacyConfigPath();
+    if (newDir == oldDir) return;
+
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::is_directory(oldDir, ec)) return;
+
+    fs::create_directories(newDir, ec);
+    for (const char* name : {"settings.json", "oc.json"}) {
+        fs::path dst = fs::path(newDir) / name;
+        fs::path src = fs::path(oldDir) / name;
+        if (!fs::exists(dst, ec) && fs::exists(src, ec)) {
+            fs::copy_file(src, dst, ec);
+        }
     }
 }
 
@@ -158,7 +186,7 @@ std::string GlobalConfig::GetMasterPassword() {
 }
 
 void GlobalConfig::SetMasterPassword(const std::string& password) {
-    s_masterPassword = ComputeMD5(password);
+    s_masterPassword = ComputeSHA256(password);
 }
 
 bool GlobalConfig::HasMasterPassword() {
@@ -166,8 +194,16 @@ bool GlobalConfig::HasMasterPassword() {
 }
 
 bool GlobalConfig::VerifyMasterPassword(const std::string& password) {
-    std::string passwordHash = ComputeMD5(password);
-    return passwordHash == s_masterPassword;
+    if (ComputeSHA256(password) == s_masterPassword) {
+        return true;
+    }
+    // Legacy MD5 hash — upgrade transparently on successful verify
+    if (ComputeMD5(password) == s_masterPassword) {
+        s_masterPassword = ComputeSHA256(password);
+        SaveSettings();
+        return true;
+    }
+    return false;
 }
 
 std::string GlobalConfig::GetActiveMasterPassword() {
@@ -189,12 +225,57 @@ std::string GlobalConfig::ComputeMD5(const std::string& input) {
     return ss.str();
 }
 
+std::string GlobalConfig::ComputeSHA256(const std::string& input) {
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)input.c_str(), input.size(), digest);
+
+    std::stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)digest[i];
+    }
+    return ss.str();
+}
+
+bool GlobalConfig::WriteFileAtomic(const std::string& path, const std::string& content) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path dst(path);
+    fs::path tmp = dst;
+    tmp += ".tmp";
+
+    {
+        std::ofstream file(tmp, std::ios::out | std::ios::trunc);
+        if (!file.is_open()) return false;
+        file << content;
+        file.flush();
+        if (!file.good()) {
+            file.close();
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+
+    fs::rename(tmp, dst, ec);
+    if (ec) {
+        // rename can fail if the destination exists (Windows) — remove and retry
+        fs::remove(dst, ec);
+        ec.clear();
+        fs::rename(tmp, dst, ec);
+        if (ec) {
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+    return true;
+}
+
 std::string GlobalConfig::GetSettingsFilePath() {
     std::string configPath = GetConfigPath();
     return configPath + "/settings.json";
 }
 
 void GlobalConfig::LoadSettings() {
+    EnsureConfigMigration();
     std::string settingsPath = GetSettingsFilePath();
     std::ifstream file(settingsPath);
     
@@ -254,11 +335,7 @@ void GlobalConfig::SaveSettings() {
     j["fontSize"] = s_fontSize;
     j["masterPassword"] = s_masterPassword;
 
-    std::ofstream file(settingsPath);
-    if (file.is_open()) {
-        file << j.dump(4);
-        file.close();
-    }
+    WriteFileAtomic(settingsPath, j.dump(4));
 }
 
 void GlobalConfig::SetDPIScaleFactor(double scale) {

@@ -183,5 +183,7 @@ void SettingsDialog::OnResetMasterPassword(wxCommandEvent& event) {
     GlobalConfig::SetMasterPassword(newPassword);
     GlobalConfig::SaveSettings();
     GlobalConfig::SetActiveMasterPassword(newPassword);
+    // Keep the Keychain copy in sync so silent unlock keeps working
+    DeviceConfig::StoreCredential("master.password", newPassword);
     wxMessageBox(TranslationHelper::Tr("masterPasswordResetSuccessfully"), TranslationHelper::Tr("success"), wxOK | wxICON_INFORMATION);
 }

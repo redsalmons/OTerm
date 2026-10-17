@@ -105,6 +105,7 @@ target_link_options(OceanTerm PRIVATE
     "LINKER:-framework,IOKit"
     "LINKER:-framework,CoreFoundation"
     "LINKER:-framework,AppKit"
+    "LINKER:-framework,Security"
 )
 
 if(nlohmann_json_FOUND)

@@ -13,6 +13,7 @@
 #include <wx/filename.h>
 #include <filesystem>
 #include <chrono>
+#include <random>
 #include <iomanip>
 #include <sstream>
 #include <fstream>
@@ -193,24 +194,31 @@ bool MyApp::OnInit() {
             TranslationHelper::Load("en");
         }
 
-        const bool skipPasswordCheck = getenv("OTERM_SKIP_PASSWORD") != nullptr;
-        const bool devAutoLogin = getenv("OTERM_DEV_AUTOLOGIN") != nullptr;
 
-        // Master password authentication
-        if (skipPasswordCheck) {
-            // dev: skip
-        } else if (!GlobalConfig::HasMasterPassword()) {
-            // No master password set, show setup dialog
-            MasterPasswordDialog setupDialog(nullptr, true);
-            if (setupDialog.ShowModal() != wxID_OK) {
-                // User cancelled, exit application
-                return false;
+
+        // Master password is managed automatically via Keychain — no user
+        // prompt. On first launch a random key is generated and stored.
+        std::string masterPassword = DeviceConfig::LoadCredential("master.password");
+        if (masterPassword.empty()) {
+            // Generate a random 32-byte hex key
+            static const char* hex = "0123456789abcdef";
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> dis(0, 255);
+            masterPassword.reserve(64);
+            for (int i = 0; i < 32; i++) {
+                unsigned char b = static_cast<unsigned char>(dis(gen));
+                masterPassword += hex[b >> 4];
+                masterPassword += hex[b & 0xF];
             }
+            DeviceConfig::StoreCredential("master.password", masterPassword);
+        }
+        GlobalConfig::SetActiveMasterPassword(masterPassword);
 
-            wxString password = setupDialog.GetPassword();
-            GlobalConfig::SetMasterPassword(password.ToStdString());
+        if (!GlobalConfig::HasMasterPassword()) {
+            // First run: record the key hash and system defaults
+            GlobalConfig::SetMasterPassword(masterPassword);
 
-            // Initialize language, font, and font size to system defaults
             wxLocale locale;
             locale.Init();
             wxString sysLang = locale.GetCanonicalName();
@@ -220,47 +228,9 @@ bool MyApp::OnInit() {
                 GlobalConfig::SetLanguage("en");
             }
 
-            // Font and font size will use system defaults (empty string and 0)
             GlobalConfig::SetFontName("");
             GlobalConfig::SetFontSize(0);
-
             GlobalConfig::SaveSettings();
-            GlobalConfig::SetActiveMasterPassword(password.ToStdString());
-        } else {
-            // Master password exists, show login dialog
-            int maxAttempts = 3;
-            int attempts = 0;
-
-            while (attempts < maxAttempts) {
-                MasterPasswordDialog loginDialog(nullptr, false);
-                loginDialog.SetPasswordVerifier([&](const wxString& password, wxString& errorMsg, bool& shouldClose) {
-                    if (devAutoLogin || GlobalConfig::VerifyMasterPassword(password.ToStdString())) {
-                        return true;
-                    } else {
-                        attempts++;
-                        int newRemaining = maxAttempts - attempts;
-                        if (newRemaining > 0) {
-                            errorMsg = wxString::Format(TranslationHelper::Tr("incorrectPasswordAttempts"), newRemaining);
-                            shouldClose = false;
-                        } else {
-                            errorMsg = TranslationHelper::Tr("tooManyFailedAttempts");
-                            shouldClose = true;
-                        }
-                        return false;
-                    }
-                });
-
-                int result = loginDialog.ShowModal();
-                if (result == wxID_CANCEL) {
-                    // User cancelled or max attempts reached, exit application
-                    return false;
-                }
-
-                wxString password = loginDialog.GetPassword();
-                // Password correct, save to memory and continue
-                GlobalConfig::SetActiveMasterPassword(password.ToStdString());
-                break;
-            }
         }
 
         // Initialize SSH log file early
@@ -816,6 +786,7 @@ void AppWindow::OnDeviceDeleteRequest(wxCommandEvent& event) {
     if (it != devices.end()) {
         SSH_LOG("Deleting device with id: " << deviceIdStr << ", name: " << it->name);
         devices.erase(it);
+        DeviceConfig::DeleteCredential(deviceIdStr);
         DeviceConfig::SaveToFile(devices);
         // Refresh device list by finding the DeviceListPanel
         for (size_t i = 0; i < m_notebook->GetPageCount(); ++i) {
