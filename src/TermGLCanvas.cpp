@@ -1962,9 +1962,14 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
 
     if (lines != 0) {
         if (scroll_callback_) {
+            scroll_callback_(lines);
+        } else {
+            SSH_LOG("  WARNING: scroll_callback_ is NULL, scroll will not work");
         }
         Refresh();
     }
+
+    event.Skip();
 }
 
 
