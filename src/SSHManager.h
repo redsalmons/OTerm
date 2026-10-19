@@ -38,13 +38,17 @@ extern std::ofstream ssh_log_file;
 extern bool ssh_log_initialized;
 
 // Logging enable/disable switch - set to 1 to enable debug logs, 0 to disable
-#define ENABLE_SSH_LOG 0
+#define ENABLE_SSH_LOG 1
+
+// Write one timestamped line to the rolling log (5MB x 7 backups).
+void SSHLogWrite(const std::string& line);
+void SSHLogWriteErr(const std::string& line);
 
 #if ENABLE_SSH_LOG
 #define SSH_LOG(msg) do { \
-    if (ssh_log_initialized) { \
-        ssh_log_file << timestamp() << " " << msg << std::endl; \
-    } \
+    std::ostringstream _oss; \
+    _oss << msg; \
+    SSHLogWrite(_oss.str()); \
 } while(0)
 #else
 #define SSH_LOG(msg) ((void)0)
@@ -52,9 +56,9 @@ extern bool ssh_log_initialized;
 
 #if ENABLE_SSH_LOG
 #define SSH_ERR(msg) do { \
-    if (ssh_log_initialized) { \
-        ssh_log_file << timestamp() << " ERROR: " << msg << std::endl; \
-    } \
+    std::ostringstream _oss; \
+    _oss << msg; \
+    SSHLogWriteErr(_oss.str()); \
 } while(0)
 #else
 #define SSH_ERR(msg) ((void)0)

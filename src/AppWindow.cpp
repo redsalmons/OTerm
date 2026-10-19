@@ -856,8 +856,6 @@ void AppWindow::OnSize(wxSizeEvent& event) {
     // Log sizes for debugging
     wxSize windowSize = GetClientSize();
     wxSize notebookSize = m_notebook->GetSize();
-    SSH_LOG("AppWindow::OnSize - Window: " << windowSize.GetWidth() << "x" << windowSize.GetHeight()
-            << ", Notebook: " << notebookSize.GetWidth() << "x" << notebookSize.GetHeight());
     
     event.Skip();
 }

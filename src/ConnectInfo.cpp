@@ -411,8 +411,6 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
             ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
             bool inAltScreen = container ? container->IsInAlternateScreen() : false;
 
-            SSH_LOG("Mouse callback: row=" << row << ", col=" << col << ", button=" << button << ", in_alt_screen=" << inAltScreen);
-
             if (inAltScreen) {
 
                 // X10 mouse protocol: \x1b[M<btn><col><row>
@@ -438,8 +436,6 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
                 seq[5] = static_cast<char>(row + 33);
 
                 std::string seq_str(seq, 6);
-
-                SSH_LOG("Sending X10 mouse sequence: " << std::hex << (int)(unsigned char)seq[0] << " " << (int)(unsigned char)seq[1] << " " << (int)(unsigned char)seq[2] << " " << (int)(unsigned char)seq[3] << " " << (int)(unsigned char)seq[4] << " " << (int)(unsigned char)seq[5] << std::dec);
 
                 TerminalPanel* panel = dynamic_cast<TerminalPanel*>(m_contentPanel);
                 ITerminalContainer* container = panel ? panel->GetTerminalContainer() : nullptr;
@@ -1206,7 +1202,6 @@ void ConnectInfo::OnLabelTextKillFocus(wxFocusEvent& event) {
 
 
 void ConnectInfo::OnSize(wxSizeEvent& event) {
-    SSH_LOG("ConnectInfo::OnSize called");
     event.Skip();
 }
 

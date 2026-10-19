@@ -363,8 +363,6 @@ bool TermGLCanvas::HandleMacRawKey(unsigned short keyCode, unsigned long modifie
 
     if (!m_imeInputBox || wxWindow::FindFocus() != m_imeInputBox) {
         if (isNavKey) {
-            SSH_LOG("MacKeyMonitor: nav key " << keyCode << " NOT consumed (focus="
-                    << wxWindow::FindFocus() << " box=" << m_imeInputBox << ")");
         }
         return false;
     }
@@ -400,8 +398,6 @@ bool TermGLCanvas::HandleMacRawKey(unsigned short keyCode, unsigned long modifie
         default:
             return false;
     }
-
-    SSH_LOG("MacKeyMonitor: nav key " << keyCode << " delivered from AppKit monitor");
 
     if (key_callback_) {
         key_callback_(seq, static_cast<int>(strlen(seq)));
@@ -1498,13 +1494,10 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                 {
                     // Check if this is a local terminal and command should be intercepted
                     TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-                    SSH_LOG("OnKeyDown: RETURN pressed, panel=" << panel << ", IsLocalTerminal=" << (panel ? panel->IsLocalTerminal() : false));
                     // If the session has ended, pressing Enter starts a new local terminal
                     if (panel) {
                         bool alive = panel->IsSessionAlive();
-                        SSH_LOG("OnKeyDown: IsSessionAlive=" << alive);
                         if (!alive) {
-                            SSH_LOG("OnKeyDown: session not alive, restarting as local terminal");
                             panel->RestartAsLocalTerminal();
                             return;
                         }
@@ -1513,21 +1506,17 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                         if (panel->CheckAndHandleLocalCommand()) {
                             return;
                         }
-                        SSH_LOG("OnKeyDown: Command not intercepted, sending Enter");
                         sequence = "\r";
                         panel->ClearInputBuffer();
                     } else {
-                        SSH_LOG("OnKeyDown: Not a local terminal (SSH), checking m_sshInputBuffer: '" << m_sshInputBuffer << "'");
                         // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
                         // if (f.is_open()) f << "[SSH_KEYDOWN] Enter pressed, m_sshInputBuffer: '" << m_sshInputBuffer << "'" << std::endl;
                         
                         if (!m_sshInputBuffer.empty()) {
                             std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
-                            SSH_LOG("OnKeyDown SSH: Extracted command='" << command << "'");
                             // if (f.is_open()) f << "[SSH_KEYDOWN] Extracted command: '" << command << "'" << std::endl;
                             
                             if (command == "download" || command == "upload") {
-                                SSH_LOG("OnKeyDown SSH: command is upload/download, intercepting!");
                                 // if (f.is_open()) f << "[SSH_KEYDOWN] Intercepting upload/download, triggering file transfer" << std::endl;
                                 
                                 sequence = "\x03"; // Send Ctrl+C to cancel command line on remote shell
@@ -1605,7 +1594,6 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
                                     m_sshInputBuffer.pop_back();
                                 } while (!m_sshInputBuffer.empty() && 
                                          ((unsigned char)m_sshInputBuffer.back() & 0xC0) == 0x80);
-                                SSH_LOG("OnKeyDown SSH backspace: m_sshInputBuffer now='" << m_sshInputBuffer << "'");
                             }
                         }
                     }
@@ -1669,18 +1657,13 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
 void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
-    SSH_LOG("OnChar called, key_callback_=" << (key_callback_ ? "set" : "null") << " keycode=" << event.GetKeyCode());
-
     // Handle RETURN key for command interception
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
-        SSH_LOG("OnChar: RETURN pressed, checking for command interception");
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
         if (panel) {
             bool alive = panel->IsSessionAlive();
-            SSH_LOG("OnChar: IsSessionAlive=" << alive);
             // If the session has ended, pressing Enter starts a new local terminal
             if (!alive) {
-                SSH_LOG("OnChar: session not alive, restarting as local terminal");
                 panel->RestartAsLocalTerminal();
                 return;
             }
@@ -1693,12 +1676,10 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
         } else if (panel && !panel->IsLocalTerminal()) {
             // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
             // if (f.is_open()) f << "[SSH_ONCHAR] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
-            SSH_LOG("OnChar SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
 
             // Check if SSH is disconnected and trigger reconnect
             SSHTerminalContainer* sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
             if (sshContainer && sshContainer->GetState() == SSHTerminalContainer::SSH_DISCONNECTED) {
-                SSH_LOG("OnChar SSH: SSH is disconnected, triggering reconnect");
                 sshContainer->Connect();
                 m_sshInputBuffer.clear();
                 return;
@@ -1706,11 +1687,9 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
             if (!m_sshInputBuffer.empty()) {
                 std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
-                SSH_LOG("OnChar SSH: Extracted command='" << command << "'");
                 // if (f.is_open()) f << "[SSH_ONCHAR] Extracted command: '" << command << "'" << std::endl;
 
                 if (command == "download" || command == "upload") {
-                    SSH_LOG("OnChar SSH: command is upload/download, intercepting!");
                     // if (f.is_open()) f << "[SSH_ONCHAR] Intercepting upload/download, sending Ctrl+C" << std::endl;
 
                     if (key_callback_) {
@@ -1851,8 +1830,6 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
         if (seq) {
 
-            SSH_LOG("OnCharHook: nav key " << event.GetKeyCode() << " sent from hook stage");
-
             if (key_callback_) {
 
                 key_callback_(seq, static_cast<int>(strlen(seq)));
@@ -1867,14 +1844,11 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
     // Handle RETURN key for command interception
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
-        SSH_LOG("OnCharHook: RETURN pressed, checking for command interception");
         TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
         if (panel) {
             bool alive = panel->IsSessionAlive();
-            SSH_LOG("OnCharHook: IsSessionAlive=" << alive);
             // If the session has ended, pressing Enter starts a new local terminal
             if (!alive) {
-                SSH_LOG("OnCharHook: session not alive, restarting as local terminal");
                 panel->RestartAsLocalTerminal();
                 return;
             }
@@ -1887,12 +1861,10 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
             // SSH terminal: check for upload/download commands
             // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
             // if (f.is_open()) f << "[SSH_CHARHOOK] Enter pressed, m_sshInputBuffer='" << m_sshInputBuffer << "'" << std::endl;
-            SSH_LOG("OnCharHook SSH: Enter pressed. m_sshInputBuffer='" << m_sshInputBuffer << "'");
 
             // Check if SSH is disconnected and trigger reconnect
             SSHTerminalContainer* sshContainer = dynamic_cast<SSHTerminalContainer*>(panel->GetTerminalContainer());
             if (sshContainer && sshContainer->GetState() == SSHTerminalContainer::SSH_DISCONNECTED) {
-                SSH_LOG("OnCharHook SSH: SSH is disconnected, triggering reconnect");
                 sshContainer->Connect();
                 m_sshInputBuffer.clear();
                 return;
@@ -1900,11 +1872,9 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
             if (!m_sshInputBuffer.empty()) {
                 std::string command = m_commandInterceptor.ExtractCommand(m_sshInputBuffer);
-                SSH_LOG("OnCharHook SSH: Extracted command='" << command << "'");
                 // if (f.is_open()) f << "[SSH_CHARHOOK] Extracted command: '" << command << "'" << std::endl;
 
                 if (command == "download" || command == "upload") {
-                    SSH_LOG("OnCharHook SSH: command is upload/download, intercepting!");
                     // if (f.is_open()) f << "[SSH_CHARHOOK] Intercepting upload/download, sending Ctrl+C" << std::endl;
 
                     if (key_callback_) {
@@ -1957,9 +1927,6 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
     int lines = m_wheelRotationAccumulator / wheelDelta;
     m_wheelRotationAccumulator %= wheelDelta;
 
-    SSH_LOG("TermGLCanvas::OnMouseWheel: delta=" << delta << ", lines=" << lines << ", accum=" << m_wheelRotationAccumulator);
-    SSH_LOG("  scroll_callback_ is " << (scroll_callback_ ? "set" : "NULL"));
-
     if (lines != 0) {
         if (scroll_callback_) {
             scroll_callback_(lines);
@@ -1975,8 +1942,6 @@ void TermGLCanvas::OnMouseWheel(wxMouseEvent& event) {
 
 
 void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
-
-    SSH_LOG("TermGLCanvas::OnMouseLeftDown called");
 
     
 
@@ -2383,8 +2348,6 @@ void TermGLCanvas::CopySelectionToClipboard() {
 
 void TermGLCanvas::OnSetFocus(wxFocusEvent& event) {
 
-    SSH_LOG("TermGLCanvas gained focus");
-
 #ifdef _WIN32
 
     // Windows: show IME when canvas gains focus
@@ -2402,8 +2365,6 @@ void TermGLCanvas::OnSetFocus(wxFocusEvent& event) {
 void TermGLCanvas::OnKillFocus(wxFocusEvent& event) {
 
     // Canvas lost focus
-
-    SSH_LOG("TermGLCanvas lost focus");
 
     // Don't hide IME input box here to avoid focus loop
 

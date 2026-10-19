@@ -5,8 +5,50 @@
 std::ofstream ssh_log_file;
 bool ssh_log_initialized = false;
 
+// Rolling log: ssh.log rotated at 5MB, keeping 7 backups (ssh.log.1 .. .7)
+static const long long kMaxLogSize = 5 * 1024 * 1024;
+static const int kKeepLogBackups = 7;
+
+static std::filesystem::path LogFilePath() {
+    return std::filesystem::path(GlobalConfig::GetLogPath()) / "ssh.log";
+}
+
+static void RotateLogIfNeeded() {
+    namespace fs = std::filesystem;
+    if (!ssh_log_file.is_open() || ssh_log_file.tellp() < kMaxLogSize) {
+        return;
+    }
+    ssh_log_file.close();
+    fs::path base = LogFilePath();
+    std::error_code ec;
+    fs::remove(base.string() + "." + std::to_string(kKeepLogBackups), ec);
+    for (int i = kKeepLogBackups - 1; i >= 1; --i) {
+        fs::rename(base.string() + "." + std::to_string(i),
+                   base.string() + "." + std::to_string(i + 1), ec);
+        ec.clear();
+    }
+    fs::rename(base, base.string() + ".1", ec);
+    ssh_log_file.open(base, std::ios::out | std::ios::trunc);
+    if (ssh_log_file.is_open()) {
+        ssh_log_file << "=== Log rotated ===" << std::endl;
+    }
+}
+
+void SSHLogWrite(const std::string& line) {
+    if (!ssh_log_initialized) return;
+    ssh_log_file << timestamp() << " " << line << std::endl;
+    ssh_log_file.flush();
+    RotateLogIfNeeded();
+}
+
+void SSHLogWriteErr(const std::string& line) {
+    if (!ssh_log_initialized) return;
+    ssh_log_file << timestamp() << " ERROR: " << line << std::endl;
+    ssh_log_file.flush();
+    RotateLogIfNeeded();
+}
+
 void InitSSHLogFile() {
-#if ENABLE_SSH_LOG
     if (ssh_log_initialized) {
         return;
     }
@@ -15,19 +57,7 @@ void InitSSHLogFile() {
         std::filesystem::path log_dir = std::filesystem::path(GlobalConfig::GetLogPath());
         std::filesystem::create_directories(log_dir);
 
-        auto now = std::chrono::system_clock::now();
-        auto t = std::chrono::system_clock::to_time_t(now);
-        std::tm tm;
-#ifdef _WIN32
-        localtime_s(&tm, &t);
-#else
-        localtime_r(&t, &tm);
-#endif
-        std::ostringstream filename;
-        filename << "ssh_" << std::put_time(&tm, "%Y%m%d_%H%M%S") << ".log";
-
-        std::filesystem::path log_path = log_dir / filename.str();
-        ssh_log_file.open(log_path, std::ios::out | std::ios::app);
+        ssh_log_file.open(LogFilePath(), std::ios::out | std::ios::app);
 
         if (ssh_log_file.is_open()) {
             ssh_log_initialized = true;
@@ -36,5 +66,4 @@ void InitSSHLogFile() {
         }
     } catch (const std::exception& e) {
     }
-#endif
 }

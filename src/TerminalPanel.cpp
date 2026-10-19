@@ -675,18 +675,14 @@ bool TerminalPanel::CheckAndHandleLocalCommand() {
 }
 
 void TerminalPanel::OnKeyDown(wxKeyEvent& event) {
-    SSH_LOG("TerminalPanel::OnKeyDown: keycode=" << event.GetKeyCode());
 
     // Handle RETURN key for command interception
     if (event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER) {
-        SSH_LOG("TerminalPanel::OnKeyDown: RETURN pressed, checking session alive");
         // If the session has ended (local or SSH), pressing Enter starts a new local terminal
         if (!IsSessionAlive()) {
-            SSH_LOG("TerminalPanel::OnKeyDown: session not alive, restarting as local terminal");
             RestartAsLocalTerminal();
             return;
         }
-        SSH_LOG("TerminalPanel::OnKeyDown: session alive, normal Enter handling");
         if (CheckAndHandleLocalCommand()) {
             return;
         }
