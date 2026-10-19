@@ -469,6 +469,11 @@ void SSHTerminalContainer::PerformAuthentication() {
     if (rc == 0) {
         SSH_LOG("SSH Authentication successful.");
         m_authRetryCount = 0;
+        // Persist the working password to the vault so file transfer and
+        // future sessions can authenticate without re-prompting
+        if (!password.empty() && !m_deviceConfig.id.empty()) {
+            DeviceConfig::StoreCredential(m_deviceConfig.id, password);
+        }
         m_sshState = SSH_CHANNEL_OPENING;
         OpenSSHChannel();
     } else if (rc == LIBSSH2_ERROR_EAGAIN) {
