@@ -2,7 +2,6 @@
 #include "MonospaceFontDialog.h"
 #include "TranslationHelper.h"
 #include "GlobalConfig.h"
-#include "DeviceConfig.h"
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/statbox.h>
@@ -73,37 +72,6 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     basicPanel->SetSizer(basicSizer);
     notebook->AddPage(basicPanel, TranslationHelper::Tr("basicConfig"));
 
-    // -------------------------------------------------------------
-    // Tab 2: Master password group
-    // -------------------------------------------------------------
-    wxPanel* passwordPanel = new wxPanel(notebook, wxID_ANY);
-    wxBoxSizer* passwordSizer = new wxBoxSizer(wxVERTICAL);
-
-    // Show password input fields
-    wxBoxSizer* password1Sizer = new wxBoxSizer(wxHORIZONTAL);
-    password1Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("enterPassword") + ":"), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
-    m_masterPassword1 = new wxTextCtrl(passwordPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
-    password1Sizer->Add(m_masterPassword1, 1, wxEXPAND | wxALL, 5);
-    passwordSizer->Add(password1Sizer, 0, wxEXPAND | wxALL, 10);
-
-    wxBoxSizer* password2Sizer = new wxBoxSizer(wxHORIZONTAL);
-    password2Sizer->Add(new wxStaticText(passwordPanel, wxID_ANY, TranslationHelper::Tr("confirmPassword") + ":"), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
-    m_masterPassword2 = new wxTextCtrl(passwordPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
-    password2Sizer->Add(m_masterPassword2, 1, wxEXPAND | wxALL, 5);
-    passwordSizer->Add(password2Sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-
-    // Show reset button
-    wxBoxSizer* masterButtonSizer = new wxBoxSizer(wxHORIZONTAL);
-    wxButton* resetButton = new wxButton(passwordPanel, wxID_ANY, TranslationHelper::Tr("reset"));
-    masterButtonSizer->Add(resetButton, 0, wxALL, 5);
-    passwordSizer->Add(masterButtonSizer, 0, wxALIGN_RIGHT | wxRIGHT | wxBOTTOM, 10);
-
-    // Bind button event
-    resetButton->Bind(wxEVT_BUTTON, &SettingsDialog::OnResetMasterPassword, this);
-
-    passwordPanel->SetSizer(passwordSizer);
-    notebook->AddPage(passwordPanel, TranslationHelper::Tr("masterPasswordConfig"));
-
     // Add notebook to dialog sizer
     mainSizer->Add(notebook, 1, wxEXPAND | wxALL, 10);
 
@@ -153,37 +121,4 @@ void SettingsDialog::OnFontButtonClicked(wxCommandEvent& event) {
             m_fontDisplayText->SetLabel(selectedFont);
         }
     }
-}
-
-void SettingsDialog::OnResetMasterPassword(wxCommandEvent& event) {
-    wxString password1 = m_masterPassword1->GetValue();
-    wxString password2 = m_masterPassword2->GetValue();
-
-    // 1. Check if passwords match
-    if (password1.IsEmpty()) {
-        wxMessageBox(TranslationHelper::Tr("passwordCannotBeEmpty"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
-        return;
-    }
-
-    if (password1 != password2) {
-        wxMessageBox(TranslationHelper::Tr("passwordsDoNotMatch"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
-        return;
-    }
-
-    // 2.1-2.3: Re-encrypt oc.json with new password
-    std::string oldPassword = GlobalConfig::GetActiveMasterPassword();
-    std::string newPassword = password1.ToStdString();
-
-    if (!DeviceConfig::ReencryptWithNewPassword(oldPassword, newPassword)) {
-        wxMessageBox(TranslationHelper::Tr("reencryptFailed"), TranslationHelper::Tr("error"), wxOK | wxICON_ERROR);
-        return;
-    }
-
-    // 2.4: Update global master password
-    GlobalConfig::SetMasterPassword(newPassword);
-    GlobalConfig::SaveSettings();
-    GlobalConfig::SetActiveMasterPassword(newPassword);
-    // Keep the Keychain copy in sync so silent unlock keeps working
-    DeviceConfig::StoreCredential("master.password", newPassword);
-    wxMessageBox(TranslationHelper::Tr("masterPasswordResetSuccessfully"), TranslationHelper::Tr("success"), wxOK | wxICON_INFORMATION);
 }

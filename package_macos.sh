@@ -172,22 +172,33 @@ for dylib in ${DYLIBS}; do
     fi
 done
 
-# Re-sign all dylibs with ad-hoc signature to fix code signing issues
-echo "Re-signing bundled dylibs..."
+# Keychain ACLs are bound to the signing identity; ad-hoc signatures change
+# every build and make macOS re-prompt. Set OTERM_SIGN_IDENTITY to a stable
+# (e.g. self-signed) code-signing certificate to avoid that.
+SIGN_ID="${OTERM_SIGN_IDENTITY:--}"
+SIGN_REQ=()
+if [ "${SIGN_ID}" = "-" ]; then
+    echo "WARNING: ad-hoc signing; Keychain may re-prompt after each rebuild (set OTERM_SIGN_IDENTITY)" >&2
+else
+    SIGN_REQ=(--requirements "=designated => identifier \"com.oceanterm.app\" and certificate leaf = H\"$(security find-certificate -c "${SIGN_ID}" -Z | awk '/SHA-1/{print $NF}')\"")
+fi
+
+# Re-sign all dylibs to fix code signing issues
+echo "Re-signing bundled dylibs with identity: ${SIGN_ID}"
 for dylib in "${RESOURCES_DIR}"/*.dylib; do
     if [ -f "${dylib}" ]; then
         echo "  Signing: $(basename "${dylib}")"
-        codesign --force --sign - "${dylib}" 2>/dev/null || true
+        codesign --force --sign "${SIGN_ID}" "${dylib}" 2>/dev/null || true
     fi
 done
 
 # Re-sign the executable
 echo "Re-signing executable..."
-codesign --force --sign - "${MACOS_DIR}/${APP_NAME}" 2>/dev/null || true
+codesign --force --sign "${SIGN_ID}" --identifier com.oceanterm.app "${SIGN_REQ[@]}" "${MACOS_DIR}/${APP_NAME}" 2>/dev/null || true
 
 # Re-sign the entire app bundle
 echo "Re-signing app bundle..."
-codesign --force --deep --sign - "${APP_BUNDLE}" 2>/dev/null || true
+codesign --force --sign "${SIGN_ID}" --identifier com.oceanterm.app "${SIGN_REQ[@]}" "${APP_BUNDLE}" 2>/dev/null || true
 
 # Create DMG for distribution
 echo "Creating DMG for distribution..."

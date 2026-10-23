@@ -1,8 +1,8 @@
 #include "AppWindow.h"
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
-#include "MasterPasswordDialog.h"
 #include <iostream>
+#include <openssl/rand.h>
 #include <wx/simplebook.h>
 #include "ConnectionDialog.h"
 #include "DeviceConfig.h"
@@ -200,24 +200,33 @@ bool MyApp::OnInit() {
 
         // Master password is managed automatically via Keychain/DPAPI — no user
         // prompt. On first launch a random key is generated and stored.
+        // If the store exists but can't be read (e.g. access denied), run
+        // without a key instead of generating a new one, which would orphan
+        // everything already saved.
+        const bool credentialStoreReady = DeviceConfig::IsCredentialStoreAvailable();
         std::string masterPassword = DeviceConfig::LoadCredential("master.password");
-        if (masterPassword.empty()) {
+        if (masterPassword.empty() && credentialStoreReady) {
             // Generate a random 32-byte hex key
             static const char* hex = "0123456789abcdef";
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<> dis(0, 255);
+            unsigned char bytes[32];
+            if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+                std::random_device rd;
+                for (auto& b : bytes) b = static_cast<unsigned char>(rd());
+            }
             masterPassword.reserve(64);
-            for (int i = 0; i < 32; i++) {
-                unsigned char b = static_cast<unsigned char>(dis(gen));
+            for (unsigned char b : bytes) {
                 masterPassword += hex[b >> 4];
                 masterPassword += hex[b & 0xF];
             }
-            DeviceConfig::StoreCredential("master.password", masterPassword);
+            if (!DeviceConfig::StoreCredential("master.password", masterPassword)) {
+                masterPassword.clear();
+            }
         }
         GlobalConfig::SetActiveMasterPassword(masterPassword);
 
-        if (!GlobalConfig::HasMasterPassword()) {
+        if (masterPassword.empty()) {
+            // Credential store unavailable: leave settings.json untouched
+        } else if (!GlobalConfig::HasMasterPassword()) {
             // First run: record the key hash and system defaults
             GlobalConfig::SetMasterPassword(masterPassword);
 
