@@ -6,6 +6,7 @@
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 #include <vector>
+#include <algorithm>
 #include <cstdint>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
@@ -546,6 +547,28 @@ void DeviceConfig::SaveToFile(const std::vector<DeviceConfig>& devices) {
     }
 
     GlobalConfig::WriteFileAtomic(configPath.ToStdString(), data.dump(2));
+}
+
+bool DeviceConfig::SaveLoginCredentials(const std::string& deviceId,
+                                        const std::string& username,
+                                        const std::string& password) {
+    if (deviceId.empty() || password.empty()) return false;
+    std::vector<DeviceConfig> devices = LoadFromFile();
+    auto it = std::find_if(devices.begin(), devices.end(),
+        [&deviceId](const DeviceConfig& d) { return d.id == deviceId; });
+    if (it == devices.end()) return false;
+
+    bool changed = false;
+    if (it->password != password) {
+        it->password = password;
+        changed = true;
+    }
+    if (it->username.empty() && !username.empty()) {
+        it->username = username;
+        changed = true;
+    }
+    if (changed) SaveToFile(devices);
+    return true;
 }
 
 bool DeviceConfig::StoreCredential(const std::string& key, const std::string& secret) {

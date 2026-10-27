@@ -17,6 +17,12 @@ struct DeviceConfig {
     static std::vector<DeviceConfig> LoadFromFile();
     static void SaveToFile(const std::vector<DeviceConfig>& devices);
 
+    // Persist credentials that just authenticated successfully into oc.json
+    // (password encrypted via the Keychain/DPAPI vault, or the master password)
+    static bool SaveLoginCredentials(const std::string& deviceId,
+                                     const std::string& username,
+                                     const std::string& password);
+
     // Remove a stored credential (Keychain on macOS; no-op elsewhere)
     static void DeleteCredential(const std::string& deviceId);
 

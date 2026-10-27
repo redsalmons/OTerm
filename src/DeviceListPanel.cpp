@@ -334,8 +334,9 @@ void DeviceListPanel::DeleteDeviceById(const std::string& deviceId) {
         });
 
     if (it != m_devices.end()) {
-        m_devices.erase(it);
-        DeviceConfig::SaveToFile(m_devices);
+        // AppWindow already persisted the deletion; reload instead of saving
+        // the cached list, which may hold stale credentials
+        LoadDevices();
         RefreshDeviceList();
     }
 }
