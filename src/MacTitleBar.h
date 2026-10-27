@@ -9,6 +9,8 @@ void SetupMacTitleBar(void* windowHandle);
 void SetMacTitleBarVisible(void* windowHandle, bool visible);
 void MacActivateApp();
 void MacWindowMoveToActiveSpace(void* windowHandle);
+// Detach an NSOpenGLContext from its view (argument is NSOpenGLContext*)
+void MacGLClearDrawable(void* glContext);
 
 #ifdef __cplusplus
 }

@@ -32,6 +32,7 @@ class TerminalPanel;
 class TerminalThread;
 
 class wxPopupTransientWindow;
+class wxBookCtrlBase;
 
 
 
@@ -70,6 +71,14 @@ public:
 
     // Reinitialize OpenGL context after reparent
     void ReinitializeGLContext();
+
+    // Detach the GL context from this canvas's view (macOS) so a hidden
+    // canvas's GL surface can't be composited over the visible page.
+    void ReleaseGLDrawable();
+
+    // Release GL drawables of canvases on non-selected pages and refresh the
+    // selected page. Call whenever the book's selection changes.
+    static void SyncBookVisibility(wxBookCtrlBase* book);
 
 
 
@@ -166,6 +175,9 @@ public:
 
 
     wxGLContext* m_glContext;
+
+    // Zoom requested while hidden; applied on next paint
+    bool m_fontZoomPending = false;
 
     FontAtlas* m_fontAtlas;
 

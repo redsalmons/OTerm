@@ -364,6 +364,10 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     this->SetThemeEnabled(false);
     m_notebook = new wxSimplebook(this, wxID_ANY);
     m_notebook->SetBackgroundColour(wxColour(10, 10, 10));
+    m_notebook->Bind(wxEVT_BOOKCTRL_PAGE_CHANGED, [this](wxBookCtrlEvent& event) {
+        event.Skip();
+        TermGLCanvas::SyncBookVisibility(m_notebook);
+    });
 
     // Both Windows and Mac use custom title bar
     m_titleBar = new CustomTitleBar(this, m_notebook, this);
