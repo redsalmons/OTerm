@@ -52,6 +52,7 @@ private:
 
     void LayoutTabs();
     void UpdateMaxTabContainerWidth();
+    void SelectNotebookPage(wxWindow* contentPanel);
 
     wxPoint m_delta;
     wxStaticText* m_titleText;

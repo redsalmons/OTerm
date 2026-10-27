@@ -19,47 +19,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(libuv CONFIG REQUIRED)
 find_package(Libssh2 CONFIG REQUIRED)
 
-# Use manually built wxWidgets for ARM64
-set(wxWidgets_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1)
-
-# Select Debug or Release wxWidgets libraries based on build type
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(wxWidgets_INCLUDE_DIRS
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/mswud
-    )
-    set(wxWidgets_LIBRARIES
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxmsw33ud.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxexpatd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxpngd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxzlibd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxregexud.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxjpegd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxtiffd.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxscintillad.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxlexillad.lib
-        comctl32
-        rpcrt4
-    )
-else()
-    set(wxWidgets_INCLUDE_DIRS
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/mswu
-    )
-    set(wxWidgets_LIBRARIES
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxmsw33u.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxexpat.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxpng.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxzlib.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxregexu.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxjpeg.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxtiff.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxscintilla.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets-3.3.1/build/lib/vc_arm64_dll/wxlexilla.lib
-        comctl32
-        rpcrt4
-    )
-endif()
+# Use wxWidgets provided by vcpkg (matching the triplet: arm64-windows / x64-windows / x86-windows)
+find_package(wxWidgets CONFIG REQUIRED COMPONENTS core base gl net)
 
 find_package(OpenGL REQUIRED)
 find_package(OpenSSL REQUIRED)
@@ -76,7 +37,6 @@ add_executable(OceanTerm WIN32
     src/SSHManager.cpp
     src/VTermManager.cpp
     src/TermGLCanvas.cpp
-    src/TerminalThread.cpp
     src/FontAtlas.cpp
     src/FileTransferDialog.cpp
     src/AsynchronousSFTPTask.cpp
@@ -94,6 +54,8 @@ add_executable(OceanTerm WIN32
     src/SplitTree.cpp
     src/SplitManager.cpp
     src/SplitContainer.cpp
+    src/SplitterPanel.cpp
+    src/RootPanel.cpp
     src/CommandInterceptor.cpp
 )
 
@@ -101,8 +63,15 @@ add_executable(OceanTerm WIN32
 target_include_directories(OceanTerm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/include
-    ${wxWidgets_INCLUDE_DIRS}
 )
+
+# libvterm static library built per-arch (build_installer.ps1 builds it into libvterm/build-<arch>)
+if(CMAKE_GENERATOR_PLATFORM)
+    string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" OTERM_ARCH)
+else()
+    set(OTERM_ARCH "arm64")
+endif()
+set(VTERM_LIB ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/build-${OTERM_ARCH}/Release/vterm.lib)
 
 # Compiler-specific options
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
@@ -119,10 +88,15 @@ target_link_libraries(OceanTerm PRIVATE
     nlohmann_json::nlohmann_json
     $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
     libssh2::libssh2
-    ${CMAKE_CURRENT_SOURCE_DIR}/libvterm/build/Release/vterm.lib
+    ${VTERM_LIB}
     ws2_32
     crypt32
-    ${wxWidgets_LIBRARIES}
+    comctl32
+    rpcrt4
+    wx::core
+    wx::base
+    wx::gl
+    wx::net
     OpenGL::GL
     OpenSSL::Crypto
     )

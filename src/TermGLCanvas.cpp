@@ -2395,7 +2395,12 @@ void TermGLCanvas::ShowIMEInputBox() {
 #endif
 
     if (m_imeInputBoxVisible) {
-
+#ifndef __APPLE__
+        if (m_imeInputBox && wxWindow::FindFocus() != m_imeInputBox) {
+            m_imeInputBox->Show();
+            m_imeInputBox->SetFocus();
+        }
+#endif
         SSH_LOG("IME input box already visible, skipping");
 
         return;

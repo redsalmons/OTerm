@@ -254,21 +254,64 @@ void CustomTitleBar::LayoutTabs() {
     // Determine how many tabs can be visible:
     // accumulate preferred widths; when adding the next tab would exceed availWidth
     // (even at minTabWidth), that tab and everything after overflows.
-    int maxVisible = 0;
-    int currentWidthSum = 0;
+    auto calcMaxVisible = [&](const std::vector<int>& widths) -> int {
+        int visibleCount = 0;
+        int widthSum = 0;
+        for (size_t i = 0; i < widths.size(); ++i) {
+            int w = widths[i] + tabMargin;
+            int minW = minTabWidth + tabMargin;
+            int needed = std::max(w, minW);
+            if (widthSum + needed <= availWidth) {
+                widthSum += needed;
+                visibleCount = (int)i + 1;
+            } else {
+                break;
+            }
+        }
+        return (visibleCount == 0 && !widths.empty()) ? 1 : visibleCount;
+    };
+
+    int maxVisible = calcMaxVisible(preferredWidths);
+
+    // Ensure the currently active tab is always within the visible range [0, maxVisible - 1]
+    int activeIdx = -1;
     for (size_t i = 0; i < m_tabs.size(); ++i) {
-        int w = preferredWidths[i] + tabMargin;
-        int minW = minTabWidth + tabMargin;
-        // Use the larger of preferred and min to avoid undercount
-        int needed = std::max(w, minW);
-        if (currentWidthSum + needed <= availWidth) {
-            currentWidthSum += needed;
-            maxVisible = i + 1;
-        } else {
+        if (m_tabs[i]->IsActive()) {
+            activeIdx = (int)i;
             break;
         }
     }
-    if (maxVisible == 0) maxVisible = 1; // Ensure at least 1 tab is visible
+    if (activeIdx >= maxVisible && maxVisible > 0) {
+        ConnectInfo* activeTab = m_tabs[activeIdx];
+        int activeWidth = preferredWidths[activeIdx];
+        m_tabs.erase(m_tabs.begin() + activeIdx);
+        preferredWidths.erase(preferredWidths.begin() + activeIdx);
+
+        int insertPos = maxVisible - 1;
+        while (insertPos > 0) {
+            int sumBefore = 0;
+            for (int i = 0; i < insertPos; ++i) {
+                sumBefore += std::max(preferredWidths[i] + tabMargin, minTabWidth + tabMargin);
+            }
+            int activeNeeded = std::max(activeWidth + tabMargin, minTabWidth + tabMargin);
+            if (sumBefore + activeNeeded <= availWidth) {
+                break;
+            }
+            --insertPos;
+        }
+
+        m_tabs.insert(m_tabs.begin() + insertPos, activeTab);
+        preferredWidths.insert(preferredWidths.begin() + insertPos, activeWidth);
+        maxVisible = calcMaxVisible(preferredWidths);
+
+        // Resync sizer order after moving activeTab
+        for (auto tab : m_tabs) {
+            m_tabContainer->Detach(tab);
+        }
+        for (auto tab : m_tabs) {
+            m_tabContainer->Add(tab, 0, wxALIGN_BOTTOM | wxLEFT | wxRIGHT | wxTOP, 0);
+        }
+    }
 
     int totalTabs = (int)m_tabs.size();
     m_overflowIndices.clear();
@@ -945,4 +988,31 @@ int CustomTitleBar::FindNotebookPage(wxWindow* contentPanel) const {
         if (current == m_notebook) break;
     }
     return wxNOT_FOUND;
+}
+
+void CustomTitleBar::SelectNotebookPage(wxWindow* contentPanel) {
+    if (!contentPanel || !m_notebook) return;
+    int notebookIndex = FindNotebookPage(contentPanel);
+    if (notebookIndex == wxNOT_FOUND) return;
+
+    wxWindow* targetPage = m_notebook->GetPage(notebookIndex);
+    m_notebook->SetSelection(notebookIndex);
+
+    // Ensure only targetPage is visible among all children of m_notebook
+    wxWindowList& children = m_notebook->GetChildren();
+    for (wxWindowList::iterator it = children.begin(); it != children.end(); ++it) {
+        wxWindow* child = *it;
+        if (child && child != targetPage && child->IsShown()) {
+            child->Hide();
+        }
+    }
+
+    if (targetPage) {
+        targetPage->SetSize(m_notebook->GetClientSize());
+        if (!targetPage->IsShown()) {
+            targetPage->Show(true);
+        }
+        targetPage->Layout();
+        targetPage->Refresh();
+    }
 }

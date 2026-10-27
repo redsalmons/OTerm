@@ -8,7 +8,7 @@
     !define APP_ARCH "arm64"
 !endif
 !ifndef APP_VERSION
-    !define APP_VERSION "1.0.3"
+    !define APP_VERSION "1.0.5"
 !endif
 !ifndef STAGING_DIR
     !define STAGING_DIR "package_staging_${APP_ARCH}"

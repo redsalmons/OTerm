@@ -149,7 +149,10 @@ int SplitManager::FindMyNotebookPageIndex(wxSimplebook* notebook) const {
             const std::vector<ConnectInfo*>& tabs = titleBar->GetTabs();
             for (size_t i = 0; i < tabs.size(); ++i) {
                 if (tabs[i] && tabs[i]->GetSplitManager() == this) {
-                    return (int)i;
+                    int pageIdx = titleBar->FindNotebookPage(tabs[i]->GetContentPanel());
+                    if (pageIdx != wxNOT_FOUND) {
+                        return pageIdx;
+                    }
                 }
             }
         }
