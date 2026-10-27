@@ -87,3 +87,24 @@ Desktop.ini
 
 imgui
 libvterm
+# Local build and packaging artifacts
+.vcpkg-cache/
+build-arm64/
+build-x64/
+build-x86/
+package_output/
+package_staging/
+package_staging_arm64/
+package_staging_x64/
+package_staging_x86/
+third_party/
+*.dmg
+
+# Local release notes and packaging scripts
+RELEASE_NOTES_*.md
+build_installer.ps1
+package_iexpress.ps1
+package_makecab.ps1
+package_simple.ps1
+package_windows.ps1
+package_windows_staging.nsi
