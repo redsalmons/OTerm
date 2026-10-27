@@ -10,6 +10,15 @@
 #include <unordered_set>
 #include <mutex>
 #include <string>
+#include <cstdlib>
+#include "SSHManager.h"
+
+// Input context that declines to handle command/terminal keys. TSM
+// pre-dispatches keyDown events through [ctx handleEvent:] — returning NO
+// for these lets them reach menu shortcuts (Cmd+V), Ctrl combos and the
+// terminal's navigation keys instead of being swallowed by the IM session.
+@interface OTermInputContext : NSTextInputContext
+@end
 
 namespace {
 
@@ -24,6 +33,11 @@ struct IMEState {
 std::unordered_map<NSView*, IMEState> g_states;
 std::unordered_set<Class> g_patchedClasses;
 std::recursive_mutex g_mutex;
+
+bool KeyDebugOn() {
+    static const bool on = getenv("OTERM_KEY_DEBUG") != nullptr;
+    return on;
+}
 
 IMEState* StateFor(id self) {
     auto it = g_states.find((NSView*)self);
@@ -156,29 +170,28 @@ void PatchCanvasClass(Class cls) {
             imp_implementationWithBlock(^(id self, SEL selector) {}), "v@::");
     }
 
-    // inputContext override: report a context only while a non-ASCII-capable
-    // input source (i.e. an actual input method) is selected. With an ASCII
-    // keyboard layout selected we return nil — TSM then skips the pre-dispatch
-    // routing that would otherwise hand raw key events to the input method
-    // before sendEvent, keeping navigation keys safe.
+    // Stop unhandled key events from bubbling up the responder chain.
+    // Without this, NSWindow plays the system beep ("click") once per
+    // keystroke the canvas doesn't consume.
+    class_addMethod(cls, @selector(noResponderFor:),
+        imp_implementationWithBlock(^(id self, SEL selector) {
+            if (KeyDebugOn()) {
+                SSH_LOG("IME_DEBUG canvas noResponderFor: " << sel_getName(selector));
+            }
+        }), "v@::");
+
+    // inputContext override: always report a context. Navigation/command keys
+    // never reach it — the keyDown: patch sends them to the original handler
+    // first — while text keys are consumed by handleEvent:, which also stops
+    // the per-keystroke beep AppKit plays for a text client without a context.
     {
         SEL sel = @selector(inputContext);
         IMP impl = imp_implementationWithBlock(^NSTextInputContext*(id self) {
             IMEState* st = StateFor(self);
             if (!st) return (NSTextInputContext*)nil;
 
-            bool asciiCapable = true;
-            if (TISInputSourceRef src = TISCopyCurrentKeyboardInputSource()) {
-                if (CFBooleanRef b = (CFBooleanRef)TISGetInputSourceProperty(
-                        src, kTISPropertyInputSourceIsASCIICapable)) {
-                    asciiCapable = CFBooleanGetValue(b);
-                }
-                CFRelease(src);
-            }
-            if (asciiCapable) return (NSTextInputContext*)nil;
-
             if (!st->ctx) {
-                st->ctx = [[NSTextInputContext alloc] initWithClient:(NSView<NSTextInputClient>*)self];
+                st->ctx = [[OTermInputContext alloc] initWithClient:(NSView<NSTextInputClient>*)self];
             }
             return st->ctx;
         });
@@ -204,8 +217,27 @@ void PatchCanvasClass(Class cls) {
             IMP orig = method_getImplementation(m);
             IMP patched = imp_implementationWithBlock(^(id self, NSEvent* event) {
                 IMEState* st = StateFor(self);
-                const bool composing = st && st->hasMarked;
                 const unsigned short kc = event.keyCode;
+                const bool dbg = KeyDebugOn();
+
+                // hasMarked can go stale (source switched, IM ended the
+                // session without unmark). Verify the input source can
+                // actually compose before trusting it.
+                bool composing = st && st->hasMarked;
+                if (composing) {
+                    bool asciiCapable = true;
+                    if (TISInputSourceRef src = TISCopyCurrentKeyboardInputSource()) {
+                        if (CFBooleanRef b = (CFBooleanRef)TISGetInputSourceProperty(
+                                src, kTISPropertyInputSourceIsASCIICapable)) {
+                            asciiCapable = CFBooleanGetValue(b);
+                        }
+                        CFRelease(src);
+                    }
+                    if (asciiCapable) {
+                        st->hasMarked = false;
+                        composing = false;
+                    }
+                }
 
                 if (!composing) {
                     const NSEventModifierFlags mods =
@@ -214,13 +246,21 @@ void PatchCanvasClass(Class cls) {
                         (mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) != 0;
 
                     if (IsTerminalKeyCode(kc) || cmdOrCtrl) {
+                        if (dbg) SSH_LOG("IME_DEBUG keyDown kc=" << kc << " -> orig (terminal/cmd key)");
                         ((void(*)(id, SEL, NSEvent*))orig)(self, @selector(keyDown:), event);
                         return;
                     }
                 }
 
                 NSTextInputContext* ctx = [self inputContext];
-                if (ctx && [ctx handleEvent:event]) return;
+                if (ctx && [ctx handleEvent:event]) {
+                    if (dbg) SSH_LOG("IME_DEBUG keyDown kc=" << kc << " -> handled by inputContext");
+                    return;
+                }
+                // IM declined a key while we thought we were composing —
+                // clear stale marked state so subsequent keys flow normally.
+                if (st && st->hasMarked) st->hasMarked = false;
+                if (dbg) SSH_LOG("IME_DEBUG keyDown kc=" << kc << " -> orig (ctx=" << (ctx ? "yes" : "nil") << ")");
                 ((void(*)(id, SEL, NSEvent*))orig)(self, @selector(keyDown:), event);
             });
             method_setImplementation(m, patched);
@@ -230,10 +270,78 @@ void PatchCanvasClass(Class cls) {
 
 } // namespace
 
+@implementation OTermInputContext
+- (BOOL)handleEvent:(NSEvent*)event {
+    if ([event type] != NSEventTypeKeyDown) {
+        return [super handleEvent:event];
+    }
+
+    // Menu shortcuts and Ctrl combos always bypass the IM path.
+    const NSEventModifierFlags mods =
+        event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    if (mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) {
+        return NO;
+    }
+
+    bool asciiCapable = true;
+    if (TISInputSourceRef src = TISCopyCurrentKeyboardInputSource()) {
+        if (CFBooleanRef b = (CFBooleanRef)TISGetInputSourceProperty(
+                src, kTISPropertyInputSourceIsASCIICapable)) {
+            asciiCapable = CFBooleanGetValue(b);
+        }
+        CFRelease(src);
+    }
+    if (!asciiCapable) {
+        // A real input method is active — let TSM route (composition,
+        // candidate window, commit via insertText:).
+        return [super handleEvent:event];
+    }
+
+    // ASCII source: there is no IM to route through, and interpretKeyEvents:
+    // stops at our context (returning NO produces nothing, which is why
+    // reporting a plain NSTextInputContext killed ASCII input). Deliver the
+    // text ourselves — insertText: on the client generates wxEVT_CHAR.
+    // Keys that produce no characters (arrows, F-keys, nav keys) are declined
+    // so they fall back to the original keyDown path.
+    if (IsTerminalKeyCode(event.keyCode)) return NO;
+    NSString* chars = [event characters];
+    if (chars.length == 0) return NO;
+    unichar c = [chars characterAtIndex:0];
+    if (c < 0x20 || (c >= 0xE000 && c <= 0xF8FF) || c == 0x7F) return NO;
+    [(NSView<NSTextInputClient>*)self.client
+        insertText:chars replacementRange:NSMakeRange(NSNotFound, 0)];
+    return YES;
+}
+@end
+
+// Belt and braces: silence the "unhandled key" beep app-wide for keyDowns
+// that end up at a window (e.g. when the first responder is not the
+// canvas). Only keyDown: is swallowed; other selectors forward as usual.
+static void SilenceWindowKeyBeep() {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Method m = class_getInstanceMethod([NSWindow class], @selector(noResponderFor:));
+        if (!m) return;
+        IMP orig = method_getImplementation(m);
+        IMP patched = imp_implementationWithBlock(^(id self, SEL selector) {
+            if (selector == @selector(keyDown:)) {
+                if (KeyDebugOn()) {
+                    SSH_LOG("IME_DEBUG window noResponderFor keyDown (swallowed beep)");
+                }
+                return;
+            }
+            ((void(*)(id, SEL, SEL))orig)(self, @selector(noResponderFor:), selector);
+        });
+        method_setImplementation(m, patched);
+    });
+}
+
 void MacIME::Enable(wxWindow* canvas, const Handlers& handlers) {
     if (!canvas) return;
     NSView* view = (NSView*)canvas->GetHandle();
     if (!view) return;
+
+    SilenceWindowKeyBeep();
 
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
 

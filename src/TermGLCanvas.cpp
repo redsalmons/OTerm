@@ -1655,6 +1655,12 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
                 break;
 
+            case WXK_ESCAPE:
+
+                sequence = "\x1b";
+
+                break;
+
             case 'C':
 
             case WXK_CONTROL_C:
