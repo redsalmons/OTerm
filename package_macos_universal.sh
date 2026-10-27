@@ -168,12 +168,24 @@ if [ -f "OceanTerm.icns" ]; then cp OceanTerm.icns "$APP_BUNDLE/Contents/Resourc
 # lipo/install_name_tool leave each bundled dylib with an invalid signature,
 # and on arm64 an adhoc-modified dylib gets SIGKILL'd by cs_invalid_page at
 # load time. Re-sign every dylib, then the executable, then the bundle.
-echo "Signing..."
+# Keychain ACLs are bound to the signing identity. Ad-hoc signatures change
+# with every build, so macOS re-prompts for Keychain access after each
+# rebuild. Set OTERM_SIGN_IDENTITY to a stable certificate (e.g. a
+# self-signed "OceanTerm Dev" code-signing cert) to avoid that.
+SIGN_ID="${OTERM_SIGN_IDENTITY:--}"
+SIGN_REQ=()
+if [ "$SIGN_ID" = "-" ]; then
+    echo "WARNING: ad-hoc signing; Keychain may re-prompt after each rebuild (set OTERM_SIGN_IDENTITY)" >&2
+else
+    # Designated requirement independent of cdhash so updates keep Keychain trust
+    SIGN_REQ=(--requirements "=designated => identifier \"com.oceanterm.app\" and certificate leaf = H\"$(security find-certificate -c "$SIGN_ID" -Z | awk '/SHA-1/{print $NF}')\"")
+fi
+echo "Signing with identity: $SIGN_ID"
 for f in "$RES"/*.dylib; do
-    codesign --force --sign - --timestamp=none "$f" || { echo "ERROR: codesign failed for $f" >&2; exit 1; }
+    codesign --force --sign "$SIGN_ID" --timestamp=none "$f" || { echo "ERROR: codesign failed for $f" >&2; exit 1; }
 done
-codesign --force --sign - --timestamp=none "$APP_BUNDLE/Contents/MacOS/$APP_NAME" || { echo "ERROR: codesign failed for executable" >&2; exit 1; }
-codesign --force --deep --sign - --timestamp=none "$APP_BUNDLE" || { echo "ERROR: codesign failed for bundle" >&2; exit 1; }
+codesign --force --sign "$SIGN_ID" --timestamp=none --identifier com.oceanterm.app "${SIGN_REQ[@]}" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" || { echo "ERROR: codesign failed for executable" >&2; exit 1; }
+codesign --force --sign "$SIGN_ID" --timestamp=none --identifier com.oceanterm.app "${SIGN_REQ[@]}" "$APP_BUNDLE" || { echo "ERROR: codesign failed for bundle" >&2; exit 1; }
 codesign -v "$APP_BUNDLE" || { echo "ERROR: bundle verification failed" >&2; exit 1; }
 
 # ---------- DMG ----------

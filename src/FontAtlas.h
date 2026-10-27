@@ -3,6 +3,7 @@
 
 #include <wx/wx.h>
 #include <unordered_map>
+#include <string>
 
 struct CharMetrics {
     float u, v;      // UV coordinates in texture atlas
@@ -36,7 +37,9 @@ private:
     bool AddCharToAtlas(char32_t charCode);
     bool FindFreeSpace(int charWidth, int charHeight, int& outX, int& outY);
     void EvictLRU();
-    void UpdateTexture(int x, int y, int width, int height, unsigned char* data);
+    void UpdateTexture(int x, int y, int width, int height, const unsigned char* data);
+    bool UploadGlyph(char32_t charCode, int bitmapWidth, int bitmapHeight,
+                     int advance, int bearingX, const unsigned char* rgba);
     
     unsigned int m_textureID;
     int m_textureWidth;
@@ -44,6 +47,7 @@ private:
     int m_fontSize;
     int m_charHeight; // Actual character rendering height
     wxFont m_font;
+    std::string m_cacheKey; // "face#size" for the process-wide glyph cache
     
     std::unordered_map<char32_t, CharMetrics> m_charMetrics;
     CharMetrics m_asciiMetrics[128];

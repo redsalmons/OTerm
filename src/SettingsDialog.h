@@ -19,15 +19,8 @@ private:
     wxStaticText* m_fontDisplayText;
     wxSpinCtrl* m_fontSizeSpin;
 
-    wxTextCtrl* m_masterPassword1;
-    wxTextCtrl* m_masterPassword2;
-    wxButton* m_masterPasswordSaveButton;
-
     void OnOK(wxCommandEvent& event);
     void OnCancel(wxCommandEvent& event);
-    void OnSetMasterPassword(wxCommandEvent& event);
-    void OnSaveMasterPassword(wxCommandEvent& event);
-    void OnResetMasterPassword(wxCommandEvent& event);
     void OnFontButtonClicked(wxCommandEvent& event);
 
     wxDECLARE_EVENT_TABLE();

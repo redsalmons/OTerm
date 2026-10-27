@@ -43,7 +43,6 @@ add_executable(OceanTerm WIN32
     src/GlobalConfig.cpp
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
-    src/MasterPasswordDialog.cpp
     src/MonospaceFontDialog.cpp
     src/LocalTerminalManager.cpp
     src/TerminalPanel.cpp

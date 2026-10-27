@@ -1,5 +1,13 @@
 #import <Cocoa/Cocoa.h>
 
+extern "C" void MacGLClearDrawable(void* glContext) {
+    if (!glContext) return;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [(NSOpenGLContext*)glContext clearDrawable];
+#pragma clang diagnostic pop
+}
+
 extern "C" void SetupMacTitleBar(void* windowHandle) {
     @try {
         // wxWidgets on macOS returns the NSView, not NSWindow

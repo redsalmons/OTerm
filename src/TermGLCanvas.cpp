@@ -37,6 +37,10 @@
 #include "GlobalConfig.h"
 #include "MacIMEProxy.h"
 #include "MacKeyMonitor.h"
+#ifdef __WXMAC__
+#include "MacTitleBar.h"
+#endif
+#include <wx/bookctrl.h>
 #include "SSHTerminalContainer.h"
 #include "TranslationHelper.h"
 
@@ -472,6 +476,14 @@ void TermGLCanvas::ApplyFontZoom() {
 
     if (!m_glInitialized || !m_glContext) return;
 
+    // Binding the context to a hidden view re-attaches its GL surface on
+    // macOS; defer until this canvas is painted on screen.
+    if (!IsShownOnScreen()) {
+        m_fontZoomPending = true;
+        return;
+    }
+    m_fontZoomPending = false;
+
     m_glContext->SetCurrent(*this);
 
     if (CreateFontAtlas()) {
@@ -519,6 +531,30 @@ static void CollectTermCanvases(wxWindow* root, std::vector<TermGLCanvas*>& out)
 }
 
 
+
+void TermGLCanvas::ReleaseGLDrawable() {
+#ifdef __WXMAC__
+    if (m_glContext) {
+        MacGLClearDrawable(m_glContext->GetWXGLContext());
+    }
+#endif
+}
+
+void TermGLCanvas::SyncBookVisibility(wxBookCtrlBase* book) {
+    if (!book) return;
+    const int sel = book->GetSelection();
+    for (size_t i = 0; i < book->GetPageCount(); ++i) {
+        std::vector<TermGLCanvas*> canvases;
+        CollectTermCanvases(book->GetPage(i), canvases);
+        for (TermGLCanvas* canvas : canvases) {
+            if ((int)i == sel) {
+                canvas->Refresh();
+            } else {
+                canvas->ReleaseGLDrawable();
+            }
+        }
+    }
+}
 
 void TermGLCanvas::BroadcastFontZoom() {
 
@@ -918,7 +954,7 @@ void TermGLCanvas::UpdateIMEBoxPlacement() {
 
 void TermGLCanvas::Render() {
 
-    if (!m_glInitialized) return;
+    if (!m_glInitialized || !IsShownOnScreen()) return;
 
     
 
@@ -1308,7 +1344,7 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
     wxPaintDC dc(this);
 
-    
+    if (!IsShownOnScreen()) return;
 
     // Initialize OpenGL on first paint
 
@@ -1316,6 +1352,10 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
         InitializeGL();
 
+    }
+
+    if (m_fontZoomPending) {
+        ApplyFontZoom();
     }
 
     
@@ -1360,7 +1400,9 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 
     // so viewport should be 1:1 with window pixel coordinates
 
-    if (m_glInitialized && m_glContext) {
+    // Skip for hidden canvases: SetCurrent would bind the context to a hidden
+    // view (macOS). Render() sets the viewport again anyway.
+    if (m_glInitialized && m_glContext && IsShownOnScreen()) {
 
         m_glContext->SetCurrent(*this);
 
@@ -1610,6 +1652,12 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
             case WXK_TAB:
 
                 sequence = "\t";
+
+                break;
+
+            case WXK_ESCAPE:
+
+                sequence = "\x1b";
 
                 break;
 

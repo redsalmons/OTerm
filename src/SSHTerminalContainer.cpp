@@ -471,8 +471,8 @@ void SSHTerminalContainer::PerformAuthentication() {
         m_authRetryCount = 0;
         // Persist the working password to the vault so file transfer and
         // future sessions can authenticate without re-prompting
-        if (!password.empty() && !m_deviceConfig.id.empty()) {
-            DeviceConfig::StoreCredential(m_deviceConfig.id, password);
+        if (m_deviceConfig.auth_method != "key") {
+            DeviceConfig::SaveLoginCredentials(m_deviceConfig.id, username, password);
         }
         m_sshState = SSH_CHANNEL_OPENING;
         OpenSSHChannel();

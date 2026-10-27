@@ -6,9 +6,11 @@
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 #include <vector>
+#include <algorithm>
 #include <cstdint>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
+#include <openssl/rand.h>
 #include <cstring>
 #include <random>
 
@@ -88,11 +90,10 @@ static std::string derive_key_v2(const std::string& password, const unsigned cha
 }
 
 static void fill_random(unsigned char* buf, size_t n) {
+    if (RAND_bytes(buf, (int)n) == 1) return;
     std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
     for (size_t i = 0; i < n; i++) {
-        buf[i] = static_cast<unsigned char>(dis(gen));
+        buf[i] = static_cast<unsigned char>(rd());
     }
 }
 
@@ -278,10 +279,12 @@ static bool KeychainStore(const std::string& account, const std::string& secret)
     return status == errSecSuccess;
 }
 
-static std::string KeychainLoad(const std::string& account) {
+enum class VaultReadStatus { Ok, NotFound, Error };
+
+static VaultReadStatus KeychainLoad(const std::string& account, std::string& out) {
     CFStringRef service = CFSTR("com.oceanterm.app");
     CFStringRef acct = CFStringCreateWithCString(nullptr, account.c_str(), kCFStringEncodingUTF8);
-    if (!acct) return "";
+    if (!acct) return VaultReadStatus::Error;
 
     const void* keys[] = { kSecClass, kSecAttrService, kSecAttrAccount,
                            kSecReturnData, kSecMatchLimit };
@@ -298,20 +301,20 @@ static std::string KeychainLoad(const std::string& account) {
 
     if (status == errSecSuccess && result) {
         CFDataRef data = (CFDataRef)result;
-        std::string secret((const char*)CFDataGetBytePtr(data), CFDataGetLength(data));
+        out.assign((const char*)CFDataGetBytePtr(data), CFDataGetLength(data));
         CFRelease(result);
-        return secret;
+        return VaultReadStatus::Ok;
     }
     if (result) CFRelease(result);
-    return "";
+    return status == errSecItemNotFound ? VaultReadStatus::NotFound : VaultReadStatus::Error;
 }
 
 // Single "vault" item holding a JSON map of all credentials — one ACL, so
 // the system authorization prompt appears at most once per app signature.
 static const char* kVaultAccount = "vault";
 
-static std::string VaultReadBlob() {
-    return KeychainLoad(kVaultAccount);
+static VaultReadStatus VaultReadBlob(std::string& out) {
+    return KeychainLoad(kVaultAccount, out);
 }
 
 static bool VaultWriteBlob(const std::string& blob) {
@@ -327,22 +330,24 @@ static std::string VaultFilePath() {
     return GetConfigDir().ToStdString() + "/vault.bin";
 }
 
-static std::string VaultReadBlob() {
+enum class VaultReadStatus { Ok, NotFound, Error };
+
+static VaultReadStatus VaultReadBlob(std::string& out) {
     std::ifstream file(VaultFilePath(), std::ios::binary);
-    if (!file.is_open()) return "";
+    if (!file.is_open()) return VaultReadStatus::NotFound;
     std::string enc((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    if (enc.empty()) return "";
+    if (enc.empty()) return VaultReadStatus::NotFound;
 
     DATA_BLOB inBlob;
     inBlob.pbData = (BYTE*)enc.data();
     inBlob.cbData = (DWORD)enc.size();
     DATA_BLOB outBlob;
     if (!CryptUnprotectData(&inBlob, nullptr, nullptr, nullptr, nullptr, 0, &outBlob)) {
-        return "";
+        return VaultReadStatus::Error;
     }
-    std::string plain((char*)outBlob.pbData, outBlob.cbData);
+    out.assign((char*)outBlob.pbData, outBlob.cbData);
     LocalFree(outBlob.pbData);
-    return plain;
+    return VaultReadStatus::Ok;
 }
 
 static bool VaultWriteBlob(const std::string& blob) {
@@ -360,18 +365,41 @@ static bool VaultWriteBlob(const std::string& blob) {
 #endif // _WIN32
 
 #if defined(__APPLE__) || defined(_WIN32)
-static json LoadVault() {
-    std::string blob = VaultReadBlob();
-    if (blob.empty()) return json::object();
-    try {
-        return json::parse(blob);
-    } catch (...) {
-        return json::object();
+// The vault is read from the backing store once per process and cached, so
+// the Keychain is touched (and may prompt) at most once per launch. If the
+// read fails for any reason other than "not found", the vault is marked
+// unavailable and never written, so an existing vault is never clobbered.
+static json s_vaultCache = json::object();
+static bool s_vaultLoaded = false;
+static bool s_vaultAvailable = false;
+
+static void EnsureVaultLoaded() {
+    if (s_vaultLoaded) return;
+    std::string blob;
+    VaultReadStatus status = VaultReadBlob(blob);
+    s_vaultLoaded = true;
+    s_vaultAvailable = (status != VaultReadStatus::Error);
+    if (status == VaultReadStatus::Ok && !blob.empty()) {
+        try {
+            s_vaultCache = json::parse(blob);
+            if (!s_vaultCache.is_object()) s_vaultAvailable = false;
+        } catch (...) {
+            s_vaultAvailable = false;
+        }
     }
 }
 
+static json LoadVault() {
+    EnsureVaultLoaded();
+    return s_vaultAvailable ? s_vaultCache : json::object();
+}
+
 static bool StoreVault(const json& vault) {
-    return VaultWriteBlob(vault.dump());
+    EnsureVaultLoaded();
+    if (!s_vaultAvailable) return false;
+    if (!VaultWriteBlob(vault.dump())) return false;
+    s_vaultCache = vault;
+    return true;
 }
 #endif
 
@@ -386,6 +414,12 @@ static std::string EncodeStoredPassword(const std::string& deviceId,
                                         const std::string& password,
                                         const std::string& masterPassword) {
 #if defined(__APPLE__) || defined(_WIN32)
+    EnsureVaultLoaded();
+    if (!s_vaultAvailable) {
+        // Vault unreadable this session: keep pointing at it rather than
+        // dropping a password that may still be stored there.
+        return password.empty() ? "" : kKeychainMarker;
+    }
     if (!password.empty()) {
         json vault = LoadVault();
         vault[deviceId] = password;
@@ -474,7 +508,7 @@ std::vector<DeviceConfig> DeviceConfig::LoadFromFile() {
         }
 
 #if defined(__APPLE__) || defined(_WIN32)
-        if (migratedToVault) {
+        if (migratedToVault && IsCredentialStoreAvailable()) {
             SaveToFile(devices);
         }
 #endif
@@ -515,6 +549,28 @@ void DeviceConfig::SaveToFile(const std::vector<DeviceConfig>& devices) {
     GlobalConfig::WriteFileAtomic(configPath.ToStdString(), data.dump(2));
 }
 
+bool DeviceConfig::SaveLoginCredentials(const std::string& deviceId,
+                                        const std::string& username,
+                                        const std::string& password) {
+    if (deviceId.empty() || password.empty()) return false;
+    std::vector<DeviceConfig> devices = LoadFromFile();
+    auto it = std::find_if(devices.begin(), devices.end(),
+        [&deviceId](const DeviceConfig& d) { return d.id == deviceId; });
+    if (it == devices.end()) return false;
+
+    bool changed = false;
+    if (it->password != password) {
+        it->password = password;
+        changed = true;
+    }
+    if (it->username.empty() && !username.empty()) {
+        it->username = username;
+        changed = true;
+    }
+    if (changed) SaveToFile(devices);
+    return true;
+}
+
 bool DeviceConfig::StoreCredential(const std::string& key, const std::string& secret) {
 #if defined(__APPLE__) || defined(_WIN32)
     json vault = LoadVault();
@@ -522,6 +578,15 @@ bool DeviceConfig::StoreCredential(const std::string& key, const std::string& se
     return StoreVault(vault);
 #else
     (void)key; (void)secret;
+    return false;
+#endif
+}
+
+bool DeviceConfig::IsCredentialStoreAvailable() {
+#if defined(__APPLE__) || defined(_WIN32)
+    EnsureVaultLoaded();
+    return s_vaultAvailable;
+#else
     return false;
 #endif
 }
@@ -545,51 +610,4 @@ void DeviceConfig::DeleteCredential(const std::string& deviceId) {
 #else
     (void)deviceId;
 #endif
-}
-
-bool DeviceConfig::ReencryptWithNewPassword(const std::string& oldPassword, const std::string& newPassword) {
-    wxString configPath = GetConfigPath();
-
-    std::ifstream file(configPath.ToStdString());
-    if (!file.is_open()) {
-        return false;
-    }
-
-    try {
-        json data = json::parse(file);
-        file.close();
-
-        // Process each device
-        for (auto& item : data["root"]) {
-            if (item.contains("password") && !item["password"].is_null()) {
-                std::string encrypted_password = item["password"].get<std::string>();
-
-#if defined(__APPLE__) || defined(_WIN32)
-                if (encrypted_password == kKeychainMarker) {
-                    continue; // vault-managed, no re-encryption needed
-                }
-#endif
-
-                // Decrypt with old password
-                std::string plaintext = decrypt_aes(encrypted_password, oldPassword);
-                if (plaintext.empty()) {
-                    // If decryption fails, assume it's not encrypted yet
-                    plaintext = encrypted_password;
-                }
-
-                // Encrypt with new password
-                std::string new_encrypted = encrypt_aes(plaintext, newPassword);
-                if (new_encrypted.empty()) {
-                    return false;
-                }
-
-                item["password"] = new_encrypted;
-            }
-        }
-
-        // Save the re-encrypted data
-        return GlobalConfig::WriteFileAtomic(configPath.ToStdString(), data.dump(2));
-    } catch (const std::exception& e) {
-        return false;
-    }
 }
