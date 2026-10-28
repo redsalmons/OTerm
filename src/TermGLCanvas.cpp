@@ -2679,21 +2679,13 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
               << " alt=" << event.AltDown()
               << " shift=" << event.ShiftDown());
 
-    // Handle Ctrl+C / Cmd+C on macOS
-    bool isControlC = (event.ControlDown() || event.RawControlDown()) && (keycode == 'C' || keycode == WXK_CONTROL_C);
-    bool isCmdC = event.CmdDown() && keycode == 'C';
-    if (isControlC || isCmdC) {
-        SSH_LOG("OnProxyKeyDown: Ctrl/Cmd+C detected, sending ETX");
-        TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-        if (panel && panel->IsLocalTerminal()) {
-            panel->ClearInputBuffer();
-        }
-        std::string key_seq = "\x03";
-        if (m_imeCallback) {
-            m_imeCallback(key_seq.c_str(), key_seq.length());
-        } else if (key_callback_) {
-            key_callback_(key_seq.c_str(), key_seq.length());
-        }
+    // Ctrl+C (copy selection / send ETX) and Ctrl+V (paste) have full
+    // handling in OnKeyDown; delegate so the proxy-box focus path matches.
+    // (The proxy box is never focused on macOS, so this only affects
+    // Windows/Linux.)
+    if ((event.ControlDown() || event.RawControlDown() || event.CmdDown()) &&
+        (keycode == 'C' || keycode == WXK_CONTROL_C || keycode == 'V')) {
+        OnKeyDown(event);
         return;
     }
 
