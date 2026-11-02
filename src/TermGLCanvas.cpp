@@ -158,6 +158,10 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
     Bind(wxEVT_KILL_FOCUS, &TermGLCanvas::OnKillFocus, this);
 
+    Bind(wxEVT_MENU, &TermGLCanvas::OnCopy, this, ID_CTX_COPY);
+
+    Bind(wxEVT_MENU, &TermGLCanvas::OnPaste, this, ID_CTX_PASTE);
+
     Bind(wxEVT_MENU, &TermGLCanvas::OnHorizontalSplit, this, ID_HORIZONTAL_SPLIT);
 
     Bind(wxEVT_MENU, &TermGLCanvas::OnVerticalSplit, this, ID_VERTICAL_SPLIT);
@@ -372,14 +376,15 @@ bool TermGLCanvas::HandleMacRawKey(unsigned short keyCode, unsigned long modifie
     }
 
     const bool ctrl = (modifierFlags & (1UL << 18)) != 0; // NSEventModifierFlagControl
+    const bool inAlt = IsInAlternateScreen();
     const char* seq = nullptr;
 
     switch (keyCode) {
 
         case 126: seq = "\x1b[A";  break; // Up
         case 125: seq = "\x1b[B";  break; // Down
-        case 124: seq = "\x1bOC";  break; // Right
-        case 123: seq = "\x1bOD";  break; // Left
+        case 124: seq = inAlt ? "\x1bOC" : "\x1b[C";  break; // Right
+        case 123: seq = inAlt ? "\x1bOD" : "\x1b[D";  break; // Left
         case 116: seq = "\x1b[5~"; break; // PageUp
         case 121: seq = "\x1b[6~"; break; // PageDown
         case 117: seq = "\x1b[3~"; break; // Forward delete
@@ -1459,64 +1464,7 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
     if (event.ControlDown() && event.GetKeyCode() == 'V') {
 
-        if (wxTheClipboard->Open()) {
-
-            if (wxTheClipboard->IsSupported(wxDF_TEXT)) {
-
-                wxTextDataObject data;
-
-                wxTheClipboard->GetData(data);
-
-                wxString text = data.GetText();
-
-                wxTheClipboard->Close();
-
-
-
-                // Check if text length is <= 255
-
-                if (text.length() <= 255) {
-
-                    // Convert to UTF-8 and send to terminal
-
-                    wxScopedCharBuffer utf8_buf = text.ToUTF8();
-
-                    if (key_callback_) {
-
-                        key_callback_(utf8_buf.data(), static_cast<int>(strlen(utf8_buf.data())));
-
-                        SSH_LOG("Pasted " << strlen(utf8_buf.data()) << " characters from clipboard");
-
-                        // Update input buffer for local/SSH terminals for command interception
-                        TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-                        if (panel) {
-                            std::string pasted_str(utf8_buf.data(), strlen(utf8_buf.data()));
-                            if (panel->IsLocalTerminal()) {
-                                panel->AppendToInputBuffer(pasted_str);
-                                SSH_LOG("Pasted to input buffer: '" << pasted_str << "', buffer now='" << panel->GetInputBuffer() << "'");
-                            } else {
-                                m_sshInputBuffer += pasted_str;
-                                SSH_LOG("Pasted to SSH input buffer: '" << pasted_str << "', m_sshInputBuffer now='" << m_sshInputBuffer << "'");
-                            }
-                        }
-
-                    }
-
-                } else {
-
-                    SSH_LOG("Clipboard text too long (" << text.length() << " > 255), skipping paste");
-
-                }
-
-            } else {
-
-                wxTheClipboard->Close();
-
-                SSH_LOG("Clipboard does not contain text, skipping paste");
-
-            }
-
-        }
+        PasteFromClipboard();
 
         return;
 
@@ -1594,13 +1542,13 @@ void TermGLCanvas::OnKeyDown(wxKeyEvent& event) {
 
             case WXK_RIGHT:
 
-                sequence = "\x1bOC";
+                sequence = IsInAlternateScreen() ? "\x1bOC" : "\x1b[C";
 
                 break;
 
             case WXK_LEFT:
 
-                sequence = "\x1bOD";
+                sequence = IsInAlternateScreen() ? "\x1bOD" : "\x1b[D";
 
                 break;
 
@@ -1814,14 +1762,14 @@ void TermGLCanvas::OnChar(wxKeyEvent& event) {
 
 void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
-    // When the IME proxy box holds focus, the native text view swallows
+    // When the IME proxy box or canvas holds focus, the native text view /
+    // parent wxPanel (wxTAB_TRAVERSAL) swallows navigation keys (arrows,
+    // Home/End, PageUp/Down, Delete, Escape) before a wxEVT_KEY_DOWN is
+    // generated. Deliver them from the hook stage instead.
+    wxWindow* focused = wxWindow::FindFocus();
+    if (focused == this || (m_imeInputBox && focused == m_imeInputBox)) {
 
-    // navigation keys (arrows, Home/End, PageUp/Down, Delete, Escape) before a
-
-    // wxEVT_KEY_DOWN is generated. Deliver them from the hook stage instead.
-
-    if (m_imeInputBox && wxWindow::FindFocus() == m_imeInputBox) {
-
+        const bool inAlt = IsInAlternateScreen();
         const char* seq = nullptr;
 
         switch (event.GetKeyCode()) {
@@ -1830,9 +1778,9 @@ void TermGLCanvas::OnCharHook(wxKeyEvent& event) {
 
             case WXK_DOWN: seq = "\x1b[B"; break;
 
-            case WXK_RIGHT: seq = "\x1bOC"; break;
+            case WXK_RIGHT: seq = inAlt ? "\x1bOC" : "\x1b[C"; break;
 
-            case WXK_LEFT: seq = "\x1bOD"; break;
+            case WXK_LEFT: seq = inAlt ? "\x1bOD" : "\x1b[D"; break;
 
             case WXK_PAGEUP: seq = "\x1b[5~"; break;
 
@@ -2077,6 +2025,10 @@ void TermGLCanvas::OnMouseLeftUp(wxMouseEvent& event) {
 
     }
 
+#ifdef _WIN32
+    ShowIMEInputBox();
+#endif
+
     event.Skip();
 
 }
@@ -2125,18 +2077,25 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
 
 void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
 
-    // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
-    // if (f.is_open()) f << "[CANVAS] OnMouseRightDown called" << std::endl;
-    
-    // Copy selection to clipboard on right click
+    // Only pop up the context menu on right-button press (ignore RIGHT_UP if bound)
+    if (event.GetEventType() == wxEVT_RIGHT_UP) {
+        event.Skip();
+        return;
+    }
 
-    CopySelectionToClipboard();
+    const bool hasSelection =
+        (m_selection_start_row != m_selection_end_row ||
+         m_selection_start_col != m_selection_end_col);
 
-
-
-    // Show context menu with split options
-
+    // Show context menu with copy/paste and split options
     wxMenu menu;
+
+    wxMenuItem* copyItem = menu.Append(ID_CTX_COPY, TranslationHelper::Tr("copy"));
+    copyItem->Enable(hasSelection);
+
+    menu.Append(ID_CTX_PASTE, TranslationHelper::Tr("paste"));
+
+    menu.AppendSeparator();
 
     menu.Append(ID_HORIZONTAL_SPLIT, TranslationHelper::Tr("horizontalSplit"));
 
@@ -2146,22 +2105,22 @@ void TermGLCanvas::OnMouseRightDown(wxMouseEvent& event) {
 
     menu.Append(ID_CLOSE_PANEL, TranslationHelper::Tr("closePanel"));
 
-    
+    PopupMenu(&menu, event.GetPosition());
 
-    // if (f.is_open()) f << "[CANVAS] Showing context menu at position: " << event.GetPosition().x << "," << event.GetPosition().y << std::endl;
-
-    // if (f.is_open()) f << "[CANVAS] ID_HORIZONTAL_SPLIT=" << ID_HORIZONTAL_SPLIT << " ID_VERTICAL_SPLIT=" << ID_VERTICAL_SPLIT << std::endl;
-
-    int result = PopupMenu(&menu, event.GetPosition());
-
-    // if (f.is_open()) f << "[CANVAS] PopupMenu returned with result: " << result << std::endl;
-
-    
-
-    // Skip to let parent handle it too
+#ifdef _WIN32
+    ShowIMEInputBox();
+#endif
 
     event.Skip();
 
+}
+
+void TermGLCanvas::OnCopy(wxCommandEvent& event) {
+    CopySelectionToClipboard();
+}
+
+void TermGLCanvas::OnPaste(wxCommandEvent& event) {
+    PasteFromClipboard();
 }
 
 
@@ -2390,6 +2349,53 @@ void TermGLCanvas::CopySelectionToClipboard() {
 
     Refresh();
 
+}
+
+void TermGLCanvas::PasteFromClipboard() {
+    if (wxTheClipboard->Open()) {
+        if (wxTheClipboard->IsSupported(wxDF_TEXT)) {
+            wxTextDataObject data;
+            wxTheClipboard->GetData(data);
+            wxString text = data.GetText();
+            wxTheClipboard->Close();
+
+            // Check if text length is <= 255
+            if (text.length() <= 255) {
+                wxScopedCharBuffer utf8_buf = text.ToUTF8();
+                if (key_callback_ && utf8_buf.data()) {
+                    size_t len = strlen(utf8_buf.data());
+                    key_callback_(utf8_buf.data(), static_cast<int>(len));
+                    SSH_LOG("Pasted " << len << " characters from clipboard");
+
+                    // Update input buffer for local/SSH terminals for command interception
+                    TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+                    if (panel) {
+                        std::string pasted_str(utf8_buf.data(), len);
+                        if (panel->IsLocalTerminal()) {
+                            panel->AppendToInputBuffer(pasted_str);
+                            SSH_LOG("Pasted to input buffer: '" << pasted_str << "', buffer now='" << panel->GetInputBuffer() << "'");
+                        } else {
+                            m_sshInputBuffer += pasted_str;
+                            SSH_LOG("Pasted to SSH input buffer: '" << pasted_str << "', m_sshInputBuffer now='" << m_sshInputBuffer << "'");
+                        }
+                    }
+                }
+            } else {
+                SSH_LOG("Clipboard text too long (" << text.length() << " > 255), skipping paste");
+            }
+        } else {
+            wxTheClipboard->Close();
+            SSH_LOG("Clipboard does not contain text, skipping paste");
+        }
+    }
+}
+
+bool TermGLCanvas::IsInAlternateScreen() const {
+    TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
+    if (panel && panel->GetTerminalContainer()) {
+        return panel->GetTerminalContainer()->IsInAlternateScreen();
+    }
+    return false;
 }
 
 
@@ -2679,21 +2685,13 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
               << " alt=" << event.AltDown()
               << " shift=" << event.ShiftDown());
 
-    // Handle Ctrl+C / Cmd+C on macOS
-    bool isControlC = (event.ControlDown() || event.RawControlDown()) && (keycode == 'C' || keycode == WXK_CONTROL_C);
-    bool isCmdC = event.CmdDown() && keycode == 'C';
-    if (isControlC || isCmdC) {
-        SSH_LOG("OnProxyKeyDown: Ctrl/Cmd+C detected, sending ETX");
-        TerminalPanel* panel = wxDynamicCast(GetParent(), TerminalPanel);
-        if (panel && panel->IsLocalTerminal()) {
-            panel->ClearInputBuffer();
-        }
-        std::string key_seq = "\x03";
-        if (m_imeCallback) {
-            m_imeCallback(key_seq.c_str(), key_seq.length());
-        } else if (key_callback_) {
-            key_callback_(key_seq.c_str(), key_seq.length());
-        }
+    // Ctrl+C (copy selection / send ETX) and Ctrl+V (paste) have full
+    // handling in OnKeyDown; delegate so the proxy-box focus path matches.
+    // (The proxy box is never focused on macOS, so this only affects
+    // Windows/Linux.)
+    if ((event.ControlDown() || event.RawControlDown() || event.CmdDown()) &&
+        (keycode == 'C' || keycode == WXK_CONTROL_C || keycode == 'V')) {
+        OnKeyDown(event);
         return;
     }
 
@@ -2789,13 +2787,13 @@ void TermGLCanvas::OnProxyKeyDown(wxKeyEvent& event) {
 
             case WXK_LEFT:
 
-                key_seq = "\x1bOD";
+                key_seq = IsInAlternateScreen() ? "\x1bOD" : "\x1b[D";
 
                 break;
 
             case WXK_RIGHT:
 
-                key_seq = "\x1bOC";
+                key_seq = IsInAlternateScreen() ? "\x1bOC" : "\x1b[C";
 
                 break;
 

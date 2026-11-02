@@ -422,10 +422,8 @@ ConnectInfo* CustomTitleBar::AddTab(const wxString& label, wxWindow* contentPane
     LayoutTabs();
     Refresh();
 
-    int notebookIndex = FindNotebookPage(contentPanel);
-    if (notebookIndex != wxNOT_FOUND) {
-        m_notebook->SetSelection(notebookIndex);
-    }
+    // Select the notebook page (also hides stray non-page children)
+    SelectNotebookPage(contentPanel);
 
     return newTab;
 }
@@ -513,10 +511,8 @@ void CustomTitleBar::OnOverflowTabClicked(wxCommandEvent& event) {
     selectedTab->SetActive(true);
 
     // Switch notebook to the selected tab's content panel
-    int notebookIndex = FindNotebookPage(selectedTab->GetContentPanel());
-    if (notebookIndex != wxNOT_FOUND) {
-        m_notebook->SetSelection(notebookIndex);
-    }
+    // (also hides stray non-page children that may cover all pages)
+    SelectNotebookPage(selectedTab->GetContentPanel());
 
     // Show IME input box for new active tab (terminal tabs)
     TermGLCanvas* canvas = selectedTab->GetCanvas();
@@ -585,17 +581,9 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
             }
 
             if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
-                wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
-                int nextNotebookPage = FindNotebookPage(nextContentPanel);
-                if (nextNotebookPage != wxNOT_FOUND) {
-                    m_notebook->SetSelection(nextNotebookPage);
-                }
+                SelectNotebookPage(m_tabs[nextTabIndex]->GetContentPanel());
             } else if (m_tabs.size() > 0) {
-                wxWindow* homeContentPanel = m_tabs[0]->GetContentPanel();
-                int homeNotebookPage = FindNotebookPage(homeContentPanel);
-                if (homeNotebookPage != wxNOT_FOUND) {
-                    m_notebook->SetSelection(homeNotebookPage);
-                }
+                SelectNotebookPage(m_tabs[0]->GetContentPanel());
             }
         }
 
@@ -614,11 +602,16 @@ void CustomTitleBar::CloseTab(wxWindow* contentPanel) {
         if (contentPanel) {
             TerminalPanel* terminalPanel = dynamic_cast<TerminalPanel*>(contentPanel);
             if (terminalPanel) {
+                terminalPanel->Shutdown();
                 TermGLCanvas* canvas = terminalPanel->GetCanvas();
                 if (canvas) {
                     canvas->StopThreads();
                 }
             }
+            // Destroy the panel — RemovePage only detaches it from the book,
+            // leaving it as a hidden child of m_notebook (HWND/GL leak that
+            // accumulates over time and eventually breaks page switching)
+            contentPanel->Destroy();
         }
         
         m_tabs.erase(m_tabs.begin() + tabIndex);
@@ -674,17 +667,9 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
             }
 
             if (nextTabIndex != -1 && nextTabIndex < (int)m_tabs.size()) {
-                wxWindow* nextContentPanel = m_tabs[nextTabIndex]->GetContentPanel();
-                int nextNotebookPage = FindNotebookPage(nextContentPanel);
-                if (nextNotebookPage != wxNOT_FOUND) {
-                    m_notebook->SetSelection(nextNotebookPage);
-                }
+                SelectNotebookPage(m_tabs[nextTabIndex]->GetContentPanel());
             } else if (m_tabs.size() > 0) {
-                wxWindow* homeContentPanel = m_tabs[0]->GetContentPanel();
-                int homeNotebookPage = FindNotebookPage(homeContentPanel);
-                if (homeNotebookPage != wxNOT_FOUND) {
-                    m_notebook->SetSelection(homeNotebookPage);
-                }
+                SelectNotebookPage(m_tabs[0]->GetContentPanel());
             }
         }
 
@@ -701,11 +686,16 @@ void CustomTitleBar::OnTabClose(wxCommandEvent& event) {
         if (tabContentPanel) {
             TerminalPanel* terminalPanel = dynamic_cast<TerminalPanel*>(tabContentPanel);
             if (terminalPanel) {
+                terminalPanel->Shutdown();
                 TermGLCanvas* canvas = terminalPanel->GetCanvas();
                 if (canvas) {
                     canvas->StopThreads();
                 }
             }
+            // Destroy the panel — RemovePage only detaches it from the book,
+            // leaving it as a hidden child of m_notebook (HWND/GL leak that
+            // accumulates over time and eventually breaks page switching)
+            tabContentPanel->Destroy();
         }
 
         m_tabs.erase(m_tabs.begin() + tabIndex);
@@ -724,11 +714,11 @@ void CustomTitleBar::OnTabSelected(wxCommandEvent& event) {
     ConnectInfo* tab = (ConnectInfo*)event.GetEventObject();
     for (size_t i = 0; i < m_tabs.size(); ++i) {
         if (m_tabs[i] == tab) {
-            // Find the notebook page index for this tab's content panel
-            int notebookIndex = FindNotebookPage(m_tabs[i]->GetContentPanel());
-            if (notebookIndex != wxNOT_FOUND) {
-                m_notebook->SetSelection(notebookIndex);
-            }
+            // Select the notebook page for this tab's content panel
+            // (SelectNotebookPage also hides stray non-page children that
+            // would otherwise stay on top of every page and make tab
+            // switching appear broken)
+            SelectNotebookPage(m_tabs[i]->GetContentPanel());
             for (auto t : m_tabs) t->SetActive(false);
             tab->SetActive(true);
 
