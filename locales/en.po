@@ -297,6 +297,12 @@ msgid "add"
 msgstr "Open"
 
 # Terminal Context Menu
+msgid "copy"
+msgstr "Copy"
+
+msgid "paste"
+msgstr "Paste"
+
 msgid "horizontalSplit"
 msgstr "Horizontal Split"
 

@@ -297,6 +297,12 @@ msgid "add"
 msgstr "打开"
 
 # Terminal Context Menu
+msgid "copy"
+msgstr "复制"
+
+msgid "paste"
+msgstr "粘贴"
+
 msgid "horizontalSplit"
 msgstr "水平分割"
 

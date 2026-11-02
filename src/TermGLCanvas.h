@@ -134,6 +134,10 @@ private:
 
     void OnMouseRightDown(wxMouseEvent& event);
 
+    void OnCopy(wxCommandEvent& event);
+
+    void OnPaste(wxCommandEvent& event);
+
     void OnHorizontalSplit(wxCommandEvent& event);
 
     void OnVerticalSplit(wxCommandEvent& event);
@@ -157,6 +161,10 @@ private:
     void BroadcastFontZoom();
 
     void CopySelectionToClipboard();
+
+    void PasteFromClipboard();
+
+    bool IsInAlternateScreen() const;
 
     
 
@@ -300,23 +308,20 @@ public:
     bool m_threadsStopped; // Track if StopThreads has been called
     DeviceConfig m_deviceConfig;
 
-
-
     enum {
 
         ID_HORIZONTAL_SPLIT = wxID_HIGHEST + 500,
 
         ID_VERTICAL_SPLIT,
 
-        ID_CLOSE_PANEL
+        ID_CLOSE_PANEL,
+
+        ID_CTX_COPY,
+
+        ID_CTX_PASTE
 
     };
 
-
-
 };
 
-
-
 #endif
-
