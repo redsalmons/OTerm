@@ -65,6 +65,10 @@ private:
     void Succeed();
     void HandleDirections();
 
+    std::string TaskTag() const;
+    std::string FormatSessionError() const;
+    static const char* SftpFxErrorName(unsigned long fxErr);
+
 #ifndef _WIN32
     // wxEventLoopSourceHandler overrides
     void OnReadWaiting() override;
@@ -80,6 +84,7 @@ private:
         HANDSHAKE,
         AUTHENTICATING,
         SFTP_INIT,
+        SCP_OPEN,       // SCP fallback for servers without an sftp subsystem
         
         // Command / List Specific
         OPEN_CHANNEL,
@@ -90,12 +95,15 @@ private:
         // File Transfer Specific
         OPEN_FILE,
         TRANSFERRING,
+        SCP_CLOSE,      // orderly shutdown of an SCP channel
         CLOSE_FILE,
         
         CLEANUP,
         FINISHED,
         FAILED
     };
+
+    static const char* StateName(SFTPState state);
 
     wxEvtHandler* m_handler;
     DeviceConfig m_deviceConfig;
@@ -114,7 +122,14 @@ private:
     FILE* m_localFile;
     long long m_bytesTransferred;
     int m_lastReportedProgress = -1;
+    bool m_loggedAuthMethods = false;
+    std::string m_cmdStderr;
     std::string m_cmdOutput;
+
+    // SCP fallback (servers without an sftp subsystem, e.g. BusyBox/Dropbear)
+    bool m_useScp = false;
+    libssh2_struct_stat m_scpStat = {};
+    int m_scpCloseStep = 0;
     std::vector<char> m_cacheBuffer; // For uploading partial block management
     
     wxTimer m_timer;
