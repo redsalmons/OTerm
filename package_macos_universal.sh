@@ -45,12 +45,12 @@ lipo -create "$ARM64_BIN" "$X86_BIN" -output "$APP_BUNDLE/Contents/MacOS/$APP_NA
 # names while source-built x86_64 wx uses -3.3.2). For each arch we resolve
 # every dep to its REAL file; the canonical bundled name is that real file's
 # basename, so dep names that resolve to the same real file collapse into a
-# single bundled copy — two differently-named copies of the same library would
+# single bundled copy 鈥?two differently-named copies of the same library would
 # load duplicate ObjC classes and break the event/paint dispatch.
 
 is_system() { case "$1" in /System/*|/usr/lib/*|@executable_path/*|@loader_path/*) return 0 ;; esac; return 1; }
 
-# collect_deps <root binary> <extra @rpath search dir> → "depName<TAB>realPath"
+# collect_deps <root binary> <extra @rpath search dir> 鈫?"depName<TAB>realPath"
 collect_deps() {
     local bin="$1" rpathdir="$2"
     local tmpfile; tmpfile=$(mktemp)

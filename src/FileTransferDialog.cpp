@@ -5,6 +5,8 @@
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
 #include <wx/dir.h>
+#include <wx/bmpbuttn.h>
+#include <wx/imaglist.h>
 #include <wx/filename.h>
 #include <wx/regex.h>
 #include <vector>
@@ -175,7 +177,9 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
         
         // Use regex to parse ls -la output
         // Format: permissions links owner group size month day time name
-        wxRegEx regex(wxT("^([drwx-]+)\\s+\\d+\\s+\\S+\\s+\\S+\\s+(\\d+)\\s+(\\w+)\\s+(\\d+)\\s+([\\d:]+)\\s+(.+)$"));
+        // Tolerant of: SELinux/ACL suffix (. + @), symlink 'l', non-ASCII
+        // locale month names (e.g. '10月').
+        wxRegEx regex(wxT("^([bcdlps-][a-zA-Z-]{9}[.+@]?)\\s+\\d+\\s+\\S+\\s+\\S+\\s+(\\d+)\\s+(\\S+)\\s+(\\S+)\\s+(\\S+)\\s+(.+)$"));
         
         if (regex.Matches(line)) {
             wxString permissions = regex.GetMatch(line, 1);
@@ -185,6 +189,14 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
             wxString time = regex.GetMatch(line, 5);
             wxString name = regex.GetMatch(line, 6);
             bool isDirectory = permissions.StartsWith("d");
+            
+            // Symlink entries display as "name -> target"; keep link name only
+            if (permissions.StartsWith("l")) {
+                size_t arrow = name.find(" -> ");
+                if (arrow != wxString::npos) {
+                    name = name.substr(0, arrow);
+                }
+            }
             
             // Skip . and .. directories (.. is added manually)
             if (name == "." || name == "..") {
@@ -204,10 +216,12 @@ void FileTransferDialog::OnSSHFileList(wxCommandEvent& event) {
             m_remoteFileSizes.push_back(size);
             
             itemsAdded++;
+        } else {
+            SSH_LOG("OnSSHFileList: line did not match ls regex: '" << line << "'");
         }
     }
     
-    SSH_LOG("Total items added: " << itemsAdded);
+    SSH_LOG("Total items added: " << itemsAdded << " out of " << contentLines.size() << " lines");
     
     // Update path label (use full path if available)
     if (targetPath == "~" && !m_remoteCurrentPath.IsEmpty() && m_remoteCurrentPath != "~") {
@@ -331,6 +345,9 @@ void FileTransferDialog::PopulateRemoteList() {
 }
 
 void FileTransferDialog::RequestRemoteDirectory(const wxString& path) {
+    SSH_LOG("FileTransferDialog::RequestRemoteDirectory called for path='" << path
+            << "' host=" << m_deviceConfig.username << "@" << m_deviceConfig.address
+            << ":" << m_deviceConfig.port);
     PopulateRemoteList(); // Show "Loading..."
     AsynchronousSFTPTask::CreateListTask(this, m_deviceConfig, path);
 }
@@ -362,10 +379,11 @@ void FileTransferDialog::CreateControls() {
                                  wxDefaultSize, wxST_ELLIPSIZE_MIDDLE);
         label->SetFont(label->GetFont().Bold());
 
-        wxButton* refreshBtn = new wxButton(mainPanel, wxID_ANY,
-                                            TranslationHelper::Tr("refresh"),
-                                            wxDefaultPosition, wxDefaultSize,
-                                            wxBU_EXACTFIT);
+        wxBitmapButton* refreshBtn = new wxBitmapButton(
+            mainPanel, wxID_ANY,
+            wxArtProvider::GetBitmap(wxART_REFRESH, wxART_BUTTON, wxSize(16, 16)),
+            wxDefaultPosition, wxDefaultSize,
+            wxBU_AUTODRAW | wxBORDER_NONE);
         refreshBtn->SetToolTip(TranslationHelper::Tr("refresh"));
         refreshBtn->Bind(wxEVT_BUTTON, [onRefresh](wxCommandEvent&) { onRefresh(); });
 
@@ -440,6 +458,7 @@ void FileTransferDialog::CreateControls() {
             remotePath += fn.GetFullName();
             long long size = 0;
             if (fn.FileExists()) size = fn.GetSize().GetValue();
+            SSH_LOG("Queue upload: local=" << localPath << " remote=" << remotePath << " size=" << size);
             queueTransfer(localPath, remotePath, "upload", size);
         });
 
@@ -653,6 +672,16 @@ void FileTransferDialog::CreateControls() {
     m_taskList->AppendColumn(TranslationHelper::Tr("progress"), wxLIST_FORMAT_LEFT, 200);
     m_taskList->AppendColumn(TranslationHelper::Tr("status"), wxLIST_FORMAT_LEFT, 150);
     m_taskList->AppendColumn(TranslationHelper::Tr("result"), wxLIST_FORMAT_LEFT, 200);
+
+    // Task list icons:
+    //   0 = upload (up arrow), 1 = download (down arrow)
+    //   2 = result success (tick), 3 = result failure (cross)
+    wxImageList* taskImages = new wxImageList(16, 16, true, 4);
+    taskImages->Add(wxArtProvider::GetBitmap(wxART_GO_UP, wxART_OTHER, wxSize(16, 16)));
+    taskImages->Add(wxArtProvider::GetBitmap(wxART_GO_DOWN, wxART_OTHER, wxSize(16, 16)));
+    taskImages->Add(wxArtProvider::GetBitmap(wxART_TICK_MARK, wxART_OTHER, wxSize(16, 16)));
+    taskImages->Add(wxArtProvider::GetBitmap(wxART_CROSS_MARK, wxART_OTHER, wxSize(16, 16)));
+    m_taskList->AssignImageList(taskImages, wxIMAGE_LIST_SMALL);
     
     // Layout main panel
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
@@ -809,15 +838,17 @@ void FileTransferDialog::LoadAndDisplayTasks() {
         // Add tasks to list (newest first - reverse order)
         for (auto it = taskList.tasks.rbegin(); it != taskList.tasks.rend(); ++it) {
             const auto& task = *it;
+            // Show an icon in the action column; unknown actions fall back to text
+            int imageIndex = -1;
             wxString actionText;
-            if (task.action == "download") {
-                actionText = TranslationHelper::Tr("download");
-            } else if (task.action == "upload") {
-                actionText = TranslationHelper::Tr("upload");
+            if (task.action == "upload") {
+                imageIndex = 0;
+            } else if (task.action == "download") {
+                imageIndex = 1;
             } else {
                 actionText = wxString::FromUTF8(task.action.c_str());
             }
-            long index = m_taskList->InsertItem(m_taskList->GetItemCount(), actionText);
+            long index = m_taskList->InsertItem(m_taskList->GetItemCount(), actionText, imageIndex);
             m_taskList->SetItem(index, 1, wxString::FromUTF8(task.local.c_str()));
             m_taskList->SetItem(index, 2, wxString::FromUTF8(task.remote.c_str()));
             m_taskList->SetItem(index, 3, FormatFileSize(task.size));
@@ -835,7 +866,14 @@ void FileTransferDialog::LoadAndDisplayTasks() {
             }
             
             m_taskList->SetItem(index, 5, TranslationHelper::Tr(statusText));
-            m_taskList->SetItem(index, 6, TranslationHelper::Tr(resultText));
+            // Result column: icon instead of text (tick = success, cross = failure)
+            if (task.status == "completed") {
+                int resultImage = (task.result == "success" || resultText == "success") ? 2 : 3;
+                m_taskList->SetItem(index, 6, wxEmptyString);
+                m_taskList->SetItemColumnImage(index, 6, resultImage);
+            } else {
+                m_taskList->SetItem(index, 6, TranslationHelper::Tr(resultText));
+            }
             
             // Set color based on status
             wxColour color;
