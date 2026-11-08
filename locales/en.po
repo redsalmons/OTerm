@@ -330,3 +330,19 @@ msgstr "Dracula"
 
 msgid "themeClassicDark"
 msgstr "Classic Dark"
+
+# Device list panel
+msgid "searchPlaceholder"
+msgstr "Search name, address or group..."
+
+msgid "noDevices"
+msgstr "No devices yet, click + to add"
+
+msgid "noSearchResults"
+msgstr "No matching devices"
+
+msgid "deviceCount"
+msgstr "%d device(s) total"
+
+msgid "deviceCountFiltered"
+msgstr "Matched %d / %d total"

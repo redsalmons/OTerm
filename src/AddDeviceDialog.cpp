@@ -1,13 +1,15 @@
 #include "AddDeviceDialog.h"
 #include "TranslationHelper.h"
 #include "GlobalConfig.h"
+#include "UiColors.h"
 #include <wx/filedlg.h>
 #include <wx/textfile.h>
 
 AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     : wxDialog(parent, wxID_ANY, TranslationHelper::Tr("addDevice"), wxDefaultPosition, wxSize(500, 450)) {
     
-    SetBackgroundColour(wxColour(10, 10, 10));
+    const UiPalette pal = CurrentUiPalette();
+    SetBackgroundColour(pal.bgWindow);
     
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
     
@@ -17,73 +19,73 @@ AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     
     // Device Name
     wxStaticText* nameLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("deviceName") + ":");
-    nameLabel->SetForegroundColour(wxColour(200, 200, 200));
+    nameLabel->SetForegroundColour(pal.textSecondary);
     m_nameCtrl = new wxTextCtrl(this, wxID_ANY);
-    m_nameCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_nameCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_nameCtrl->SetBackgroundColour(pal.bgSearch);
+    m_nameCtrl->SetForegroundColour(pal.textPrimary);
     gridSizer->Add(nameLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 15);
     gridSizer->Add(m_nameCtrl, 1, wxEXPAND);
     
     // Username
     wxStaticText* usernameLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("username") + ":");
-    usernameLabel->SetForegroundColour(wxColour(200, 200, 200));
+    usernameLabel->SetForegroundColour(pal.textSecondary);
     m_usernameCtrl = new wxTextCtrl(this, wxID_ANY);
-    m_usernameCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_usernameCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_usernameCtrl->SetBackgroundColour(pal.bgSearch);
+    m_usernameCtrl->SetForegroundColour(pal.textPrimary);
     gridSizer->Add(usernameLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 15);
     gridSizer->Add(m_usernameCtrl, 1, wxEXPAND);
     
     // Address
     wxStaticText* addressLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("hostAddress") + ":");
-    addressLabel->SetForegroundColour(wxColour(200, 200, 200));
+    addressLabel->SetForegroundColour(pal.textSecondary);
     m_addressCtrl = new wxTextCtrl(this, wxID_ANY);
-    m_addressCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_addressCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_addressCtrl->SetBackgroundColour(pal.bgSearch);
+    m_addressCtrl->SetForegroundColour(pal.textPrimary);
     gridSizer->Add(addressLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 15);
     gridSizer->Add(m_addressCtrl, 1, wxEXPAND);
     
     // Port
     wxStaticText* portLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("port") + ":");
-    portLabel->SetForegroundColour(wxColour(200, 200, 200));
+    portLabel->SetForegroundColour(pal.textSecondary);
     m_portCtrl = new wxTextCtrl(this, wxID_ANY, "22");
-    m_portCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_portCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_portCtrl->SetBackgroundColour(pal.bgSearch);
+    m_portCtrl->SetForegroundColour(pal.textPrimary);
     gridSizer->Add(portLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 15);
     gridSizer->Add(m_portCtrl, 1, wxEXPAND);
     
     // Group
     wxStaticText* groupLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("deviceGroup") + ":");
-    groupLabel->SetForegroundColour(wxColour(200, 200, 200));
+    groupLabel->SetForegroundColour(pal.textSecondary);
     m_groupCtrl = new wxTextCtrl(this, wxID_ANY);
-    m_groupCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_groupCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_groupCtrl->SetBackgroundColour(pal.bgSearch);
+    m_groupCtrl->SetForegroundColour(pal.textPrimary);
     gridSizer->Add(groupLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 15);
     gridSizer->Add(m_groupCtrl, 1, wxEXPAND);
     
     // Auth Method
     wxStaticText* authLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("authMethod") + ":");
-    authLabel->SetForegroundColour(wxColour(200, 200, 200));
+    authLabel->SetForegroundColour(pal.textSecondary);
     m_authChoice = new wxChoice(this, wxID_ANY);
     m_authChoice->Append(TranslationHelper::Tr("password"));
     m_authChoice->Append(TranslationHelper::Tr("key"));
     m_authChoice->SetSelection(0);
-    m_authChoice->SetBackgroundColour(wxColour(30, 30, 30));
-    m_authChoice->SetForegroundColour(wxColour(255, 255, 255));
+    m_authChoice->SetBackgroundColour(pal.bgSearch);
+    m_authChoice->SetForegroundColour(pal.textPrimary);
     gridSizer->Add(authLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 15);
     gridSizer->Add(m_authChoice, 1, wxEXPAND);
     
     // Password/Key
     wxStaticText* passwordLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("passwordKey") + ":");
-    passwordLabel->SetForegroundColour(wxColour(200, 200, 200));
+    passwordLabel->SetForegroundColour(pal.textSecondary);
     
     wxBoxSizer* passwordSizer = new wxBoxSizer(wxHORIZONTAL);
     m_passwordCtrl = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
-    m_passwordCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_passwordCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_passwordCtrl->SetBackgroundColour(pal.bgSearch);
+    m_passwordCtrl->SetForegroundColour(pal.textPrimary);
     
     m_keyTextCtrl = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE | wxTE_DONTWRAP);
-    m_keyTextCtrl->SetBackgroundColour(wxColour(30, 30, 30));
-    m_keyTextCtrl->SetForegroundColour(wxColour(255, 255, 255));
+    m_keyTextCtrl->SetBackgroundColour(pal.bgSearch);
+    m_keyTextCtrl->SetForegroundColour(pal.textPrimary);
     m_keyTextCtrl->Hide();
     
     m_keyBrowseButton = new wxButton(this, wxID_ANY, TranslationHelper::Tr("browse"));
@@ -103,12 +105,12 @@ AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     buttonSizer->AddStretchSpacer();
     
     m_saveButton = new wxButton(this, wxID_SAVE, TranslationHelper::Tr("save"));
-    m_saveButton->SetBackgroundColour(wxColour(60, 100, 180));
-    m_saveButton->SetForegroundColour(wxColour(255, 255, 255));
+    m_saveButton->SetBackgroundColour(pal.accent);
+    m_saveButton->SetForegroundColour(*wxWHITE);
     
     wxButton* cancelButton = new wxButton(this, wxID_CANCEL, TranslationHelper::Tr("cancel"));
-    cancelButton->SetBackgroundColour(wxColour(100, 100, 100));
-    cancelButton->SetForegroundColour(wxColour(255, 255, 255));
+    cancelButton->SetBackgroundColour(pal.bgHeader);
+    cancelButton->SetForegroundColour(pal.textPrimary);
     
     buttonSizer->Add(m_saveButton, 0, wxRIGHT, 10);
     buttonSizer->Add(cancelButton, 0);

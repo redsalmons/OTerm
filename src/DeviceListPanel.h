@@ -36,6 +36,7 @@ private:
 
     wxSearchCtrl* m_searchCtrl;
     wxButton* m_addButton;
+    wxStaticText* m_statusText;
     wxScrolledWindow* m_scrolledWindow;
     wxPanel* m_contentPanel;
     std::vector<DeviceConfig> m_devices;

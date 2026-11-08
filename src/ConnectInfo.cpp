@@ -13,6 +13,7 @@
 #include "SSHManager.h"
 
 #include "FileTransferTask.h"
+#include "UiColors.h"
 #include "AsynchronousSFTPTask.h"
 
 #include "TranslationHelper.h"
@@ -96,7 +97,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
     m_label = new wxStaticText(this, wxID_ANY, label, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
 
-    m_label->SetForegroundColour(*wxWHITE);
+    m_label->SetForegroundColour(CurrentUiPalette().textPrimary);
 
 #ifdef __APPLE__
 
@@ -965,29 +966,30 @@ void ConnectInfo::OnPaint(wxPaintEvent& event)
 
 
 
+    const UiPalette pal = CurrentUiPalette();
     wxColour backgroundColour;
 
-    wxColour borderColour = wxColour(20, 20, 20);
+    wxColour borderColour = pal.tabBorder;
 
 
 
     if (m_isActive) {
 
-        backgroundColour = wxColour(45, 45, 45);
+        backgroundColour = pal.tabActive;
 
     } else if (m_isHovered) {
 
-        backgroundColour = wxColour(60, 60, 60);
+        backgroundColour = pal.tabHover;
 
     } else {
 
-        backgroundColour = wxColour(30, 30, 30);
+        backgroundColour = pal.tabIdle;
 
     }
 
 
 
-    dc.SetBackground(wxBrush(GetParent()->GetBackgroundColour()));
+    dc.SetBackground(wxBrush(pal.titleBg));
 
     dc.Clear();
 
@@ -1011,11 +1013,11 @@ void ConnectInfo::OnPaint(wxPaintEvent& event)
 
     m_label->SetBackgroundColour(backgroundColour);
 
-    m_label->SetForegroundColour(*wxWHITE);
+    m_label->SetForegroundColour(pal.textPrimary);
 
     m_closeButton->SetBackgroundColour(backgroundColour);
 
-    m_closeButton->SetForegroundColour(*wxWHITE);
+    m_closeButton->SetForegroundColour(pal.textPrimary);
 
 
 
@@ -1082,8 +1084,9 @@ void ConnectInfo::OnLabelDoubleClick(wxMouseEvent& event) {
                                    wxTE_PROCESS_ENTER | wxBORDER_NONE);
     
     // Match label appearance
-    m_labelEditor->SetForegroundColour(*wxWHITE);
-    m_labelEditor->SetBackgroundColour(m_isActive ? wxColour(45, 45, 45) : wxColour(30, 30, 30));
+    const UiPalette pal = CurrentUiPalette();
+    m_labelEditor->SetForegroundColour(pal.textPrimary);
+    m_labelEditor->SetBackgroundColour(m_isActive ? pal.tabActive : pal.tabIdle);
     wxFont labelFont = m_label->GetFont();
     m_labelEditor->SetFont(labelFont);
     

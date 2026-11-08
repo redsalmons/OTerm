@@ -8,6 +8,7 @@
 #include "DeviceConfig.h"
 #include "TermGLCanvas.h"
 #include "DeviceListPanel.h"
+#include "UiColors.h"
 #include "SSHManager.h"
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
@@ -364,10 +365,11 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
 #ifndef __WXMSW__
     SetDoubleBuffered(true);
 #endif
-    SetBackgroundColour(wxColour(10, 10, 10));
+    const wxColour chromeBg = CurrentUiPalette().bgWindow;
+    SetBackgroundColour(chromeBg);
     this->SetThemeEnabled(false);
     m_notebook = new wxSimplebook(this, wxID_ANY);
-    m_notebook->SetBackgroundColour(wxColour(10, 10, 10));
+    m_notebook->SetBackgroundColour(chromeBg);
     m_notebook->Bind(wxEVT_BOOKCTRL_PAGE_CHANGED, [this](wxBookCtrlEvent& event) {
         event.Skip();
         TermGLCanvas::SyncBookVisibility(m_notebook);

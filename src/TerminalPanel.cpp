@@ -4,6 +4,7 @@
 #include "LocalTerminalContainer.h"
 #include "GlobalConfig.h"
 #include "AppWindow.h"
+#include "UiColors.h"
 #include <wx/menu.h>
 #include <wx/splitter.h>
 #include <fstream>
@@ -26,7 +27,7 @@ TerminalPanel::TerminalPanel(wxWindow* parent, std::unique_ptr<ITerminalContaine
     SetSizer(sizer);
     
     // Set background color to match terminal to avoid white flashes
-    SetBackgroundColour(wxColour(10, 10, 10));
+    SetBackgroundColour(CurrentUiPalette().bgWindow);
     
     // 设置最小尺寸，防止面板塌陷
     SetMinSize(wxSize(100, 100));

@@ -1,14 +1,16 @@
 #include "SplitContainer.h"
 #include "TerminalPanel.h"
 #include "TermGLCanvas.h"
+#include "UiColors.h"
 #include <functional>
 
 SplitContainer::SplitContainer(wxWindow* parent, wxSplitMode mode)
     : wxPanel(parent, wxID_ANY), m_mode(mode) {
-    SetBackgroundColour(wxColour(10, 10, 10));
+    const UiPalette pal = CurrentUiPalette();
+    SetBackgroundColour(pal.bgWindow);
     
     m_sash = new wxPanel(this, wxID_ANY);
-    m_sash->SetBackgroundColour(wxColour(80, 80, 80));
+    m_sash->SetBackgroundColour(pal.border);
     
     if (mode == wxSPLIT_VERTICAL) {
         m_sash->SetCursor(wxCURSOR_SIZEWE);

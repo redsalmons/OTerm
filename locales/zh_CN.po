@@ -330,3 +330,19 @@ msgstr "Dracula"
 
 msgid "themeClassicDark"
 msgstr "经典深色"
+
+# Device list panel
+msgid "searchPlaceholder"
+msgstr "搜索设备名称、地址或分组..."
+
+msgid "noDevices"
+msgstr "暂无设备，点击 + 添加"
+
+msgid "noSearchResults"
+msgstr "没有找到匹配的设备"
+
+msgid "deviceCount"
+msgstr "共 %d 台设备"
+
+msgid "deviceCountFiltered"
+msgstr "匹配 %d / 共 %d 台设备"

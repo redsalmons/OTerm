@@ -6,6 +6,7 @@
 #include "SettingsDialog.h"
 #include "GlobalConfig.h"
 #include "DeviceListPanel.h"
+#include "UiColors.h"
 #ifdef __WXMAC__
 #include "MacTitleBar.h"
 #endif
@@ -18,8 +19,8 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 #ifdef __WXMSW__
     SetBackgroundColour(wxColour(30, 30, 30));
 #else
-    // Mac: Use lighter color to blend with title bar
-    SetBackgroundColour(wxColour(45, 45, 45));
+    // Mac: follow system appearance
+    SetBackgroundColour(CurrentUiPalette().titleBg);
 #endif
     
     // Calculate title bar height based on DPI scale
@@ -82,10 +83,11 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     m_closeButton = nullptr;
     m_newTabButton = new wxButton(this, wxID_ANY, "+", wxDefaultPosition, wxSize(scaledNewTabWidth, scaledButtonSize), wxBORDER_NONE);
 
-    m_drawerButton->SetBackgroundColour(wxColour(60, 60, 60));
-    m_drawerButton->SetForegroundColour(wxColour(255, 255, 255));
+    const UiPalette pal = CurrentUiPalette();
+    m_drawerButton->SetBackgroundColour(pal.tabHover);
+    m_drawerButton->SetForegroundColour(pal.textPrimary);
     m_newTabButton->SetBackgroundColour(wxColour(0, 0, 0, 0));
-    m_newTabButton->SetForegroundColour(wxColour(255, 255, 255));
+    m_newTabButton->SetForegroundColour(pal.textPrimary);
     wxFont font = m_newTabButton->GetFont();
     font.SetWeight(wxFONTWEIGHT_BOLD);
     m_newTabButton->SetFont(font);
@@ -102,7 +104,7 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 #else
     // Mac: Create title text but hide it by default (show in fullscreen)
     m_titleText = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("oceanTerm"));
-    m_titleText->SetForegroundColour(wxColour(255, 255, 255));
+    m_titleText->SetForegroundColour(CurrentUiPalette().textPrimary);
     wxFont titleFont = m_titleText->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     titleFont.SetStyle(wxFONTSTYLE_ITALIC);
@@ -925,7 +927,7 @@ void CustomTitleBar::OnPaint(wxPaintEvent& event) {
 #else
     // Mac: Draw background color
     wxSize clientSize = GetClientSize();
-    dc.SetBackground(wxBrush(wxColour(45, 45, 45)));
+    dc.SetBackground(wxBrush(CurrentUiPalette().titleBg));
     dc.Clear();
 #endif
 }
