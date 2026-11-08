@@ -12,6 +12,9 @@
 #include <string>
 #include <functional>
 #include <ctime>
+#include <cstdint>
+#include <cstdio>
+#include <mutex>
 
 class VTermManager {
 public:
@@ -33,8 +36,7 @@ public:
     
     // Scroll history line structure
     struct HistoryLine {
-        std::vector<TerminalCell> cells;  // Complete line of cells
-        int timestamp;                    // When this line was added
+        std::vector<TerminalCell> cells;  // Cells up to the last meaningful column
     };
 
 public:
@@ -77,18 +79,15 @@ public:
     // Cleanup VTerm resources
     void cleanup();
     
-    // Helper function to convert ANSI color index to RGB
-    static uint32_t ansi_color_to_rgb(uint8_t color_index);
-    
     // Scroll history management
     void add_line_to_history(const VTermScreenCell* cells, int cols);
-    void save_top_row_to_history();
-    void save_row_to_history(int row_index);
-    const std::deque<HistoryLine>& get_scroll_history() const { return scroll_history_; }
-    void clear_scroll_history();
-    
+
+    // Delete scrollback cache files left behind by dead processes.
+    // Call once at application startup.
+    static void CleanupStaleScrollbackFiles();
+
     // Screen access methods for scrolling
-    const std::vector<TerminalCell>& get_screen_row(int row) const;
+    const std::vector<TerminalCell>& get_screen_row(int row);
     int get_rows() const { return rows_; }
     int get_cols() const { return cols_; }
     
@@ -130,6 +129,18 @@ private:
     void ApplyThemeToVTerm();
     void SyncThemeIfNeeded();
 
+    // Scrollback file backing: append-only per-session log plus a small
+    // in-memory window. Lines older than the window are paged in on demand.
+    void AppendHistoryLine(std::vector<TerminalCell>&& cells);
+    void EnsureHistoryFile();
+    void CloseHistoryFile();
+    void CompactHistoryFile();
+    void LoadHistoryRange(int64_t start, int64_t count);
+    void EnsureHistoryPage(int64_t index);
+    const std::vector<TerminalCell>& GetHistoryLine(int64_t index);
+    size_t HistoryTailCapacity() const;
+    size_t HistoryPageCapacity() const;
+
 private:
     // VTerm components
     VTerm* vt_;
@@ -142,9 +153,21 @@ private:
     // Screen cell buffer
     std::vector<std::vector<TerminalCell>> cell_buffer_;
     
-    // Scroll history buffer (max 10000 lines)
+    // Scroll history: in-memory tail window plus on-demand page cache.
+    // The full history lives in a per-session file; scroll_history_ always
+    // holds the newest HistoryTailCapacity() lines and history_page_ a
+    // window of older lines loaded around the current scroll position.
     std::deque<HistoryLine> scroll_history_;
-    static const int MAX_HISTORY_LINES = 10000;
+    std::deque<HistoryLine> history_page_;
+    int64_t page_start_ = -1;
+    int64_t history_total_ = 0;                    // total lines in the log
+    std::vector<uint64_t> history_offsets_;        // file offset per line
+    std::string history_path_;
+    FILE* history_file_ = nullptr;
+    std::mutex history_mutex_;  // guards file appends vs. page-in reads
+
+    static const int64_t MAX_HISTORY_FILE_LINES = 50000;
+    static const int64_t HISTORY_KEEP_LINES = 25000;
     
     // Output tracking for auto-scroll
     bool has_new_output_;

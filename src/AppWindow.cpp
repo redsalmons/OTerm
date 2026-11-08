@@ -38,6 +38,7 @@ int AppWindow::s_globalTabCounter = 0;
 #include "TerminalPanel.h"
 #include "InfiniteSplitter.h"
 #include "LocalTerminalContainer.h"
+#include "VTermManager.h"
 
 #if defined(__WXMSW__)
 #include <wx/msw/private.h>
@@ -141,6 +142,9 @@ void MyApp::OnAssertFailure(const wxChar* file, int line, const wxChar* func,
 bool MyApp::OnInit() {
     // std::ofstream f((std::filesystem::temp_directory_path() / "oterm_alert.log").string(), std::ios::app);
     // if (f.is_open()) f << "[APP] MyApp::OnInit called" << std::endl;
+
+    // Remove scrollback cache files left behind by previous runs.
+    VTermManager::CleanupStaleScrollbackFiles();
 
     try {
 #ifdef __WXMSW__

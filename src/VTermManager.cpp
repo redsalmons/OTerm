@@ -4,13 +4,72 @@
 #include "GlobalConfig.h"
 #include <cstring>
 #include <chrono>
+#include <fstream>
+#include <filesystem>
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstdlib>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
+#include <process.h>
 #else
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <signal.h>
 #endif
+
+namespace {
+
+// Pack a VTermScreenCell's colours as unresolved references; the renderer
+// resolves them against the active theme so theme switches apply instantly.
+void PackVTermCellColors(const VTermScreenCell& cell, VTermState* state,
+                         uint32_t& fg_color, uint32_t& bg_color) {
+    fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+    bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
+
+    VTermColor vt_fg = cell.fg;
+    if (VTERM_COLOR_IS_DEFAULT_FG(&vt_fg)) {
+        fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+    } else if (VTERM_COLOR_IS_INDEXED(&vt_fg) && vt_fg.indexed.idx < 16) {
+        fg_color = PackCellColorIndexed(vt_fg.indexed.idx);
+    } else {
+        vterm_state_convert_color_to_rgb(state, &vt_fg);
+        fg_color = PackCellColorRGB((vt_fg.rgb.red << 16) |
+                                    (vt_fg.rgb.green << 8) |
+                                    vt_fg.rgb.blue);
+    }
+
+    VTermColor vt_bg = cell.bg;
+    if (VTERM_COLOR_IS_DEFAULT_BG(&vt_bg)) {
+        bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
+    } else if (VTERM_COLOR_IS_INDEXED(&vt_bg) && vt_bg.indexed.idx < 16) {
+        bg_color = PackCellColorIndexed(vt_bg.indexed.idx);
+    } else {
+        vterm_state_convert_color_to_rgb(state, &vt_bg);
+        bg_color = PackCellColorRGB((vt_bg.rgb.red << 16) |
+                                    (vt_bg.rgb.green << 8) |
+                                    vt_bg.rgb.blue);
+    }
+
+    if (cell.attrs.reverse) {
+        std::swap(fg_color, bg_color);
+    }
+}
+
+// On-disk record for one history cell (14 bytes, packed).
+#pragma pack(push, 1)
+struct HistoryCellRecord {
+    uint32_t char_code;
+    uint32_t fg_color;
+    uint32_t bg_color;
+    uint8_t attrs;
+    uint8_t width;
+};
+#pragma pack(pop)
+
+} // namespace
 
 VTermManager::VTermManager()
     : vt_(nullptr), vts_(nullptr), rows_(10), cols_(80), has_new_output_(false), 
@@ -195,35 +254,6 @@ void VTermManager::resize(int new_rows, int new_cols) {
     SSH_LOG("VTermManager::resize completed successfully");
 }
 
-uint32_t VTermManager::ansi_color_to_rgb(uint8_t color_index) {
-    // Standard 16-color ANSI palette
-    static const uint32_t ansi_colors[16] = {
-        0xFF000000, // Black
-        0xFF800000, // Red
-        0xFF008000, // Green
-        0xFF808000, // Yellow
-        0xFF000080, // Blue
-        0xFF800080, // Magenta
-        0xFF008080, // Cyan
-        0xFFC0C0C0, // White
-        0xFF808080, // Bright Black (Gray)
-        0xFFFF0000, // Bright Red
-        0xFF00FF00, // Bright Green
-        0xFFFFFF00, // Bright Yellow
-        0xFF0000FF, // Bright Blue
-        0xFFFF00FF, // Bright Magenta
-        0xFF00FFFF, // Bright Cyan
-        0xFFFFFFFF  // Bright White
-    };
-    
-    if (color_index < 16) {
-        return ansi_colors[color_index];
-    }
-    
-    // Default to white for unknown colors
-    return 0xFFFFFFFF;
-}
-
 void VTermManager::reset() {
     if (vts_) {
         vterm_screen_reset(vts_, 1);
@@ -231,11 +261,54 @@ void VTermManager::reset() {
 }
 
 void VTermManager::cleanup() {
+    // The tab/session is going away: drop the scrollback cache file too.
+    CloseHistoryFile();
+    if (!history_path_.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(history_path_, ec);
+        history_path_.clear();
+    }
+    scroll_history_.clear();
+    history_page_.clear();
+    page_start_ = -1;
+    history_total_ = 0;
+    history_offsets_.clear();
+
     if (vt_) {
         vterm_free(vt_);
         vt_ = nullptr;
     }
     vts_ = nullptr;
+}
+
+void VTermManager::CleanupStaleScrollbackFiles() {
+    const std::filesystem::path dir =
+        std::filesystem::path(GlobalConfig::GetConfigPath()) / "scrollback";
+    std::error_code ec;
+    if (!std::filesystem::exists(dir, ec)) return;
+
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        const std::string name = entry.path().filename().string();
+        // Expected name: scrollback_<pid>_<counter>.bin
+        if (name.rfind("scrollback_", 0) != 0) continue;
+        const size_t pid_begin = 11;  // strlen("scrollback_")
+        const size_t pid_end = name.find('_', pid_begin);
+        if (pid_end == std::string::npos) continue;
+        const int pid = std::atoi(name.substr(pid_begin, pid_end - pid_begin).c_str());
+        if (pid <= 0) continue;
+
+        bool alive = false;
+#ifdef _WIN32
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        alive = (h != nullptr);
+        if (h) CloseHandle(h);
+#else
+        alive = (kill(pid, 0) == 0 || errno == EPERM);
+#endif
+        if (!alive) {
+            std::filesystem::remove(entry.path(), ec);
+        }
+    }
 }
 
 int VTermManager::vterm_damage_callback(VTermRect rect, void *user) {
@@ -474,32 +547,8 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             
             // Pack colours as unresolved references; the renderer resolves them
             // against the active theme so theme switches apply instantly.
-            uint32_t fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
-            uint32_t bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
-
-            VTermColor vt_fg = cell.fg;
-            if (VTERM_COLOR_IS_DEFAULT_FG(&vt_fg)) {
-                fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
-            } else if (VTERM_COLOR_IS_INDEXED(&vt_fg) && vt_fg.indexed.idx < 16) {
-                fg_color = PackCellColorIndexed(vt_fg.indexed.idx);
-            } else {
-                vterm_state_convert_color_to_rgb(state, &vt_fg);
-                fg_color = PackCellColorRGB((vt_fg.rgb.red << 16) |
-                                            (vt_fg.rgb.green << 8) |
-                                            vt_fg.rgb.blue);
-            }
-
-            VTermColor vt_bg = cell.bg;
-            if (VTERM_COLOR_IS_DEFAULT_BG(&vt_bg)) {
-                bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
-            } else if (VTERM_COLOR_IS_INDEXED(&vt_bg) && vt_bg.indexed.idx < 16) {
-                bg_color = PackCellColorIndexed(vt_bg.indexed.idx);
-            } else {
-                vterm_state_convert_color_to_rgb(state, &vt_bg);
-                bg_color = PackCellColorRGB((vt_bg.rgb.red << 16) |
-                                            (vt_bg.rgb.green << 8) |
-                                            vt_bg.rgb.blue);
-            }
+            uint32_t fg_color, bg_color;
+            PackVTermCellColors(cell, state, fg_color, bg_color);
             
             // Debug: Print actual RGB values (commented out to reduce noise)
             // if (row == 0 && col < 3) {
@@ -511,13 +560,8 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             // }
             
                         
-            // Handle reverse attribute
-            if (cell.attrs.reverse) {
-                std::swap(fg_color, bg_color);
-            }
-            
-            // Note: reverse attribute already handled above
-            
+            // Note: reverse attribute already handled in PackVTermCellColors
+
             // Extract attributes
             uint8_t attrs = 0;
             if (cell.attrs.bold) attrs |= 0x01;
@@ -570,147 +614,272 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
     if (!cells || cols <= 0 || cols > 1000) {
         return;
     }
-    
-    // Create a new history line
-    HistoryLine history_line;
-    history_line.timestamp = time(nullptr);
-    history_line.cells.resize(cols);
-    
-    // Convert VTermScreenCell to TerminalCell format
+
+    VTermState* state = vterm_obtain_state(vt_);
+
+    std::vector<TerminalCell> line;
+    line.reserve(cols);
     for (int col = 0; col < cols; col++) {
-        TerminalCell& terminal_cell = history_line.cells[col];
-        
-        if (cells[col].chars[0] != 0) {
-            terminal_cell.char_code = cells[col].chars[0];
+        TerminalCell tc;
+        tc.char_code = (cells[col].chars[0] != 0 && cells[col].chars[0] != 0xffffffff)
+                           ? cells[col].chars[0]
+                           : static_cast<uint32_t>(' ');
+        tc.width = cells[col].width;
+
+        if (state) {
+            PackVTermCellColors(cells[col], state, tc.fg_color, tc.bg_color);
         } else {
-            terminal_cell.char_code = ' ';
+            tc.fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+            tc.bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
         }
-        terminal_cell.width = cells[col].width;
-        
-        // Extract colors using VTerm's actual color structure
-        uint32_t fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
-        uint32_t bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
-        
-        // Use proper ANSI color extraction like in the other function
-        // Note: This is a simplified version - full implementation would need VTerm color access
-        // For now, use basic colors to avoid the red-only issue
-        if (cells[col].attrs.bold) {
-            fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG); // Keep default fg for bold
-        }
-        if (cells[col].attrs.reverse) {
-            // Swap foreground and background for reverse video
-            uint32_t temp = fg_color;
-            fg_color = bg_color;
-            bg_color = temp;
-        }
-        
-        terminal_cell.fg_color = fg_color;
-        terminal_cell.bg_color = bg_color;
-        
-        // Extract attributes
+
         uint8_t attrs = 0;
         if (cells[col].attrs.bold) attrs |= 0x01;
         if (cells[col].attrs.underline) attrs |= 0x02;
         if (cells[col].attrs.italic) attrs |= 0x04;
         if (cells[col].attrs.blink) attrs |= 0x08;
         if (cells[col].attrs.reverse) attrs |= 0x10;
-        
-        terminal_cell.attrs = attrs;
-        terminal_cell.dirty = false; // History lines don't need dirty tracking
+        tc.attrs = attrs;
+        tc.dirty = false;
+
+        line.push_back(tc);
     }
-    
-    // Add to history buffer
-    scroll_history_.push_back(history_line);
-    
-    // Maintain maximum history size (10000 lines)
-    if (scroll_history_.size() > MAX_HISTORY_LINES) {
+
+    // Trim trailing cells that carry no information: blank text, default
+    // background and no attributes. Consumers treat missing cells as blank.
+    const uint32_t default_bg = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
+    size_t last = line.size();
+    while (last > 0) {
+        const TerminalCell& c = line[last - 1];
+        const bool meaningful = (c.char_code != ' ' && c.char_code != 0) ||
+                                c.bg_color != default_bg || c.attrs != 0;
+        if (meaningful) break;
+        --last;
+    }
+    line.resize(last);
+
+    AppendHistoryLine(std::move(line));
+}
+
+size_t VTermManager::HistoryTailCapacity() const {
+    return static_cast<size_t>(std::max(120, rows_ * 3));
+}
+
+size_t VTermManager::HistoryPageCapacity() const {
+    return static_cast<size_t>(std::max(120, rows_ * 3));
+}
+
+void VTermManager::EnsureHistoryFile() {
+    if (history_file_) return;
+
+    std::filesystem::path dir =
+        std::filesystem::path(GlobalConfig::GetConfigPath()) / "scrollback";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+
+    static std::atomic<int> counter{0};
+#ifdef _WIN32
+    const int pid = _getpid();
+#else
+    const int pid = getpid();
+#endif
+    char name[64];
+    snprintf(name, sizeof(name), "scrollback_%d_%d.bin", pid, counter.fetch_add(1));
+    history_path_ = (dir / name).string();
+    history_file_ = fopen(history_path_.c_str(), "ab");
+}
+
+void VTermManager::CloseHistoryFile() {
+    if (history_file_) {
+        fclose(history_file_);
+        history_file_ = nullptr;
+    }
+}
+
+void VTermManager::AppendHistoryLine(std::vector<TerminalCell>&& cells) {
+    std::lock_guard<std::mutex> lock(history_mutex_);
+    EnsureHistoryFile();
+    if (!history_file_) return;  // No backing store: drop the line
+
+    if (history_total_ >= MAX_HISTORY_FILE_LINES) {
+        CompactHistoryFile();
+    }
+    if (history_total_ >= MAX_HISTORY_FILE_LINES) return;
+
+    const uint32_t ncols = static_cast<uint32_t>(cells.size());
+    const uint64_t offset =
+#ifdef _WIN32
+        static_cast<uint64_t>(_ftelli64(history_file_));
+#else
+        static_cast<uint64_t>(ftello(history_file_));
+#endif
+    fwrite(&ncols, sizeof(ncols), 1, history_file_);
+    for (const auto& c : cells) {
+        HistoryCellRecord rec{c.char_code, c.fg_color, c.bg_color, c.attrs, c.width};
+        fwrite(&rec, sizeof(rec), 1, history_file_);
+    }
+    history_offsets_.push_back(offset);
+    ++history_total_;
+
+    HistoryLine line;
+    line.cells = std::move(cells);
+    scroll_history_.push_back(std::move(line));
+
+    const size_t cap = HistoryTailCapacity();
+    while (scroll_history_.size() > cap) {
         scroll_history_.pop_front();
     }
 }
 
-void VTermManager::save_top_row_to_history() {
-    if (!vts_ || cell_buffer_.empty()) {
+void VTermManager::CompactHistoryFile() {
+    // Keep the newest HISTORY_KEEP_LINES records; rewrite the log without
+    // the dropped prefix and rebuild the offset index.
+    CloseHistoryFile();
+    history_page_.clear();
+    page_start_ = -1;
+
+    const int64_t drop = history_total_ - HISTORY_KEEP_LINES;
+    if (drop <= 0) return;
+
+    const std::string old_path = history_path_;
+    const std::string tmp_path = old_path + ".tmp";
+
+    std::ifstream in(old_path, std::ios::binary);
+    std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+    if (!in || !out) {
+        history_path_.clear();
         return;
     }
-    
-    // Don't save history in alternate screen mode (e.g., vi, less)
-    if (in_alternate_screen_) {
+
+    std::vector<uint64_t> new_offsets;
+    new_offsets.reserve(HISTORY_KEEP_LINES);
+    uint64_t out_pos = 0;
+    for (int64_t i = drop; i < history_total_; ++i) {
+        in.seekg(static_cast<std::streamoff>(history_offsets_[i]));
+        uint32_t ncols = 0;
+        in.read(reinterpret_cast<char*>(&ncols), sizeof(ncols));
+        if (!in) break;
+        new_offsets.push_back(out_pos);
+        out.write(reinterpret_cast<const char*>(&ncols), sizeof(ncols));
+        out_pos += sizeof(ncols);
+        std::vector<char> buf(static_cast<size_t>(ncols) * sizeof(HistoryCellRecord));
+        in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+        if (!in) break;
+        out.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+        out_pos += static_cast<uint64_t>(buf.size());
+    }
+    in.close();
+    out.close();
+
+    std::error_code ec;
+    std::filesystem::rename(tmp_path, old_path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp_path, ec);
+        history_path_.clear();
         return;
     }
-    
-    // Get the top row (row 0) before it gets scrolled off
-    std::vector<TerminalCell> top_row = cell_buffer_[0];
-    
-    // Create a history line
-    HistoryLine history_line;
-    history_line.timestamp = time(nullptr);
-    history_line.cells = top_row;
-    
-    // Add to history buffer
-    scroll_history_.push_back(history_line);
-    
-    // Maintain maximum history size
-    if (scroll_history_.size() > MAX_HISTORY_LINES) {
-        scroll_history_.pop_front();
-    }
+
+    history_offsets_ = std::move(new_offsets);
+    history_total_ = static_cast<int64_t>(history_offsets_.size());
+    history_path_ = old_path;
+    history_file_ = fopen(history_path_.c_str(), "ab");
 }
 
-void VTermManager::save_row_to_history(int row_index) {
-    if (!vts_ || cell_buffer_.empty() || row_index < 0 || row_index >= cell_buffer_.size()) {
-        return;
+void VTermManager::LoadHistoryRange(int64_t start, int64_t count) {
+    std::lock_guard<std::mutex> lock(history_mutex_);
+    history_page_.clear();
+    page_start_ = -1;
+    if (history_path_.empty() || start < 0 || start >= history_total_) return;
+
+    std::ifstream in(history_path_, std::ios::binary);
+    if (!in) return;
+
+    const int64_t end = std::min(start + count, history_total_);
+    count = end - start;
+    if (count <= 0) return;
+
+    history_page_.resize(static_cast<size_t>(count));
+    for (int64_t i = 0; i < count; ++i) {
+        in.seekg(static_cast<std::streamoff>(history_offsets_[start + i]));
+        uint32_t ncols = 0;
+        in.read(reinterpret_cast<char*>(&ncols), sizeof(ncols));
+        if (!in) {
+            history_page_.resize(static_cast<size_t>(i));
+            break;
+        }
+        auto& cells = history_page_[static_cast<size_t>(i)].cells;
+        cells.resize(ncols);
+        for (uint32_t j = 0; j < ncols; ++j) {
+            HistoryCellRecord rec;
+            in.read(reinterpret_cast<char*>(&rec), sizeof(rec));
+            if (!in) {
+                cells.resize(j);
+                break;
+            }
+            TerminalCell& tc = cells[j];
+            tc.char_code = rec.char_code;
+            tc.fg_color = rec.fg_color;
+            tc.bg_color = rec.bg_color;
+            tc.attrs = rec.attrs;
+            tc.width = rec.width;
+            tc.dirty = false;
+        }
     }
-    
-    // Don't save history in alternate screen mode (e.g., vi, less)
-    if (in_alternate_screen_) {
-        return;
-    }
-    
-    // Get the specified row
-    std::vector<TerminalCell> row = cell_buffer_[row_index];
-    
-    // Create a history line
-    HistoryLine history_line;
-    history_line.timestamp = time(nullptr);
-    history_line.cells = row;
-    
-    // Add to history buffer
-    scroll_history_.push_back(history_line);
-    
-    // Maintain maximum history size
-    if (scroll_history_.size() > MAX_HISTORY_LINES) {
-        scroll_history_.pop_front();
-    }
+    page_start_ = start;
 }
 
-void VTermManager::clear_scroll_history() {
-    scroll_history_.clear();
+void VTermManager::EnsureHistoryPage(int64_t index) {
+    if (page_start_ >= 0 && index >= page_start_ &&
+        index < page_start_ + static_cast<int64_t>(history_page_.size())) {
+        return;
+    }
+    const int64_t cap = static_cast<int64_t>(HistoryPageCapacity());
+    const int64_t max_start = std::max<int64_t>(0, history_total_ - cap);
+    int64_t start = index - cap / 2;
+    start = std::max<int64_t>(0, std::min(start, max_start));
+    LoadHistoryRange(start, std::min(cap, history_total_ - start));
 }
-const std::vector<VTermManager::TerminalCell>& VTermManager::get_screen_row(int row) const {
+
+const std::vector<VTermManager::TerminalCell>& VTermManager::GetHistoryLine(int64_t index) {
+    const int64_t tail_start = history_total_ - static_cast<int64_t>(scroll_history_.size());
+    if (index >= tail_start) {
+        return scroll_history_[static_cast<size_t>(index - tail_start)].cells;
+    }
+    EnsureHistoryPage(index);
+    if (page_start_ >= 0 && index >= page_start_ &&
+        index < page_start_ + static_cast<int64_t>(history_page_.size())) {
+        return history_page_[static_cast<size_t>(index - page_start_)].cells;
+    }
+    static std::vector<TerminalCell> empty;
+    return empty;
+}
+
+const std::vector<VTermManager::TerminalCell>& VTermManager::get_screen_row(int row) {
     // In alternate screen (vi mode), ignore scroll offset - no scrollback
     if (!in_alternate_screen_ && current_scroll_offset_ > 0) {
-        // When scrolling up (current_scroll_offset_ > 0), show history at the top
-        // Calculate how many history lines to show
-        int history_lines_to_show = (current_scroll_offset_ < (int)scroll_history_.size()) ? current_scroll_offset_ : (int)scroll_history_.size();
-        
+        // When scrolling up (current_scroll_offset_ > 0), show history at the top.
+        // History indices are absolute across the on-disk log; GetHistoryLine
+        // serves them from the tail window or pages them in from the file.
+        const int64_t history_lines_to_show =
+            std::min<int64_t>(current_scroll_offset_, history_total_);
+
         // If this row is in the history section
         if (row < history_lines_to_show) {
-            // Get from history (most recent history first)
-            int history_index = scroll_history_.size() - history_lines_to_show + row;
-            if (history_index >= 0 && history_index < (int)scroll_history_.size()) {
-                return scroll_history_[history_index].cells;
-            }
+            const int64_t history_index = history_total_ - history_lines_to_show + row;
+            return GetHistoryLine(history_index);
         }
         // Otherwise get from current screen (shifted down)
         else {
-            int screen_row = row - history_lines_to_show;
-            if (screen_row >= 0 && screen_row < rows_ && screen_row < (int)cell_buffer_.size()) {
-                return cell_buffer_[screen_row];
+            const int64_t screen_row = row - history_lines_to_show;
+            if (screen_row >= 0 && screen_row < rows_ &&
+                screen_row < static_cast<int64_t>(cell_buffer_.size())) {
+                return cell_buffer_[static_cast<size_t>(screen_row)];
             }
         }
     }
     // Not scrolling or in alternate screen, get from current screen normally
-    else if (row >= 0 && row < rows_ && row < (int)cell_buffer_.size()) {
-        return cell_buffer_[row];
+    else if (row >= 0 && row < rows_ && row < static_cast<int>(cell_buffer_.size())) {
+        return cell_buffer_[static_cast<size_t>(row)];
     }
     
     // Return empty row if out of bounds
@@ -727,7 +896,7 @@ void VTermManager::mark_output_consumed() {
 }
 
 void VTermManager::scroll_up(int lines) {
-    int total_lines = scroll_history_.size() + rows_;
+    int total_lines = static_cast<int>(history_total_) + rows_;
     int max_offset = total_lines - rows_; // Maximum scroll offset (showing oldest content)
     
     // Safety check - if total_lines is less than or equal to rows_, we cannot scroll up
@@ -739,18 +908,18 @@ void VTermManager::scroll_up(int lines) {
     int old_offset = current_scroll_offset_;
     current_scroll_offset_ = (std::min)(current_scroll_offset_ + lines, max_offset);
     
-    SSH_LOG("scroll_up: lines=" << lines << ", old_offset=" << old_offset << ", new_offset=" << current_scroll_offset_ << ", max_offset=" << max_offset << ", history_size=" << scroll_history_.size());
+    SSH_LOG("scroll_up: lines=" << lines << ", old_offset=" << old_offset << ", new_offset=" << current_scroll_offset_ << ", max_offset=" << max_offset << ", history_size=" << history_total_);
 }
 
 void VTermManager::scroll_down(int lines) {
     int old_offset = current_scroll_offset_;
     current_scroll_offset_ = (std::max)(current_scroll_offset_ - lines, 0);
     
-    SSH_LOG("scroll_down: lines=" << lines << ", old_offset=" << old_offset << ", new_offset=" << current_scroll_offset_ << ", history_size=" << scroll_history_.size());
+    SSH_LOG("scroll_down: lines=" << lines << ", old_offset=" << old_offset << ", new_offset=" << current_scroll_offset_ << ", history_size=" << history_total_);
 }
 
 void VTermManager::scroll_to_top() {
-    int total_lines = scroll_history_.size() + rows_;
+    int total_lines = static_cast<int>(history_total_) + rows_;
     current_scroll_offset_ = (std::max)(0, total_lines - rows_);
 }
 
@@ -759,7 +928,7 @@ void VTermManager::scroll_to_bottom() {
 }
 
 bool VTermManager::can_scroll_up() const {
-    int total_lines = scroll_history_.size() + rows_;
+    int total_lines = static_cast<int>(history_total_) + rows_;
     int max_offset = total_lines - rows_;
     return current_scroll_offset_ < max_offset;
 }

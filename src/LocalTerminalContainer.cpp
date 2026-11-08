@@ -1,5 +1,6 @@
 #include "LocalTerminalContainer.h"
 #include "SSHManager.h"
+#include "TerminalTheme.h"
 #include <fstream>
 #include <filesystem>
 #include <iostream>
@@ -270,16 +271,25 @@ void LocalTerminalContainer::UpdateBackBuffer() {
     int vterm_rows = m_vtermManager.get_rows();
     for (int row = 0; row < vterm_rows; ++row) {
         const auto& row_cells = m_vtermManager.get_screen_row(row);
-        for (int col = 0; col < m_cols && col < (int)row_cells.size(); ++col) {
-            const auto& cell = row_cells[col];
+        for (int col = 0; col < m_cols; ++col) {
             CellInstance& inst = m_backBuffer.cells[row][col];
             inst.cell_x = (float)col;
             inst.cell_y = (float)row;
-            inst.fg_color = cell.fg_color;
-            inst.bg_color = cell.bg_color;
-            inst.char_code = cell.char_code;
-            inst.width = cell.width;
-            inst.attrs = cell.attrs;
+            if (col < (int)row_cells.size()) {
+                const auto& cell = row_cells[col];
+                inst.fg_color = cell.fg_color;
+                inst.bg_color = cell.bg_color;
+                inst.char_code = cell.char_code;
+                inst.width = cell.width;
+                inst.attrs = cell.attrs;
+            } else {
+                // History rows are trimmed; missing cells render as blank.
+                inst.fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+                inst.bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
+                inst.char_code = 0;
+                inst.width = 1;
+                inst.attrs = 0;
+            }
         }
     }
 
