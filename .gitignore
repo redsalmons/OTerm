@@ -43,6 +43,7 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 *.cmake
+!cmake/SignMacOS.cmake
 
 # Visual Studio generated files
 *.exe

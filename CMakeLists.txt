@@ -171,6 +171,15 @@ else()
             "LINKER:-framework,AppKit"
             "LINKER:-framework,Security"
         )
+        # Re-sign with a stable identity so Keychain ACLs survive rebuilds;
+        # ad-hoc signatures change every build and re-prompt for the vault.
+        add_custom_command(TARGET OceanTerm POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DOTERM_BIN=$<TARGET_FILE:OceanTerm>
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacOS.cmake
+            COMMENT "Re-signing OceanTerm for stable Keychain ACL"
+            VERBATIM
+        )
     elseif(UNIX)
         target_link_libraries(OceanTerm PRIVATE pthread)
     endif()
