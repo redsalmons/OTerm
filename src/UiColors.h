@@ -30,15 +30,6 @@ struct UiPalette {
     wxColour accent;
 };
 
-// Temporary crash/stage diagnostics.
-#include <fstream>
-#include <filesystem>
-inline void UiThemeDebugStage(const char* stage) {
-    std::ofstream f((std::filesystem::temp_directory_path() / "oterm_theme_debug.log"),
-                    std::ios::app);
-    if (f.is_open()) f << stage << std::endl;
-}
-
 // Whether the OS is currently using a dark appearance for apps.
 // On Windows the Personalize registry value is authoritative and works
 // regardless of whether wxMSW dark mode could be enabled; elsewhere we use

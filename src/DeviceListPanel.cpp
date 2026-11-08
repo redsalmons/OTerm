@@ -226,7 +226,6 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     m_appearanceTimer.SetOwner(this);
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
         const bool dark = SystemUsesDarkTheme();
-        UiThemeDebugStage(dark ? "devicelist:tick dark" : "devicelist:tick light");
         if (dark != m_appWasDark) {
             m_appWasDark = dark;
             ApplyUiPalette();
@@ -355,7 +354,6 @@ void DeviceListPanel::RefreshDeviceList(const std::string& filter) {
 }
 
 void DeviceListPanel::ApplyUiPalette() {
-    UiThemeDebugStage("devicelist:apply");
     const UiPalette pal = CurrentUiPalette();
     SetBackgroundColour(pal.bgWindow);
     if (m_centerPanel) m_centerPanel->SetBackgroundColour(pal.bgWindow);

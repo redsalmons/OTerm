@@ -778,7 +778,6 @@ void FileTransferDialog::CreateControls() {
     m_appearanceTimer.SetOwner(this);
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
         const bool dark = SystemUsesDarkTheme();
-        UiThemeDebugStage(dark ? "transferdlg:tick dark" : "transferdlg:tick light");
         if (dark != m_appWasDark) {
             m_appWasDark = dark;
             ApplyUiPalette();
