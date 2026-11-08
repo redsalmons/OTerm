@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(OceanTerm VERSION 1.0.7 LANGUAGES C CXX)
+project(OceanTerm VERSION 1.0.8 LANGUAGES C CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
