@@ -746,17 +746,10 @@ void CustomTitleBar::NotifyAllTabsResize() {
                 
                 wxSize size = canvas->GetSize();
                 
-                // Get configured font size
-                int fontSize = GlobalConfig::GetFontSize();
-                if (fontSize == 0) fontSize = 12;
-
-                float dpiScale = canvas->GetDPIScale();
-                int terminalFontSize = fontSize;
-                if (dpiScale > 1.0f) {
-                    terminalFontSize = static_cast<int>(fontSize * 2);
-                }
-                if (terminalFontSize < 8) terminalFontSize = 8;
-                if (terminalFontSize > 72) terminalFontSize = 72;
+                float dpiScale = canvas->GetTerminalScale();
+                int terminalFontSize = canvas->GetTerminalFontSize();
+                const float coordinateScale = canvas->GetTerminalScale(TermGLCanvas::ScaleUsage::Coordinates);
+                size = wxSize(wxRound(size.x * coordinateScale), wxRound(size.y * coordinateScale));
 
                 // Calculate cell size based on actual canvas metrics or fallback
                 int cellWidth = (canvas->m_cellWidth > 0) ? canvas->m_cellWidth : (terminalFontSize / 2);

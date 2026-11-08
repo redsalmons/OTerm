@@ -377,8 +377,8 @@ void TerminalPanel::OnClosePanel(wxCommandEvent& event) {
 void TerminalPanel::OnSize(wxSizeEvent& event) {
     Layout();
     if (m_terminalContainer && m_canvas) {
-        // Convert to GL pixel space: cell metrics and margins are physical pixels
-        float glScale = m_canvas->GLPixelScale();
+        // Use the same terminal coordinates as rendering and hit testing.
+        float glScale = m_canvas->GetTerminalScale(TermGLCanvas::ScaleUsage::Coordinates);
         wxSize size = GetClientSize();
         size.SetWidth(static_cast<int>(size.GetWidth() * glScale));
         size.SetHeight(static_cast<int>(size.GetHeight() * glScale));
@@ -386,8 +386,7 @@ void TerminalPanel::OnSize(wxSizeEvent& event) {
         // Get font height for minimum height check
         int cellHeight = m_canvas->m_cellHeight;
         if (cellHeight <= 0) {
-            float dpiScale = m_canvas->m_dpiScale;
-            cellHeight = GlobalConfig::GetTerminalFontSize(dpiScale);
+            cellHeight = m_canvas->GetTerminalFontSize();
             if (cellHeight < 12) cellHeight = 12;
         }
         
@@ -410,11 +409,11 @@ void TerminalPanel::OnSize(wxSizeEvent& event) {
             return;
         }
         
-        float dpiScale = m_canvas->m_dpiScale;
+        float dpiScale = m_canvas->GetTerminalScale();
         
         // Robust fallback: if canvas hasn't initialized font metrics yet, calculate from config
         if (cellWidth <= 0 || cellHeight <= 0) {
-            int terminalFontSize = GlobalConfig::GetTerminalFontSize(dpiScale);
+            int terminalFontSize = m_canvas->GetTerminalFontSize();
             
             cellWidth = terminalFontSize / 2;
             cellHeight = terminalFontSize;

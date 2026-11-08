@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <algorithm>
 #include "SSHManager.h"
 
 #ifndef GL_CLAMP_TO_EDGE
@@ -16,16 +17,17 @@
 #endif
 
 struct GlyphBitmap {
-    int width = 0;   // bitmap pixels incl. left padding
+    int width = 0;   // Cropped bitmap dimensions in physical pixels
     int height = 0;
-    int advance = 0; // advance without padding
-    int bearingX = 0;
+    int advance = 0; // Measured advance, independent of the bitmap's ink bounds
+    float bearingX = 0;
+    float bearingY = 0;
     std::vector<unsigned char> rgba;
 };
 
 namespace {
 
-// Process-wide raster cache: "face#size" -> char -> pixels. Rasterizing a
+// Process-wide raster cache: "face#size#scale" -> char -> pixels. Rasterizing a
 // glyph via wxDC is the expensive part and is identical for every canvas,
 // so the result is shared; each FontAtlas only uploads to its own texture.
 std::mutex s_glyphMutex;
@@ -57,8 +59,9 @@ wxString CharToWxString(char32_t charCode) {
 // DC + bitmap pairs per character.
 class GlyphRasterizer {
 public:
-    GlyphRasterizer(const wxFont& font, int charHeight, int fontSize)
-        : m_font(font), m_charHeight(charHeight), m_fontSize(fontSize) {
+    GlyphRasterizer(const wxFont& font, int charHeight, int baseline, float rasterScale)
+        : m_font(font), m_charHeight(charHeight), m_baseline(baseline),
+          m_rasterScale(rasterScale) {
         m_measureBitmap.Create(1, 1, 24);
         m_measureDC.SelectObject(m_measureBitmap);
         m_measureGCDC = new wxGCDC(m_measureDC);
@@ -70,26 +73,6 @@ public:
         m_measureDC.SelectObject(wxNullBitmap);
     }
 
-    static int LeftPadding() {
-#ifdef _WIN32
-        return 2;
-#else
-        return 0;
-#endif
-    }
-
-    int YOffset(const wxGCDC& dc, const wxString& text) const {
-        wxSize ce = dc.GetTextExtent(text);
-        int yOffset;
-#ifdef _WIN32
-        // On Windows, shift text up to leave space at bottom for underline
-        yOffset = (m_charHeight - 12 - ce.y) / 2;
-#else
-        yOffset = (m_charHeight - ce.y) / 2;
-#endif
-        return yOffset < 0 ? 0 : yOffset;
-    }
-
     static void ExtractRGBA(const unsigned char* src, size_t srcStride,
                             unsigned char* dst, int width, int height) {
         for (int y = 0; y < height; ++y) {
@@ -97,63 +80,46 @@ public:
             unsigned char* d = dst + y * width * 4;
             for (int x = 0; x < width; ++x) {
                 unsigned char lum = (unsigned char)((row[x * 3] + row[x * 3 + 1] + row[x * 3 + 2]) / 3);
-                if (lum < 15) lum = 0;
-                d[x * 4 + 0] = lum;
-                d[x * 4 + 1] = lum;
-                d[x * 4 + 2] = lum;
+                // Straight alpha: GL_SRC_ALPHA applies coverage exactly once.
+                d[x * 4 + 0] = 255;
+                d[x * 4 + 1] = 255;
+                d[x * 4 + 2] = 255;
                 d[x * 4 + 3] = lum;
             }
         }
     }
 
     GlyphBitmap Rasterize(const wxString& text) {
-        wxSize extent = m_measureGCDC->GetTextExtent(text);
-        int charWidth = extent.x ? extent.x : m_fontSize;
-        const int leftPadding = LeftPadding();
-        const int bitmapWidth = charWidth + leftPadding;
-
-        wxBitmap bitmap(bitmapWidth, m_charHeight, 32);
-        wxMemoryDC memDC(bitmap);
-        memDC.SetBackground(wxBrush(wxColour(0, 0, 0)));
-        memDC.Clear();
-        {
-            wxGCDC dc(memDC);
-            dc.SetFont(m_font);
-            dc.SetTextForeground(wxColour(255, 255, 255));
-            dc.DrawText(text, leftPadding, YOffset(dc, text));
-        }
-        memDC.SelectObject(wxNullBitmap);
-
-        GlyphBitmap gb;
-        gb.width = bitmapWidth;
-        gb.height = m_charHeight;
-        gb.advance = charWidth;
-        gb.bearingX = -leftPadding;
-        wxImage image = bitmap.ConvertToImage();
-        if (!image.IsOk()) return gb;
-        gb.rgba.resize(bitmapWidth * m_charHeight * 4);
-        ExtractRGBA(image.GetData(), (size_t)bitmapWidth * 3,
-                    gb.rgba.data(), bitmapWidth, m_charHeight);
-        return gb;
+        auto glyphs = RasterizeBatch({{0, text}});
+        return glyphs.empty() ? GlyphBitmap{} : std::move(*glyphs.front().second);
     }
 
     // Rasterize many characters in one bitmap + DC pass; returns entries in
     // the same order. On failure fewer (or zero) entries may come back.
     std::vector<std::pair<char32_t, std::shared_ptr<GlyphBitmap>>> RasterizeBatch(
             const std::vector<std::pair<char32_t, wxString>>& chars) {
-        const int leftPadding = LeftPadding();
-        struct Slot { int w, x; };
+        // Text extents describe advances, not ink bounds. Reserve one line
+        // height around each run for overhangs, then keep only its visible ink.
+        const int padding = m_charHeight;
+        struct Slot { int w, h, x, advance, top, drawY; };
         std::vector<Slot> slots(chars.size());
         int totalW = 0;
+        int totalH = 0;
         for (size_t i = 0; i < chars.size(); ++i) {
-            wxSize e = m_measureGCDC->GetTextExtent(chars[i].second);
-            slots[i].w = (e.x ? e.x : m_fontSize) + leftPadding;
-            slots[i].x = totalW;
+            int width, height, descent;
+            m_measureGCDC->GetTextExtent(chars[i].second, &width, &height, &descent);
+            const int textTop = m_baseline - (height - descent);
+            const int top = std::min(0, textTop) - padding;
+            const int bottom = std::max(m_charHeight, m_baseline + descent) + padding;
+            slots[i] = {width + 2 * padding, bottom - top, totalW,
+                        width, top, textTop - top};
             totalW += slots[i].w;
+            totalH = std::max(totalH, slots[i].h);
         }
-        if (totalW <= 0) totalW = 1;
+        if (chars.empty()) return {};
 
-        wxBitmap bitmap(totalW, m_charHeight, 32);
+        wxBitmap bitmap;
+        bitmap.CreateWithLogicalSize(totalW, totalH, m_rasterScale, 32);
         wxMemoryDC memDC(bitmap);
         memDC.SetBackground(wxBrush(wxColour(0, 0, 0)));
         memDC.Clear();
@@ -162,8 +128,7 @@ public:
             dc.SetFont(m_font);
             dc.SetTextForeground(wxColour(255, 255, 255));
             for (size_t i = 0; i < chars.size(); ++i) {
-                dc.DrawText(chars[i].second, slots[i].x + leftPadding,
-                            YOffset(dc, chars[i].second));
+                dc.DrawText(chars[i].second, slots[i].x + padding, slots[i].drawY);
             }
         }
         memDC.SelectObject(wxNullBitmap);
@@ -174,12 +139,34 @@ public:
         const unsigned char* rgb = image.GetData();
         for (size_t i = 0; i < chars.size(); ++i) {
             auto gb = std::make_shared<GlyphBitmap>();
-            gb->width = slots[i].w;
-            gb->height = m_charHeight;
-            gb->advance = slots[i].w - leftPadding;
-            gb->bearingX = -leftPadding;
+            const int pixelX = wxRound(slots[i].x * m_rasterScale);
+            const int pixelW = wxRound((slots[i].x + slots[i].w) * m_rasterScale) - pixelX;
+            const int pixelH = wxRound(slots[i].h * m_rasterScale);
+            int left = pixelW, top = pixelH, right = -1, bottom = -1;
+            for (int y = 0; y < pixelH; ++y) {
+                for (int x = 0; x < pixelW; ++x) {
+                    const auto* p = rgb + ((size_t)y * image.GetWidth() + pixelX + x) * 3;
+                    if ((p[0] + p[1] + p[2]) / 3 == 0) continue;
+                    left = std::min(left, x);
+                    right = std::max(right, x);
+                    top = std::min(top, y);
+                    bottom = std::max(bottom, y);
+                }
+            }
+            gb->advance = slots[i].advance;
+            if (right < left) { // Space or another glyph without visible ink
+                gb->width = gb->height = 1;
+                gb->rgba = {255, 255, 255, 0};
+                out.emplace_back(chars[i].first, gb);
+                continue;
+            }
+            gb->width = right - left + 1;
+            gb->height = bottom - top + 1;
+            gb->bearingX = left / m_rasterScale - padding;
+            gb->bearingY = slots[i].top + top / m_rasterScale;
             gb->rgba.resize(gb->width * gb->height * 4);
-            ExtractRGBA(rgb + slots[i].x * 3, (size_t)totalW * 3,
+            ExtractRGBA(rgb + ((size_t)top * image.GetWidth() + pixelX + left) * 3,
+                        (size_t)image.GetWidth() * 3,
                         gb->rgba.data(), gb->width, gb->height);
             out.emplace_back(chars[i].first, gb);
         }
@@ -189,7 +176,8 @@ public:
 private:
     wxFont m_font;
     int m_charHeight;
-    int m_fontSize;
+    int m_baseline;
+    float m_rasterScale;
     wxBitmap m_measureBitmap;
     wxMemoryDC m_measureDC;
     wxGCDC* m_measureGCDC;
@@ -204,8 +192,10 @@ FontAtlas::FontAtlas()
     , m_fontSize(0)
     , m_charHeight(0)
     , m_currentTime(0) {
-    for (int i = 0; i < 128; ++i) {
-        m_asciiMetricsCached[i] = false;
+    for (int s = 0; s < 4; ++s) {
+        for (int i = 0; i < 128; ++i) {
+            m_asciiMetricsCached[s][i] = false;
+        }
     }
 }
 
@@ -215,30 +205,30 @@ FontAtlas::~FontAtlas() {
     }
 }
 
-bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
+bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName, float rasterScale) {
     InitSSHLogFile();
     SSH_LOG("FontAtlas::InitializeSystemFont called with fontSize=" << fontSize << ", fontName='" << fontName << "'");
 
     m_fontSize = fontSize;
+    m_rasterScale = rasterScale;
 
-    if (fontName.IsEmpty()) {
-        // Use default font
-        m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
-        SSH_LOG("FontAtlas: Using default modern font");
-    } else {
-        // Use specified font from config
-        m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false, fontName);
-        SSH_LOG("FontAtlas: Using specified font from config: " << fontName);
-    }
-
-    if (!m_font.IsOk()) {
-        SSH_LOG("FontAtlas: Failed to create font with name '" << fontName << "' and size " << fontSize);
-        // Fallback to default font
-        m_font = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
-        if (!m_font.IsOk()) {
-            SSH_LOG("FontAtlas: Fallback font also failed");
-            return false;
+    // Create the four style variants up front: index = bold | italic<<1,
+    // matching the style bits used by CellInstance::attrs.
+    for (int s = 0; s < 4; ++s) {
+        const auto fstyle = (s & 2) ? wxFONTSTYLE_ITALIC : wxFONTSTYLE_NORMAL;
+        const auto fweight = (s & 1) ? wxFONTWEIGHT_BOLD : wxFONTWEIGHT_NORMAL;
+        if (fontName.IsEmpty()) {
+            m_fonts[s] = wxFont(fontSize, wxFONTFAMILY_MODERN, fstyle, fweight);
+        } else {
+            m_fonts[s] = wxFont(fontSize, wxFONTFAMILY_MODERN, fstyle, fweight, false, fontName);
         }
+        if (!m_fonts[s].IsOk()) {
+            m_fonts[s] = wxFont(fontSize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+        }
+    }
+    if (!m_fonts[0].IsOk()) {
+        SSH_LOG("FontAtlas: Failed to create font with name '" << fontName << "' and size " << fontSize);
+        return false;
     }
 
     // Calculate actual character height including descenders
@@ -246,14 +236,16 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
     wxBitmap tempBitmap(1, 1, 24);
     wxMemoryDC tempDC(tempBitmap);
     wxGCDC gcdc(tempDC); // Use GCDC for accurate font metrics
-    gcdc.SetFont(m_font);
+    gcdc.SetFont(m_fonts[0]);
 
     // Get text extent for a string containing ascenders and descenders
     wxString testChar = "Mg|jpqy_";
-    wxSize extent = gcdc.GetTextExtent(testChar);
+    int textWidth, textHeight, descent;
+    gcdc.GetTextExtent(testChar, &textWidth, &textHeight, &descent);
 
     // Use the actual character height including descenders
-    m_charHeight = extent.y;
+    m_charHeight = textHeight;
+    m_baseline = textHeight - descent;
 
 #ifdef _WIN32
     // On Windows, add padding to character height to provide space for underline rendering
@@ -267,17 +259,21 @@ bool FontAtlas::InitializeSystemFont(int fontSize, const wxString& fontName) {
         m_charHeight = fontSize;
     }
 
-    m_cacheKey = m_font.GetFaceName().ToStdString() + "#" + std::to_string(m_fontSize);
+    const std::string faceKey = m_fonts[0].GetFaceName().ToStdString() + "#"
+        + std::to_string(m_fontSize) + "#" + std::to_string(m_rasterScale);
+    for (int s = 0; s < 4; ++s) {
+        m_cacheKeys[s] = faceKey + "#" + std::to_string(s);
+    }
 
-    SSH_LOG("FontAtlas: Font created successfully, name='" << m_font.GetFaceName() << "', size=" << fontSize << ", charHeight=" << m_charHeight);
+    SSH_LOG("FontAtlas: Font created successfully, name='" << m_fonts[0].GetFaceName() << "', size=" << fontSize << ", charHeight=" << m_charHeight << ", rasterScale=" << m_rasterScale);
     return GenerateTextureAtlas();
 }
 
 bool FontAtlas::GenerateTextureAtlas() {
     int charSize = m_fontSize;
     
-    m_textureWidth = 1024;
-    m_textureHeight = 1024;
+    m_textureWidth = wxRound(1024 * m_rasterScale);
+    m_textureHeight = wxRound(1024 * m_rasterScale);
     
     SSH_LOG("FontAtlas: Creating empty texture atlas for dynamic loading: " << m_textureWidth << "x" << m_textureHeight);
     
@@ -335,24 +331,25 @@ bool FontAtlas::GenerateTextureAtlas() {
     
     // Initialize free space tracking
     m_freeSpaces.clear();
-    m_freeSpaces.push_back(std::make_pair(0, 0));
+    m_freeSpaces.emplace_back(0, 0, m_textureWidth, m_textureHeight);
     
-    // Pre-load ASCII characters: rasterize in one pass and share the bitmaps
-    // process-wide; later atlases only upload from the cache.
-    {
+    // Pre-load ASCII characters for every style variant: rasterize in one
+    // pass per style and share the bitmaps process-wide; later atlases only
+    // upload from the cache.
+    for (int style = 0; style < 4; ++style) {
         std::vector<std::pair<char32_t, wxString>> missing;
         {
             std::lock_guard<std::mutex> lock(s_glyphMutex);
-            auto& byChar = s_glyphCache[m_cacheKey];
+            auto& byChar = s_glyphCache[m_cacheKeys[style]];
             for (char32_t c = 32; c <= 126; ++c) {
                 if (!byChar.count(c)) missing.emplace_back(c, CharToWxString(c));
             }
         }
         if (!missing.empty()) {
-            GlyphRasterizer rasterizer(m_font, m_charHeight, m_fontSize);
+            GlyphRasterizer rasterizer(m_fonts[style], m_charHeight, m_baseline, m_rasterScale);
             auto glyphs = rasterizer.RasterizeBatch(missing);
             std::lock_guard<std::mutex> lock(s_glyphMutex);
-            auto& byChar = s_glyphCache[m_cacheKey];
+            auto& byChar = s_glyphCache[m_cacheKeys[style]];
             for (auto& g : glyphs) {
                 byChar[g.first] = std::move(g.second);
             }
@@ -361,11 +358,11 @@ bool FontAtlas::GenerateTextureAtlas() {
             std::shared_ptr<GlyphBitmap> gb;
             {
                 std::lock_guard<std::mutex> lock(s_glyphMutex);
-                auto it = s_glyphCache[m_cacheKey].find(c);
-                if (it != s_glyphCache[m_cacheKey].end()) gb = it->second;
+                auto it = s_glyphCache[m_cacheKeys[style]].find(c);
+                if (it != s_glyphCache[m_cacheKeys[style]].end()) gb = it->second;
             }
             if (gb) {
-                UploadGlyph(c, gb->width, gb->height, gb->advance, gb->bearingX, gb->rgba.data());
+                UploadGlyph(c, style, gb->width, gb->height, gb->advance, gb->bearingX, gb->bearingY, gb->rgba.data());
             }
         }
     }
@@ -374,10 +371,11 @@ bool FontAtlas::GenerateTextureAtlas() {
     return true;
 }
 
-bool FontAtlas::AddCharToAtlas(char32_t charCode) {
+bool FontAtlas::AddCharToAtlas(char32_t charCode, int style) {
+    style &= 3;
     // Check if character already exists
-    auto it = m_charMetrics.find(charCode);
-    if (it != m_charMetrics.end()) {
+    auto it = m_charMetrics[style].find(charCode);
+    if (it != m_charMetrics[style].end()) {
         it->second.last_used = m_currentTime++;
         return true;
     }
@@ -385,33 +383,33 @@ bool FontAtlas::AddCharToAtlas(char32_t charCode) {
     std::shared_ptr<GlyphBitmap> glyph;
     {
         std::lock_guard<std::mutex> lock(s_glyphMutex);
-        auto& byChar = s_glyphCache[m_cacheKey];
+        auto& byChar = s_glyphCache[m_cacheKeys[style]];
         auto git = byChar.find(charCode);
         if (git != byChar.end()) glyph = git->second;
     }
     if (!glyph) {
-        GlyphRasterizer rasterizer(m_font, m_charHeight, m_fontSize);
+        GlyphRasterizer rasterizer(m_fonts[style], m_charHeight, m_baseline, m_rasterScale);
         glyph = std::make_shared<GlyphBitmap>(rasterizer.Rasterize(CharToWxString(charCode)));
         std::lock_guard<std::mutex> lock(s_glyphMutex);
-        auto& byChar = s_glyphCache[m_cacheKey];
+        auto& byChar = s_glyphCache[m_cacheKeys[style]];
         if (byChar.size() < kGlyphCacheLimitPerFont) {
             byChar[charCode] = glyph;
         }
     }
 
-    return UploadGlyph(charCode, glyph->width, glyph->height,
-                       glyph->advance, glyph->bearingX, glyph->rgba.data());
+    return UploadGlyph(charCode, style, glyph->width, glyph->height,
+                       glyph->advance, glyph->bearingX, glyph->bearingY, glyph->rgba.data());
 }
 
-bool FontAtlas::UploadGlyph(char32_t charCode, int bitmapWidth, int bitmapHeight,
-                            int advance, int bearingX, const unsigned char* rgba) {
+bool FontAtlas::UploadGlyph(char32_t charCode, int style, int bitmapWidth, int bitmapHeight,
+                            int advance, float bearingX, float bearingY, const unsigned char* rgba) {
     if (bitmapWidth <= 0 || bitmapHeight <= 0 || !rgba) return false;
 
     // Find free space in atlas
     int x, y;
     if (!FindFreeSpace(bitmapWidth, bitmapHeight, x, y)) {
-        // No space available, evict LRU
-        EvictLRU();
+        // Reuse an old slot large enough for this glyph's actual ink bounds.
+        EvictLRU(bitmapWidth, bitmapHeight);
         if (!FindFreeSpace(bitmapWidth, bitmapHeight, x, y)) {
             SSH_LOG("FontAtlas: Failed to find space for character 0x" << std::hex << static_cast<uint32_t>(charCode) << std::dec);
             return false;
@@ -428,53 +426,63 @@ bool FontAtlas::UploadGlyph(char32_t charCode, int bitmapWidth, int bitmapHeight
     metrics.h = static_cast<float>(bitmapHeight) / m_textureHeight;
     metrics.advance = static_cast<float>(advance);
     metrics.bearingX = static_cast<float>(bearingX);
-    metrics.bearingY = 0.0f;
-    metrics.actual_height = static_cast<float>(bitmapHeight);
+    metrics.bearingY = bearingY;
+    metrics.actual_width = static_cast<float>(bitmapWidth) / m_rasterScale;
+    metrics.actual_height = static_cast<float>(bitmapHeight) / m_rasterScale;
     metrics.last_used = m_currentTime++;
     metrics.tex_x = x;
     metrics.tex_y = y;
     metrics.tex_w = bitmapWidth;
     metrics.tex_h = bitmapHeight;
 
-    m_charMetrics[charCode] = metrics;
+    m_charMetrics[style & 3][charCode] = metrics;
     return true;
 }
 
 bool FontAtlas::FindFreeSpace(int charWidth, int charHeight, int& outX, int& outY) {
-    if (m_freeSpaces.empty()) {
-        return false;
-    }
-    
-    auto& pos = m_freeSpaces.back();
-    outX = pos.first;
-    outY = pos.second;
-    
-    pos.first += charWidth + 2;
-    if (pos.first + charWidth > m_textureWidth) {
-        pos.first = 0;
-        pos.second += charHeight + 2;
-        if (pos.second + charHeight > m_textureHeight) {
-            return false;
+    // Cropped glyphs have different heights. An origin alone is insufficient
+    // to describe reusable space: a taller/wider glyph could overwrite a neighbour.
+    auto best = m_freeSpaces.end();
+    for (auto it = m_freeSpaces.begin(); it != m_freeSpaces.end(); ++it) {
+        if (it->width >= charWidth && it->height >= charHeight &&
+            (best == m_freeSpaces.end() ||
+             it->width * it->height < best->width * best->height)) {
+            best = it;
         }
     }
-    
+    if (best == m_freeSpaces.end()) return false;
+    const wxRect free = *best;
+    m_freeSpaces.erase(best);
+    outX = free.x;
+    outY = free.y;
+    if (free.width > charWidth)
+        m_freeSpaces.emplace_back(free.x + charWidth, free.y,
+                                  free.width - charWidth, charHeight);
+    if (free.height > charHeight)
+        m_freeSpaces.emplace_back(free.x, free.y + charHeight,
+                                  free.width, free.height - charHeight);
     return true;
 }
 
-void FontAtlas::EvictLRU() {
+void FontAtlas::EvictLRU(int requiredWidth, int requiredHeight) {
     char32_t oldestChar = 0;
+    int oldestStyle = 0;
     int oldestTime = m_currentTime;
     
-    for (const auto& [charCode, metrics] : m_charMetrics) {
-        if (metrics.last_used < oldestTime) {
-            oldestTime = metrics.last_used;
-            oldestChar = charCode;
+    for (int s = 0; s < 4; ++s) {
+        for (const auto& [charCode, metrics] : m_charMetrics[s]) {
+            if (metrics.tex_w >= requiredWidth && metrics.tex_h >= requiredHeight &&
+                metrics.last_used < oldestTime) {
+                oldestTime = metrics.last_used;
+                oldestChar = charCode;
+                oldestStyle = s;
+            }
         }
     }
     
     if (oldestChar != 0) {
         SSH_LOG("FontAtlas: Evicting LRU character 0x" << std::hex << static_cast<uint32_t>(oldestChar) << std::dec);
-        const auto& metrics = m_charMetrics[oldestChar];
+        const auto& metrics = m_charMetrics[oldestStyle][oldestChar];
         
         int totalPixels = metrics.tex_w * metrics.tex_h * 4;
         unsigned char* clearData = new unsigned char[totalPixels];
@@ -482,9 +490,10 @@ void FontAtlas::EvictLRU() {
         UpdateTexture(metrics.tex_x, metrics.tex_y, metrics.tex_w, metrics.tex_h, clearData);
         delete[] clearData;
         
-        m_freeSpaces.push_back(std::make_pair(metrics.tex_x, metrics.tex_y));
+        m_freeSpaces.emplace_back(metrics.tex_x, metrics.tex_y, metrics.tex_w, metrics.tex_h);
+        if (oldestChar < 128) m_asciiMetricsCached[oldestStyle][oldestChar] = false;
         
-        m_charMetrics.erase(oldestChar);
+        m_charMetrics[oldestStyle].erase(oldestChar);
     }
 }
 
@@ -499,32 +508,33 @@ void FontAtlas::UpdateTexture(int x, int y, int width, int height, const unsigne
     }
 }
 
-CharMetrics FontAtlas::GetCharMetrics(char32_t charCode) {
+CharMetrics FontAtlas::GetCharMetrics(char32_t charCode, int style) {
+    style &= 3;
     if (charCode < 128) {
-        if (m_asciiMetricsCached[charCode]) {
-            return m_asciiMetrics[charCode];
+        if (m_asciiMetricsCached[style][charCode]) {
+            return m_asciiMetrics[style][charCode];
         }
     }
 
-    auto it = m_charMetrics.find(charCode);
-    if (it != m_charMetrics.end()) {
+    auto it = m_charMetrics[style].find(charCode);
+    if (it != m_charMetrics[style].end()) {
         it->second.last_used = m_currentTime++;
         CharMetrics metrics = it->second;
         if (charCode < 128) {
-            m_asciiMetrics[charCode] = metrics;
-            m_asciiMetricsCached[charCode] = true;
+            m_asciiMetrics[style][charCode] = metrics;
+            m_asciiMetricsCached[style][charCode] = true;
         }
         return metrics;
     }
     
     // Character not found, try to add it dynamically
-    if (AddCharToAtlas(charCode)) {
-        it = m_charMetrics.find(charCode);
-        if (it != m_charMetrics.end()) {
+    if (AddCharToAtlas(charCode, style)) {
+        it = m_charMetrics[style].find(charCode);
+        if (it != m_charMetrics[style].end()) {
             CharMetrics metrics = it->second;
             if (charCode < 128) {
-                m_asciiMetrics[charCode] = metrics;
-                m_asciiMetricsCached[charCode] = true;
+                m_asciiMetrics[style][charCode] = metrics;
+                m_asciiMetricsCached[style][charCode] = true;
             }
             return metrics;
         }
@@ -539,6 +549,7 @@ CharMetrics FontAtlas::GetCharMetrics(char32_t charCode) {
     defaultMetrics.advance = static_cast<float>(m_fontSize);
     defaultMetrics.bearingX = 0.0f;
     defaultMetrics.bearingY = static_cast<float>(m_fontSize);
+    defaultMetrics.actual_width = static_cast<float>(m_fontSize);
     defaultMetrics.actual_height = static_cast<float>(m_fontSize);
     defaultMetrics.last_used = 0;
     defaultMetrics.tex_x = 0;

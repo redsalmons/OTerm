@@ -54,12 +54,13 @@ public:
 
     void ClearScreenData();
 
-    float GetDPIScale() const { return m_dpiScale; }
-
-    // Scale factor between logical window size and OpenGL framebuffer pixels.
-    // On macOS the GL drawable uses view (point) coordinates, so this is 1.
-    float GLPixelScale() const;
-    float GLFramebufferScale() const;
+    enum class ScaleUsage {
+        Layout,      // Configured font size and margins -> terminal coordinates
+        Coordinates, // wx window/mouse coordinates -> terminal coordinates
+        Raster       // Terminal coordinates -> framebuffer/bitmap pixels
+    };
+    float GetTerminalScale(ScaleUsage usage = ScaleUsage::Layout) const;
+    int GetTerminalFontSize() const;
 
 
 
@@ -226,7 +227,6 @@ public:
 
     bool m_glInitialized;
 
-    float m_dpiScale;
 
 
 

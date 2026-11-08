@@ -307,33 +307,11 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
 
 
-        // Get configured font size
-
-        int fontSize = GlobalConfig::GetFontSize();
-
-        if (fontSize == 0) fontSize = 12; // Default if not configured
-
-
-
-        // Get DPI scale from canvas
-
-        float dpiScale = m_termCanvas->GetDPIScale();
-
-
-
-        // Apply x2 scaling only if DPI scaling is detected (same as in TermGLCanvas)
-
-        int terminalFontSize = fontSize;
-
-        if (dpiScale > 1.0f) {
-
-            terminalFontSize = static_cast<int>(fontSize * 2);
-
-        }
-
-        if (terminalFontSize < 8) terminalFontSize = 8;
-
-        if (terminalFontSize > 72) terminalFontSize = 72;
+        // Use the canvas's platform scaling for both layout and cell sizing.
+        float dpiScale = m_termCanvas->GetTerminalScale();
+        int terminalFontSize = m_termCanvas->GetTerminalFontSize();
+        const float coordinateScale = m_termCanvas->GetTerminalScale(TermGLCanvas::ScaleUsage::Coordinates);
+        canvasSize = wxSize(wxRound(canvasSize.x * coordinateScale), wxRound(canvasSize.y * coordinateScale));
 
 
 
@@ -381,7 +359,7 @@ ConnectInfo::ConnectInfo(wxWindow* parent, const wxString& label, wxWindow* cont
 
         SSH_LOG("ConnectInfo: Canvas size: " << canvasSize.GetWidth() << "x" << canvasSize.GetHeight()
 
-                << ", Font size: " << fontSize << ", Terminal font size: " << terminalFontSize
+                << ", Terminal font size: " << terminalFontSize
 
                 << ", Cell size: " << cellWidth << "x" << cellHeight
 
@@ -1352,4 +1330,3 @@ ConnectInfo::~ConnectInfo() {
     m_terminalThread = nullptr;
 
 }
-

@@ -17,6 +17,7 @@
 #include <iomanip>
 
 #include <algorithm>
+#include <cmath>
 
 #include <chrono>
 
@@ -70,7 +71,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
       m_cursor_row(0), m_cursor_col(0), m_cursor_visible(true), m_cursor_out_of_bounds(false), m_scroll_offset(0),
 
-      m_cached_cell_height(24), m_glInitialized(false), m_dpiScale(1.0f),
+      m_cached_cell_height(24), m_glInitialized(false),
 
       m_selecting(false), m_selection_start_row(0), m_selection_start_col(0),
 
@@ -99,30 +100,6 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
       m_wheelRotationAccumulator(0),
       m_zoomWheelAccumulator(0) {
 
-    // Calculate DPI scale
-
-    if (GetHandle()) {
-
-        m_dpiScale = GetDPIScaleFactor();
-
-    } else {
-
-        int screenNum = wxDisplay::GetFromWindow(this);
-
-        if (screenNum != wxNOT_FOUND) {
-
-            wxDisplay display(screenNum);
-
-            int dpi = display.GetPPI().GetWidth();
-
-            m_dpiScale = static_cast<float>(dpi) / 96.0f;
-
-        }
-
-    }
-
-    if (m_dpiScale <= 0.0f) m_dpiScale = 1.0f;
-    
     SetBackgroundStyle(wxBG_STYLE_PAINT);
 
     SSH_LOG("TermGLCanvas constructor called, this=" << this << ", ownsThreads=" << m_ownsThreads);
@@ -230,7 +207,7 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
 
 
-    SSH_LOG("TermGLCanvas constructed, IsShown: " << IsShown() << ", IsEnabled: " << IsEnabled() << ", DPI scale: " << m_dpiScale);
+    SSH_LOG("TermGLCanvas constructed, IsShown: " << IsShown() << ", IsEnabled: " << IsEnabled() << ", layout scale: " << GetTerminalScale());
 
 }
 
@@ -312,29 +289,20 @@ TermGLCanvas::~TermGLCanvas() {
 
 
 
-float TermGLCanvas::GLPixelScale() const {
-
-#if defined(__WXMAC__) || defined(__WXMSW__)
-
-    return 1.0f;
-
-#else
-
-    return m_dpiScale;
-
-#endif
-
+int TermGLCanvas::GetTerminalFontSize() const {
+    return GlobalConfig::GetTerminalFontSize(GetTerminalScale());
 }
 
-// Physical framebuffer scale: on Retina displays the GL surface is 2x the
-// logical widget size. The viewport must be sized in physical pixels while
-// the ortho projection stays in logical coordinates.
-float TermGLCanvas::GLFramebufferScale() const {
+float TermGLCanvas::GetTerminalScale(ScaleUsage usage) const {
 #ifdef __WXMAC__
-    float scale = GetContentScaleFactor();
-    return scale > 0.0f ? scale : 1.0f;
+    // Cocoa lays out in points. Retina changes pixel density, not font size.
+    return usage == ScaleUsage::Raster ? GetContentScaleFactor() : 1.0f;
+#elif defined(__WXMSW__)
+    // Preserve Windows font/margin scaling; wx window coordinates are pixels.
+    return usage == ScaleUsage::Layout ? GetDPIScaleFactor() : 1.0f;
 #else
-    return 1.0f;
+    // Preserve the existing Linux terminal coordinate and font scaling.
+    return usage == ScaleUsage::Raster ? 1.0f : GetDPIScaleFactor();
 #endif
 }
 
@@ -433,21 +401,14 @@ bool TermGLCanvas::CreateFontAtlas() {
 
     std::string fontName = GlobalConfig::GetFontName();
 
-    int fontSize = GlobalConfig::GetEffectiveFontSize();
+    // Layout size is independent of the raster density on macOS.
 
-    // Rasterize glyphs at the physical pixel size for the current DPI scale
-
-    int terminalFontSize = static_cast<int>(fontSize * m_dpiScale + 0.5f);
-
-    if (terminalFontSize <= 0) terminalFontSize = fontSize;
-
-    if (terminalFontSize < 8) terminalFontSize = 8;
-
-    if (terminalFontSize > 72) terminalFontSize = 72;
+    int terminalFontSize = GetTerminalFontSize();
 
     m_fontSize = terminalFontSize;
 
-    if (!m_fontAtlas->InitializeSystemFont(terminalFontSize, wxString::FromUTF8(fontName.c_str()))) {
+    if (!m_fontAtlas->InitializeSystemFont(terminalFontSize, wxString::FromUTF8(fontName.c_str()),
+                                         GetTerminalScale(ScaleUsage::Raster))) {
 
         SSH_LOG("Failed to initialize font atlas with configured font");
 
@@ -691,11 +652,12 @@ void TermGLCanvas::InitializeGL() {
 
     // Set up OpenGL state
     wxSize size = GetSize();
-    float glScale = GLPixelScale();
+    float glScale = GetTerminalScale(ScaleUsage::Coordinates);
     int physW = static_cast<int>(size.GetWidth() * glScale);
     int physH = static_cast<int>(size.GetHeight() * glScale);
     if (physW > 0 && physH > 0) {
-        glViewport(0, 0, physW, physH);
+        const float rasterScale = GetTerminalScale(ScaleUsage::Raster);
+        glViewport(0, 0, wxRound(physW * rasterScale), wxRound(physH * rasterScale));
     }
 
     glClearColor(0.04f, 0.04f, 0.04f, 1.0f);
@@ -804,7 +766,8 @@ void TermGLCanvas::InitializeFontMetrics() {
 
 
 
-    m_cellHeight = m_charHeight;
+    // Line height = glyph extent height + ~15% leading so rows don't touch.
+    m_cellHeight = m_charHeight + std::max(1, m_charHeight / 6);
 
 
 
@@ -870,8 +833,8 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     } else {
         // Calculate scroll offset to keep cursor visible (account for 4px top/bottom margins, DPI-scaled)
         wxSize size = GetSize();
-        int scroll_margin_y = static_cast<int>(4 * m_dpiScale);
-        int availableHeight = static_cast<int>(size.GetHeight() * GLPixelScale()) - scroll_margin_y * 2;
+        int scroll_margin_y = static_cast<int>(4 * GetTerminalScale());
+        int availableHeight = static_cast<int>(size.GetHeight() * GetTerminalScale(ScaleUsage::Coordinates)) - scroll_margin_y * 2;
         int visible_rows = availableHeight / m_cached_cell_height;
         
         // Calculate scroll offset to keep cursor at bottom
@@ -892,16 +855,21 @@ void TermGLCanvas::SetCursorPosition(int row, int col, bool in_alt_screen, int v
     m_cursor_out_of_bounds = (vterm_scroll_offset > 0 && screen_row >= max_rows);
 
     // 3. Now calculate cursor rect with the correct updated m_scroll_offset
-    float margin_x = 8.0f * m_dpiScale;
-    float margin_y = 4.0f * m_dpiScale;
+    float margin_x = 8.0f * GetTerminalScale();
+    float margin_y = 4.0f * GetTerminalScale();
     float cell_width = static_cast<float>(m_cellWidth);
     float cell_height = static_cast<float>(m_cellHeight);
 
+    // The text block (font extent height) is centred inside the taller row
+    // pitch; glyphs are positioned relative to it, not the full cell.
+    const float leading_offset = (cell_height - static_cast<float>(m_charHeight)) * 0.5f;
+    const float text_h = static_cast<float>(m_charHeight);
+
     float cursor_x = col * cell_width + margin_x;
     float cursor_y = (screen_row - m_scroll_offset) * cell_height + margin_y;
-    float cursor_height = cell_height * 0.85f;
-    float cursor_y_offset = (cell_height - cursor_height) / 2.0f;
-    cursor_y += cursor_y_offset;
+    float cursor_height = text_h * 0.85f;
+    float cursor_y_offset = (text_h - cursor_height) * 0.5f;
+    cursor_y += leading_offset + cursor_y_offset;
 
     // Save to member for Render() to use
     if (m_cursor_out_of_bounds) {
@@ -928,7 +896,7 @@ void TermGLCanvas::UpdateIMEBoxPlacement() {
 
     if (!m_imeInputBox) return;
 
-    const float glScale = GLPixelScale();
+    const float glScale = GetTerminalScale(ScaleUsage::Coordinates);
 
     // m_cursorRect is in GL pixel space; clamp it there first
 
@@ -969,14 +937,14 @@ void TermGLCanvas::Render() {
 
     wxSize size = GetSize();
 
-    float glScale = GLPixelScale();
+    float glScale = GetTerminalScale(ScaleUsage::Coordinates);
 
     int physW = static_cast<int>(size.GetWidth() * glScale);
 
     int physH = static_cast<int>(size.GetHeight() * glScale);
 
-    int fbScale = static_cast<int>(GLFramebufferScale());
-    glViewport(0, 0, physW * fbScale, physH * fbScale);
+    const float rasterScale = GetTerminalScale(ScaleUsage::Raster);
+    glViewport(0, 0, wxRound(physW * rasterScale), wxRound(physH * rasterScale));
 
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -994,9 +962,9 @@ void TermGLCanvas::Render() {
 
     // Margin offset: 8px left/right, 4px top/bottom (DPI-scaled for high DPI screens)
 
-    const float margin_x = 8.0f * m_dpiScale;
+    const float margin_x = 8.0f * GetTerminalScale();
 
-    const float margin_y = 4.0f * m_dpiScale;
+    const float margin_y = 4.0f * GetTerminalScale();
 
 
 
@@ -1005,6 +973,11 @@ void TermGLCanvas::Render() {
     float cell_width = static_cast<float>(m_cellWidth);
 
     float cell_height = static_cast<float>(m_cellHeight);
+
+    // The text block (font extent height) is centred inside the taller row
+    // pitch; glyphs are positioned relative to it, not the full cell.
+    const float leading_offset = (cell_height - static_cast<float>(m_charHeight)) * 0.5f;
+    const float text_h = static_cast<float>(m_charHeight);
 
     
 
@@ -1148,7 +1121,9 @@ void TermGLCanvas::Render() {
 
             char32_t render_char = (cell.char_code == '\t') ? ' ' : cell.char_code;
 
-            m_fontAtlas->GetCharMetrics(render_char);
+            const int style = ((cell.attrs & 0x01) ? 1 : 0) | ((cell.attrs & 0x04) ? 2 : 0);
+
+            m_fontAtlas->GetCharMetrics(render_char, style);
 
         }
 
@@ -1168,6 +1143,9 @@ void TermGLCanvas::Render() {
 
         glBegin(GL_QUADS);
 
+        // Snap glyph origins to physical pixels for crisp stems.
+        const float rs = GetTerminalScale(ScaleUsage::Raster);
+
         for (const auto& cell : m_screen_cells) {
 
             // Skip continuation cells (char_code = 0 for wide character continuation)
@@ -1186,31 +1164,13 @@ void TermGLCanvas::Render() {
 
 
 
-            // Use cell width for wide characters (Chinese characters use 2 cells)
-
-            uint8_t cell_width_multiplier = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
-
-            float render_width = cell_width * cell_width_multiplier;
-
-
-
-            // Tab character: widen by 6px (3px on each side)
-
-            if (cell.char_code == '\t') {
-
-                x -= 3.0f;
-
-                render_width += 6.0f;
-
-            }
-
-
-
             // Use space glyph for tab since tab (0x09) is not in font atlas
 
             char32_t render_char = (cell.char_code == '\t') ? ' ' : cell.char_code;
 
-            CharMetrics metrics = m_fontAtlas->GetCharMetrics(render_char);
+            const int style = ((cell.attrs & 0x01) ? 1 : 0) | ((cell.attrs & 0x04) ? 2 : 0);
+
+            CharMetrics metrics = m_fontAtlas->GetCharMetrics(render_char, style);
 
             if (metrics.u == 0 && metrics.v == 0 && metrics.w == 0 && metrics.h == 0) {
 
@@ -1244,19 +1204,38 @@ void TermGLCanvas::Render() {
 
 
 
-            // Apply bearingX offset so left padding in atlas maps to correct screen position.
+            // The terminal grid positions the glyph; it must not resize its ink.
+            // Bearings include the common baseline and any negative overhang.
+            const uint8_t cell_span = (cell.width > 0 && cell.width <= 2) ? cell.width : 1;
+            const float span_width = cell_width * cell_span;
+            float glyph_w = metrics.actual_width;
+            float glyph_h = metrics.actual_height;
+            float left = x + metrics.bearingX;
+            float top = y + leading_offset + metrics.bearingY;
+            if (cell_span == 2) {
+                // Wide glyphs sit centred inside their two cells. Tall ideographs
+                // fill their font advance horizontally (slight stretch) and are
+                // centred vertically; short punctuation keeps size and baseline.
+                const bool tall = glyph_h >= text_h * 0.7f;
+                if (tall && metrics.advance > glyph_w)
+                    glyph_w = metrics.advance < span_width ? metrics.advance : span_width;
+                left = x + (span_width - glyph_w) * 0.5f;
+                if (tall)
+                    top = y + leading_offset + (text_h - glyph_h) * 0.5f;
+            }
+            // Snap the glyph origin to the physical pixel grid.
+            left = std::floor(left * rs + 0.5f) / rs;
+            top = std::floor(top * rs + 0.5f) / rs;
+            const float right = left + glyph_w;
+            const float bottom = top + glyph_h;
 
-            // For tab, use 0 so the space glyph fills the widened tab area evenly (centered).
+            glTexCoord2f(test_u1, test_v1); glVertex2f(left, top);
 
-            float x_offset = (cell.char_code == '\t') ? 0.0f : metrics.bearingX;
+            glTexCoord2f(test_u2, test_v1); glVertex2f(right, top);
 
-            glTexCoord2f(test_u1, test_v1); glVertex2f(x + x_offset, y);
+            glTexCoord2f(test_u2, test_v2); glVertex2f(right, bottom);
 
-            glTexCoord2f(test_u2, test_v1); glVertex2f(x + render_width, y);
-
-            glTexCoord2f(test_u2, test_v2); glVertex2f(x + render_width, y + cell_height);
-
-            glTexCoord2f(test_u1, test_v2); glVertex2f(x + x_offset, y + cell_height);
+            glTexCoord2f(test_u1, test_v2); glVertex2f(left, bottom);
 
         }
 
@@ -1290,8 +1269,8 @@ void TermGLCanvas::Render() {
                 render_width += 6.0f;
             }
 
-            // Draw underline at baseline (near bottom of cell)
-            float underline_y = y + cell_height - 2.0f;
+            // Draw underline at the bottom of the text block, not the cell
+            float underline_y = y + leading_offset + text_h - 2.0f;
 
             uint8_t fg_r = cell.fg_color & 0xFF;
             uint8_t fg_g = (cell.fg_color >> 8) & 0xFF;
@@ -1359,7 +1338,9 @@ void TermGLCanvas::OnPaint(wxPaintEvent& event) {
 
     }
 
-    if (m_fontZoomPending) {
+    // Moving between displays can change bitmap density without changing size.
+    if (m_fontZoomPending || m_fontSize != GetTerminalFontSize() ||
+        (m_fontAtlas && m_fontAtlas->GetRasterScale() != GetTerminalScale(ScaleUsage::Raster))) {
         ApplyFontZoom();
     }
 
@@ -1413,10 +1394,10 @@ void TermGLCanvas::OnSize(wxSizeEvent& event) {
 
         wxSize size = GetSize();
 
-        float glScale = GLPixelScale();
+        float glScale = GetTerminalScale(ScaleUsage::Coordinates);
 
-        int fbScale = static_cast<int>(GLFramebufferScale());
-        glViewport(0, 0, static_cast<int>(size.GetWidth() * glScale * fbScale), static_cast<int>(size.GetHeight() * glScale * fbScale));
+        const float rasterScale = GetTerminalScale(ScaleUsage::Raster);
+        glViewport(0, 0, wxRound(size.GetWidth() * glScale * rasterScale), wxRound(size.GetHeight() * glScale * rasterScale));
 
     }
 
@@ -1963,9 +1944,9 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
 
     wxPoint pos = event.GetPosition();
 
-    const float margin_x = 8.0f * m_dpiScale;
+    const float margin_x = 8.0f * GetTerminalScale();
 
-    const float margin_y = 4.0f * m_dpiScale;
+    const float margin_y = 4.0f * GetTerminalScale();
 
     float cell_width = static_cast<float>(m_cellWidth);
 
@@ -1975,9 +1956,9 @@ void TermGLCanvas::OnMouseLeftDown(wxMouseEvent& event) {
 
     // Convert pixel position to cell coordinates
 
-    int col = std::max(0, static_cast<int>((pos.x * GLPixelScale() - margin_x) / cell_width));
+    int col = std::max(0, static_cast<int>((pos.x * GetTerminalScale(ScaleUsage::Coordinates) - margin_x) / cell_width));
 
-    int row = std::max(0, static_cast<int>((pos.y * GLPixelScale() - margin_y) / cell_height));
+    int row = std::max(0, static_cast<int>((pos.y * GetTerminalScale(ScaleUsage::Coordinates) - margin_y) / cell_height));
 
     
 
@@ -2041,9 +2022,9 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
 
         wxPoint pos = event.GetPosition();
 
-        const float margin_x = 8.0f * m_dpiScale;
+        const float margin_x = 8.0f * GetTerminalScale();
 
-        const float margin_y = 4.0f * m_dpiScale;
+        const float margin_y = 4.0f * GetTerminalScale();
 
         float cell_width = static_cast<float>(m_cellWidth);
 
@@ -2053,9 +2034,9 @@ void TermGLCanvas::OnMouseMove(wxMouseEvent& event) {
 
         // Convert pixel position to cell coordinates
 
-        int col = std::max(0, static_cast<int>((pos.x * GLPixelScale() - margin_x) / cell_width));
+        int col = std::max(0, static_cast<int>((pos.x * GetTerminalScale(ScaleUsage::Coordinates) - margin_x) / cell_width));
 
-        int row = std::max(0, static_cast<int>((pos.y * GLPixelScale() - margin_y) / cell_height));
+        int row = std::max(0, static_cast<int>((pos.y * GetTerminalScale(ScaleUsage::Coordinates) - margin_y) / cell_height));
 
         
 
