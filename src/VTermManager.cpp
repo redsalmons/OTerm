@@ -1,3 +1,8 @@
+// Must precede every include: wx headers pull in windows.h transitively,
+// and its min/max macros break std::min/std::max below.
+#ifdef _WIN32
+#define NOMINMAX
+#endif
 #include "VTermManager.h"
 #include "SSHManager.h"
 #include "TerminalTheme.h"
@@ -11,7 +16,6 @@
 #include <cerrno>
 #include <cstdlib>
 #ifdef _WIN32
-#define NOMINMAX
 #include <windows.h>
 #include <process.h>
 #else

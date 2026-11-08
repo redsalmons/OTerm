@@ -84,7 +84,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     int currentThemeIndex = 0;
     const std::string currentThemeId = GlobalConfig::GetThemeName();
     for (size_t i = 0; i < themes.size(); ++i) {
-        themeNames.Add(wxString::FromUTF8(TranslationHelper::Tr(themes[i].nameKey).c_str()));
+        themeNames.Add(TranslationHelper::Tr(themes[i].nameKey));
         if (themes[i].id == currentThemeId) currentThemeIndex = (int)i;
     }
 
@@ -96,7 +96,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     themeSizer->Add(themeChoiceSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
     m_themePreview = new wxStaticText(themePanel, wxID_ANY,
-        "Hello, world! 你好，世界 ABCabc 0123456789");
+        wxString::FromUTF8("Hello, world! 你好，世界 ABCabc 0123456789"));
     themeSizer->Add(m_themePreview, 0, wxEXPAND | wxALL, 10);
 
     m_themeChoice->Bind(wxEVT_CHOICE, &SettingsDialog::OnThemeChanged, this);
