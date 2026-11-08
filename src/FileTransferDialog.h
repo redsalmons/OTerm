@@ -31,6 +31,7 @@ public:
 
 private:
     void CreateControls();
+    void ApplyUiPalette();
     void LayoutControls();
     void PopulateLocalList(const wxString& path);
     void PopulateRemoteList();
@@ -51,11 +52,15 @@ private:
         long long sizeBytes;  // Store actual size in bytes
     };
 
-    wxDataViewListCtrl* m_localList;
-    wxDataViewListCtrl* m_remoteList;
-    wxListCtrl* m_taskList;
-    wxStaticText* m_localPathLabel;
-    wxStaticText* m_remotePathLabel;
+    wxPanel* m_mainPanel = nullptr;
+    wxDataViewListCtrl* m_localList = nullptr;
+    wxDataViewListCtrl* m_remoteList = nullptr;
+    wxDataViewListCtrl* m_taskList = nullptr;
+    wxPanel* m_localHeaderPanel = nullptr;
+    wxPanel* m_remoteHeaderPanel = nullptr;
+    wxPanel* m_taskHeaderPanel = nullptr;
+    wxStaticText* m_localPathLabel = nullptr;
+    wxStaticText* m_remotePathLabel = nullptr;
     wxIcon m_folderIcon;
     wxIcon m_fileIcon;
     wxIcon m_loadingIcon;
@@ -65,6 +70,8 @@ private:
     wxString m_remoteCurrentPath;
     std::map<wxString, bool> m_expandingItems;
     wxTimer* m_taskTimer;
+    wxTimer m_appearanceTimer;
+    bool m_appWasDark = false;
 };
 
 #endif

@@ -29,19 +29,26 @@ public:
     void LoadDevices();
     void RefreshDeviceList(const std::string& filter = "");
     void SetFocusToSearch();
+    void ApplyUiPalette();
 
 private:
     void OnSearch(wxCommandEvent& event);
     void OnAddDevice(wxCommandEvent& event);
 
-    wxSearchCtrl* m_searchCtrl;
-    wxButton* m_addButton;
-    wxStaticText* m_statusText;
-    wxScrolledWindow* m_scrolledWindow;
-    wxPanel* m_contentPanel;
+    wxPanel* m_centerPanel = nullptr;
+    wxSearchCtrl* m_searchCtrl = nullptr;
+    wxButton* m_addButton = nullptr;
+    wxStaticText* m_statusText = nullptr;
+    wxScrolledWindow* m_scrolledWindow = nullptr;
+    wxPanel* m_contentPanel = nullptr;
     std::vector<DeviceConfig> m_devices;
     std::vector<DeviceRowPanel*> m_rowPanels;
     float m_dpiScale;
+
+    // Polls the OS appearance: wxEVT_SYS_COLOUR_CHANGED is unreliable on
+    // wxMSW, so the panel re-themes itself when the setting flips.
+    wxTimer m_appearanceTimer;
+    bool m_appWasDark = false;
 
     enum {
         ID_SEARCH_CTRL = wxID_HIGHEST + 1,

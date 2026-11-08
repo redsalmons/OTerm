@@ -4,6 +4,7 @@
 #include "UiColors.h"
 #include <wx/filedlg.h>
 #include <wx/textfile.h>
+#include "PaletteChoice.h"
 
 AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     : wxDialog(parent, wxID_ANY, TranslationHelper::Tr("addDevice"), wxDefaultPosition, wxSize(500, 450)) {
@@ -65,7 +66,7 @@ AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     // Auth Method
     wxStaticText* authLabel = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("authMethod") + ":");
     authLabel->SetForegroundColour(pal.textSecondary);
-    m_authChoice = new wxChoice(this, wxID_ANY);
+    m_authChoice = new PaletteChoice(this, wxID_ANY);
     m_authChoice->Append(TranslationHelper::Tr("password"));
     m_authChoice->Append(TranslationHelper::Tr("key"));
     m_authChoice->SetSelection(0);
@@ -116,7 +117,7 @@ AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     buttonSizer->Add(cancelButton, 0);
     
     mainSizer->Add(buttonSizer, 0, wxALL | wxALIGN_RIGHT, 20);
-    
+
     SetSizer(mainSizer);
     
     // Bind events
@@ -124,8 +125,63 @@ AddDeviceDialog::AddDeviceDialog(wxWindow* parent)
     Bind(wxEVT_BUTTON, &AddDeviceDialog::OnCancel, this, wxID_CANCEL);
     m_authChoice->Bind(wxEVT_CHOICE, &AddDeviceDialog::OnAuthMethodChanged, this);
     m_keyBrowseButton->Bind(wxEVT_BUTTON, &AddDeviceDialog::OnKeyBrowse, this);
-    
+
     UpdatePasswordFieldVisibility();
+
+    // Re-theme when the OS appearance flips (event delivery is unreliable on
+    // Windows, so poll — same pattern as ConnectionDialog).
+    m_appWasDark = SystemUsesDarkTheme();
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event) {
+        event.Skip();
+        m_appWasDark = SystemUsesDarkTheme();
+        ApplyUiPalette();
+        Refresh();
+    });
+    m_appearanceTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        const bool dark = SystemUsesDarkTheme();
+        if (dark != m_appWasDark) {
+            m_appWasDark = dark;
+            ApplyUiPalette();
+        }
+    }, m_appearanceTimer.GetId());
+    m_appearanceTimer.Start(2000);
+}
+
+void AddDeviceDialog::ApplyUiPalette() {
+    const UiPalette pal = CurrentUiPalette();
+    ApplyDarkTitleBar(this);
+    SetBackgroundColour(pal.bgWindow);
+    // Controls are direct children of the dialog; labels keep the muted colour.
+    for (wxWindow* child : GetChildren()) {
+        if (auto* t = dynamic_cast<wxStaticText*>(child)) {
+            t->SetForegroundColour(pal.textSecondary);
+        }
+        if (auto* b = dynamic_cast<wxButton*>(child)) {
+            if (b == m_saveButton) {
+                b->SetBackgroundColour(pal.accent);
+                b->SetForegroundColour(*wxWHITE);
+            } else {
+                b->SetBackgroundColour(pal.bgHeader);
+                b->SetForegroundColour(pal.textPrimary);
+            }
+        }
+    }
+    for (wxTextCtrl* ctrl : {m_nameCtrl, m_usernameCtrl, m_addressCtrl,
+                             m_portCtrl, m_groupCtrl, m_passwordCtrl, m_keyTextCtrl}) {
+        if (ctrl) {
+            ctrl->SetBackgroundColour(pal.bgSearch);
+            ctrl->SetForegroundColour(pal.textPrimary);
+        }
+    }
+    if (m_authChoice) {
+        m_authChoice->SetBackgroundColour(pal.bgSearch);
+        m_authChoice->SetForegroundColour(pal.textPrimary);
+    }
+    // Native controls keep stale pixels until invalidated — repaint the whole
+    // subtree so nothing lags one theme behind.
+    RepaintUiTree(this);
+    Update();
 }
 
 void AddDeviceDialog::OnSave(wxCommandEvent& event) {

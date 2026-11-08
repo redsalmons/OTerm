@@ -1,9 +1,11 @@
 #include "ConnectionDialog.h"
 #include "TranslationHelper.h"
+#include "UiColors.h"
 #include "SSHManager.h"
 #include "GlobalConfig.h"
 #include <wx/filedlg.h>
 #include <wx/file.h>
+#include "PaletteChoice.h"
 
 #ifdef __WXMSW__
 #include <commctrl.h>
@@ -28,7 +30,8 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     mainSizer->Add(m_treeCtrl, 1, wxEXPAND | wxALL, 5);
 
     // Right Panel (Form)
-    wxPanel* formPanel = new wxPanel(this, wxID_ANY);
+    m_formPanel = new wxPanel(this, wxID_ANY);
+    wxPanel* formPanel = m_formPanel;
     wxBoxSizer* formSizer = new wxBoxSizer(wxVERTICAL);
 
     wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 5, 5);
@@ -67,7 +70,9 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
 
     gridSizer->Add(new wxStaticText(formPanel, wxID_ANY, TranslationHelper::Tr("authMethod") + ":"), 0, wxALIGN_CENTER_VERTICAL);
     wxString authChoices[] = { TranslationHelper::Tr("password"), TranslationHelper::Tr("key") };
-    m_authChoice = new wxChoice(formPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, 2, authChoices);
+    m_authChoice = new PaletteChoice(formPanel, wxID_ANY);
+    m_authChoice->Append(authChoices[0]);
+    m_authChoice->Append(authChoices[1]);
     m_authChoice->SetSelection(0);
     gridSizer->Add(m_authChoice, 0);
     gridSizer->AddSpacer(0);
@@ -121,6 +126,77 @@ ConnectionDialog::ConnectionDialog(wxWindow* parent, const wxString& title, bool
     Bind(wxEVT_CHOICE, &ConnectionDialog::OnAuthMethodChanged, this, m_authChoice->GetId());
     Bind(wxEVT_BUTTON, &ConnectionDialog::OnKeyBrowse, this, m_keyBrowseButton->GetId());
     Bind(wxEVT_SIZE, &ConnectionDialog::OnSize, this);
+
+    ApplyUiPalette();
+
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event) {
+        event.Skip();
+        m_appWasDark = SystemUsesDarkTheme();
+        ApplyUiPalette();
+        Refresh();
+    });
+    m_appWasDark = SystemUsesDarkTheme();
+    m_appearanceTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        const bool dark = SystemUsesDarkTheme();
+        if (dark != m_appWasDark) {
+            m_appWasDark = dark;
+            ApplyUiPalette();
+        }
+    }, m_appearanceTimer.GetId());
+    m_appearanceTimer.Start(2000);
+}
+
+void ConnectionDialog::ApplyUiPalette() {
+    const UiPalette pal = CurrentUiPalette();
+    ApplyDarkTitleBar(this);
+    SetBackgroundColour(pal.bgWindow);
+    if (m_formPanel) m_formPanel->SetBackgroundColour(pal.bgWindow);
+    if (m_treeCtrl) {
+        m_treeCtrl->SetBackgroundColour(pal.bgContent);
+        m_treeCtrl->SetForegroundColour(pal.textPrimary);
+        // Items keep the colour they were created with on wxMSW — walk the
+        // tree and set each item's colours explicitly, then force a repaint.
+        std::function<void(wxTreeItemId)> recolorItem = [&](wxTreeItemId id) {
+            if (!id.IsOk()) return;
+            m_treeCtrl->SetItemTextColour(id, pal.textPrimary);
+            m_treeCtrl->SetItemBackgroundColour(id, pal.bgContent);
+            wxTreeItemIdValue cookie;
+            for (wxTreeItemId child = m_treeCtrl->GetFirstChild(id, cookie);
+                 child.IsOk(); child = m_treeCtrl->GetNextChild(id, cookie)) {
+                recolorItem(child);
+            }
+        };
+        recolorItem(m_treeCtrl->GetRootItem());
+        m_treeCtrl->Refresh();
+    }
+    for (wxTextCtrl* ctrl : {m_nameCtrl, m_usernameCtrl, m_addressCtrl,
+                             m_portCtrl, m_groupCtrl, m_passwordCtrl, m_keyTextCtrl}) {
+        if (ctrl) {
+            ctrl->SetBackgroundColour(pal.bgContent);
+            ctrl->SetForegroundColour(pal.textPrimary);
+        }
+    }
+    if (m_authChoice) {
+        m_authChoice->SetBackgroundColour(pal.bgContent);
+        m_authChoice->SetForegroundColour(pal.textPrimary);
+    }
+    // Field labels and buttons are created inline — recolour them on the form.
+    if (m_formPanel) {
+        for (wxWindow* child : m_formPanel->GetChildren()) {
+            if (auto* t = dynamic_cast<wxStaticText*>(child)) {
+                t->SetForegroundColour(pal.textPrimary);
+            }
+            if (auto* b = dynamic_cast<wxButton*>(child)) {
+                b->SetBackgroundColour(pal.tabHover);
+                b->SetForegroundColour(pal.textPrimary);
+            }
+        }
+    }
+    // Native controls keep stale pixels until invalidated — repaint the whole
+    // subtree so nothing lags one theme behind.
+    RepaintUiTree(this);
+    Update();
 }
 
 void ConnectionDialog::LoadConfig() {
@@ -233,7 +309,7 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
         return;
     }
 
-    m_currentDevice.auth_method = m_authChoice->GetStringSelection() == TranslationHelper::Tr("password") ? "password" : "key";
+    m_currentDevice.auth_method = m_authChoice->GetValue() == TranslationHelper::Tr("password") ? "password" : "key";
 
     if (m_currentDevice.auth_method == "key") {
         wxString keyContent = m_keyTextCtrl->GetValue().Trim(true).Trim(false);
@@ -404,7 +480,7 @@ void ConnectionDialog::OnKeyBrowse(wxCommandEvent& event) {
 }
 
 void ConnectionDialog::UpdatePasswordFieldVisibility() {
-    bool isKeyAuth = m_authChoice->GetStringSelection() == TranslationHelper::Tr("key");
+    bool isKeyAuth = m_authChoice->GetValue() == TranslationHelper::Tr("key");
     m_passwordCtrl->Show(!isKeyAuth);
     m_keyTextCtrl->Show(isKeyAuth);
     m_keyBrowseButton->Show(isKeyAuth);

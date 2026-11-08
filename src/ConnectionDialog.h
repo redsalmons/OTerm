@@ -7,6 +7,10 @@
 #include <vector>
 #include "DeviceConfig.h"
 
+class PaletteChoice;
+
+class wxOwnerDrawnComboBox;
+
 wxDECLARE_EVENT(wxEVT_DEVICE_LIST_UPDATE, wxCommandEvent);
 
 class DeviceTreeItemData : public wxTreeItemData {
@@ -40,14 +44,16 @@ private:
     void RebuildTree();
     void PopulateForm(const DeviceConfig& device);
     void UpdatePasswordFieldVisibility();
+    void ApplyUiPalette();
 
+    wxPanel* m_formPanel = nullptr;
     wxTreeCtrl* m_treeCtrl;
     wxTextCtrl* m_nameCtrl;
     wxTextCtrl* m_usernameCtrl;
     wxTextCtrl* m_addressCtrl;
     wxTextCtrl* m_portCtrl;
     wxTextCtrl* m_groupCtrl;
-    wxChoice* m_authChoice;
+    PaletteChoice* m_authChoice;
     wxTextCtrl* m_passwordCtrl;
     wxTextCtrl* m_keyTextCtrl;
     wxButton* m_keyBrowseButton;
@@ -58,4 +64,8 @@ private:
     DeviceConfig m_currentDevice;
     DeviceConfig m_selectedDevice;
     wxTreeItemId m_rootId;
+
+    // Appearance tracking (poll-based; SYS_COLOUR_CHANGED is unreliable on wxMSW).
+    wxTimer m_appearanceTimer;
+    bool m_appWasDark = false;
 };

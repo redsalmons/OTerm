@@ -4,6 +4,7 @@
 #include "FileTransferTask.h"
 #include "GlobalConfig.h"
 #include "TranslationHelper.h"
+#include "UiColors.h"
 #include <wx/dir.h>
 #include <wx/bmpbuttn.h>
 #include <wx/imaglist.h>
@@ -39,6 +40,45 @@ wxString GetItemName(wxDataViewListCtrl* list, int row) {
     wxDataViewIconText data;
     data << value;
     return data.GetText();
+}
+
+// The native SysHeader32 used by wxDataViewCtrl on wxMSW ignores colours, so
+// each list gets a plain-panel header row whose labels mirror the column
+// titles. Widths are synced in SyncListHeader.
+const int kHeaderPad = 6;
+
+wxPanel* CreateListHeader(wxWindow* parent, wxDataViewListCtrl* list) {
+    const UiPalette pal = CurrentUiPalette();
+    wxPanel* panel = new wxPanel(parent, wxID_ANY);
+    panel->SetBackgroundColour(pal.bgHeader);
+    wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
+    const unsigned count = list->GetColumnCount();
+    for (unsigned i = 0; i < count; ++i) {
+        wxStaticText* label = new wxStaticText(panel, wxID_ANY,
+                                               list->GetColumn(i)->GetTitle());
+        label->SetForegroundColour(pal.textFaint);
+        label->SetFont(label->GetFont().Bold());
+        sizer->Add(label, i + 1 == count ? 1 : 0,
+                   wxLEFT | wxALIGN_CENTER_VERTICAL, kHeaderPad);
+    }
+    panel->SetSizer(sizer);
+    panel->SetMinSize(wxSize(-1, list->GetCharHeight() + 10));
+    return panel;
+}
+
+// Mirror the list's column widths onto the header labels so the two stay
+// aligned when columns are resized by AdjustTaskListColumns et al.
+void SyncListHeader(wxDataViewListCtrl* list, wxPanel* header) {
+    if (!list || !header) return;
+    const unsigned count = list->GetColumnCount();
+    unsigned i = 0;
+    for (wxWindow* child : header->GetChildren()) {
+        if (i >= count) break;
+        const int w = list->GetColumn(i)->GetWidth() - kHeaderPad;
+        if (w > 0) child->SetMinSize(wxSize(w, -1));
+        ++i;
+    }
+    header->Layout();
 }
 
 wxString GenerateUUID() {
@@ -370,14 +410,16 @@ wxString FileTransferDialog::FormatFileDate(const wxDateTime& date) {
 
 void FileTransferDialog::CreateControls() {
     // Create main panel
-    wxPanel* mainPanel = new wxPanel(this, wxID_ANY);
-    mainPanel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+    m_mainPanel = new wxPanel(this, wxID_ANY);
+    wxPanel* mainPanel = m_mainPanel;
+    mainPanel->SetBackgroundColour(CurrentUiPalette().bgWindow);
 
     auto makePathRow = [mainPanel](wxStaticText*& label, const wxString& path,
                                    std::function<void()> onRefresh) -> wxSizer* {
         label = new wxStaticText(mainPanel, wxID_ANY, path, wxDefaultPosition,
                                  wxDefaultSize, wxST_ELLIPSIZE_MIDDLE);
         label->SetFont(label->GetFont().Bold());
+        label->SetForegroundColour(CurrentUiPalette().textPrimary);
 
         wxBitmapButton* refreshBtn = new wxBitmapButton(
             mainPanel, wxID_ANY,
@@ -398,7 +440,9 @@ void FileTransferDialog::CreateControls() {
                                         [this]() { PopulateLocalList(m_localCurrentPath); });
 
     m_localList = new wxDataViewListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                         wxDV_ROW_LINES | wxDV_SINGLE);
+                                         wxDV_ROW_LINES | wxDV_SINGLE | wxDV_NO_HEADER);
+    m_localList->SetBackgroundColour(CurrentUiPalette().bgContent);
+    m_localList->SetForegroundColour(CurrentUiPalette().textPrimary);
     m_localList->AppendIconTextColumn(TranslationHelper::Tr("name"),
                                       wxDATAVIEW_CELL_INERT, -1, wxALIGN_LEFT,
                                       wxDATAVIEW_COL_RESIZABLE);
@@ -414,7 +458,9 @@ void FileTransferDialog::CreateControls() {
                                          [this]() { RequestRemoteDirectory(m_remoteCurrentPath); });
 
     m_remoteList = new wxDataViewListCtrl(mainPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                          wxDV_ROW_LINES | wxDV_SINGLE);
+                                          wxDV_ROW_LINES | wxDV_SINGLE | wxDV_NO_HEADER);
+    m_remoteList->SetBackgroundColour(CurrentUiPalette().bgContent);
+    m_remoteList->SetForegroundColour(CurrentUiPalette().textPrimary);
     
     // Drag & drop: local files -> remote list = upload; remote "path|size"
     // text -> local list = download. wxDataViewCtrl needs explicit
@@ -662,27 +708,26 @@ void FileTransferDialog::CreateControls() {
         event.SetDataObject(new wxTextDataObject(dragData));
     });
     
-    // Create task list (height for 4 rows)
-    m_taskList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 160),
-                                wxLC_REPORT | wxLC_SINGLE_SEL);
-    m_taskList->AppendColumn(TranslationHelper::Tr("action"), wxLIST_FORMAT_LEFT, 200);
-    m_taskList->AppendColumn(TranslationHelper::Tr("local"), wxLIST_FORMAT_LEFT, 200);
-    m_taskList->AppendColumn(TranslationHelper::Tr("remote"), wxLIST_FORMAT_LEFT, 200);
-    m_taskList->AppendColumn(TranslationHelper::Tr("size"), wxLIST_FORMAT_RIGHT, 200);
-    m_taskList->AppendColumn(TranslationHelper::Tr("progress"), wxLIST_FORMAT_LEFT, 200);
-    m_taskList->AppendColumn(TranslationHelper::Tr("status"), wxLIST_FORMAT_LEFT, 150);
-    m_taskList->AppendColumn(TranslationHelper::Tr("result"), wxLIST_FORMAT_LEFT, 200);
+    // Create task list (height for 4 rows). The native column headers are
+    // hidden (wxDV_NO_HEADER) — SysHeader32 ignores colours on wxMSW, so a
+    // plain themed panel is used for the header row instead.
+    m_taskList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition,
+                                        wxSize(-1, 160), wxDV_ROW_LINES | wxDV_SINGLE | wxDV_NO_HEADER);
+    m_taskList->SetBackgroundColour(CurrentUiPalette().bgContent);
+    m_taskList->SetForegroundColour(CurrentUiPalette().textPrimary);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("action"), wxDATAVIEW_CELL_INERT, -1);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("local"), wxDATAVIEW_CELL_INERT, -1);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("remote"), wxDATAVIEW_CELL_INERT, -1);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("size"), wxDATAVIEW_CELL_INERT, -1);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("progress"), wxDATAVIEW_CELL_INERT, -1);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("status"), wxDATAVIEW_CELL_INERT, -1);
+    m_taskList->AppendTextColumn(TranslationHelper::Tr("result"), wxDATAVIEW_CELL_INERT, -1);
 
-    // Task list icons:
-    //   0 = upload (up arrow), 1 = download (down arrow)
-    //   2 = result success (tick), 3 = result failure (cross)
-    wxImageList* taskImages = new wxImageList(16, 16, true, 4);
-    taskImages->Add(wxArtProvider::GetBitmap(wxART_GO_UP, wxART_OTHER, wxSize(16, 16)));
-    taskImages->Add(wxArtProvider::GetBitmap(wxART_GO_DOWN, wxART_OTHER, wxSize(16, 16)));
-    taskImages->Add(wxArtProvider::GetBitmap(wxART_TICK_MARK, wxART_OTHER, wxSize(16, 16)));
-    taskImages->Add(wxArtProvider::GetBitmap(wxART_CROSS_MARK, wxART_OTHER, wxSize(16, 16)));
-    m_taskList->AssignImageList(taskImages, wxIMAGE_LIST_SMALL);
-    
+    // Themed header panels stand in for the hidden native headers.
+    m_localHeaderPanel = CreateListHeader(mainPanel, m_localList);
+    m_remoteHeaderPanel = CreateListHeader(mainPanel, m_remoteList);
+    m_taskHeaderPanel = CreateListHeader(this, m_taskList);
+
     // Layout main panel
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
 
@@ -690,12 +735,14 @@ void FileTransferDialog::CreateControls() {
     wxStaticBoxSizer* localBox = new wxStaticBoxSizer(
         wxVERTICAL, mainPanel, TranslationHelper::Tr("localDirectory"));
     localBox->Add(localPathRow, 0, wxEXPAND | wxALL, 4);
+    localBox->Add(m_localHeaderPanel, 0, wxEXPAND | wxLEFT | wxRIGHT, 4);
     localBox->Add(m_localList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
     // Remote section
     wxStaticBoxSizer* remoteBox = new wxStaticBoxSizer(
         wxVERTICAL, mainPanel, TranslationHelper::Tr("remoteDirectory"));
     remoteBox->Add(remotePathRow, 0, wxEXPAND | wxALL, 4);
+    remoteBox->Add(m_remoteHeaderPanel, 0, wxEXPAND | wxLEFT | wxRIGHT, 4);
     remoteBox->Add(m_remoteList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
     // Split local and remote horizontally
@@ -709,13 +756,86 @@ void FileTransferDialog::CreateControls() {
     // Task list section
     wxStaticBoxSizer* taskBox = new wxStaticBoxSizer(
         wxVERTICAL, this, TranslationHelper::Tr("transferTasks"));
-    taskBox->Add(m_taskList, 1, wxEXPAND | wxALL, 4);
+    taskBox->Add(m_taskHeaderPanel, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
+    taskBox->Add(m_taskList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
     // Dialog layout
     wxBoxSizer* dialogSizer = new wxBoxSizer(wxVERTICAL);
     dialogSizer->Add(mainPanel, 1, wxEXPAND);
     dialogSizer->Add(taskBox, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
     SetSizer(dialogSizer);
+
+    // Re-apply theme colours when the OS appearance changes while open.
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event) {
+        event.Skip();
+        ApplyUiPalette();
+        Refresh();
+    });
+
+    // The event is unreliable on wxMSW and the dialog sits outside the main
+    // window's subtree, so also poll the effective appearance directly.
+    m_appWasDark = SystemUsesDarkTheme();
+    m_appearanceTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        const bool dark = SystemUsesDarkTheme();
+        UiThemeDebugStage(dark ? "transferdlg:tick dark" : "transferdlg:tick light");
+        if (dark != m_appWasDark) {
+            m_appWasDark = dark;
+            ApplyUiPalette();
+            Refresh();
+        }
+    }, m_appearanceTimer.GetId());
+    m_appearanceTimer.Start(2000);
+
+    // The dialog object is created once and reused — re-apply the palette
+    // every time it is shown so colours cached at construction can't go stale.
+    Bind(wxEVT_SHOW, [this](wxShowEvent& event) {
+        event.Skip();
+        if (event.IsShown()) {
+            m_appWasDark = SystemUsesDarkTheme();
+            ApplyUiPalette();
+        }
+    });
+}
+
+void FileTransferDialog::ApplyUiPalette() {
+    const UiPalette pal = CurrentUiPalette();
+    ApplyDarkTitleBar(this);
+    SetBackgroundColour(pal.bgWindow);
+    if (m_mainPanel) m_mainPanel->SetBackgroundColour(pal.bgWindow);
+    if (m_localPathLabel) m_localPathLabel->SetForegroundColour(pal.textPrimary);
+    if (m_remotePathLabel) m_remotePathLabel->SetForegroundColour(pal.textPrimary);
+    for (wxDataViewListCtrl* list : {m_localList, m_remoteList, m_taskList}) {
+        if (!list) continue;
+        list->SetBackgroundColour(pal.bgContent);
+        list->SetForegroundColour(pal.textPrimary);
+        list->Refresh();
+    }
+    // Group-box captions and stray labels use system colours — recolour them.
+    // wxStaticBox is its own class (not a wxStaticText), so check both.
+    std::function<void(wxWindow*)> recolor = [&](wxWindow* w) {
+        if (auto* t = dynamic_cast<wxStaticText*>(w)) t->SetForegroundColour(pal.textPrimary);
+        if (auto* b = dynamic_cast<wxStaticBox*>(w)) b->SetForegroundColour(pal.textPrimary);
+        if (auto* btn = dynamic_cast<wxButton*>(w)) {
+            btn->SetBackgroundColour(pal.tabHover);
+            btn->SetForegroundColour(pal.textPrimary);
+        }
+        for (wxWindow* c : w->GetChildren()) recolor(c);
+    };
+    recolor(this);
+    // Header panels: bg + muted label colour — applied after recolor() which
+    // would otherwise set every wxStaticText to textPrimary.
+    for (wxPanel* header : {m_localHeaderPanel, m_remoteHeaderPanel, m_taskHeaderPanel}) {
+        if (!header) continue;
+        header->SetBackgroundColour(pal.bgHeader);
+        for (wxWindow* c : header->GetChildren())
+            c->SetForegroundColour(pal.textFaint);
+        header->Refresh();
+    }
+    // Native controls keep stale pixels until invalidated — repaint the whole
+    // subtree so nothing lags one theme behind.
+    RepaintUiTree(this);
+    Update();
 }
 
 void FileTransferDialog::LayoutControls() {
@@ -744,14 +864,15 @@ void FileTransferDialog::AdjustTaskListColumns() {
     
     if (remainingWidth > 0) {
         int pathColumnWidth = remainingWidth / 2;
-        m_taskList->SetColumnWidth(0, actionWidth);  // Action
-        m_taskList->SetColumnWidth(1, pathColumnWidth);  // Local
-        m_taskList->SetColumnWidth(2, pathColumnWidth);  // Remote
-        m_taskList->SetColumnWidth(3, sizeWidth);  // Size
-        m_taskList->SetColumnWidth(4, progressWidth);  // Progress
-        m_taskList->SetColumnWidth(5, statusWidth);  // Status
-        m_taskList->SetColumnWidth(6, resultWidth);  // Result
+        const int widths[] = {actionWidth, pathColumnWidth, pathColumnWidth,
+                              sizeWidth, progressWidth, statusWidth, resultWidth};
+        for (int i = 0; i < 7; ++i) {
+            if (wxDataViewColumn* col = m_taskList->GetColumn(i)) {
+                col->SetWidth(widths[i]);
+            }
+        }
     }
+    SyncListHeader(m_taskList, m_taskHeaderPanel);
 }
 
 void FileTransferDialog::AdjustFileListColumns() {
@@ -760,7 +881,7 @@ void FileTransferDialog::AdjustFileListColumns() {
     int localWidth = m_localList->GetClientSize().GetWidth();
     int remoteWidth = m_remoteList->GetClientSize().GetWidth();
     
-    auto adjust = [](wxDataViewListCtrl* list, int totalWidth) {
+    auto adjust = [](wxDataViewListCtrl* list, wxPanel* header, int totalWidth) {
         if (totalWidth <= 0) return;
         int sizeWidth = 60;
         int dateWidth = 93;
@@ -770,9 +891,10 @@ void FileTransferDialog::AdjustFileListColumns() {
             list->GetColumn(1)->SetWidth(sizeWidth);
             list->GetColumn(2)->SetWidth(dateWidth);
         }
+        SyncListHeader(list, header);
     };
-    adjust(m_localList, localWidth);
-    adjust(m_remoteList, remoteWidth);
+    adjust(m_localList, m_localHeaderPanel, localWidth);
+    adjust(m_remoteList, m_remoteHeaderPanel, remoteWidth);
 }
 
 void FileTransferDialog::OnTimer(wxTimerEvent& event) {
@@ -838,22 +960,16 @@ void FileTransferDialog::LoadAndDisplayTasks() {
         // Add tasks to list (newest first - reverse order)
         for (auto it = taskList.tasks.rbegin(); it != taskList.tasks.rend(); ++it) {
             const auto& task = *it;
-            // Show an icon in the action column; unknown actions fall back to text
-            int imageIndex = -1;
+            // Action column: arrow glyph + label (icons can't follow the palette)
             wxString actionText;
             if (task.action == "upload") {
-                imageIndex = 0;
+                actionText = wxString::FromUTF8("\xE2\x86\x91 ") + TranslationHelper::Tr("upload");
             } else if (task.action == "download") {
-                imageIndex = 1;
+                actionText = wxString::FromUTF8("\xE2\x86\x93 ") + TranslationHelper::Tr("download");
             } else {
                 actionText = wxString::FromUTF8(task.action.c_str());
             }
-            long index = m_taskList->InsertItem(m_taskList->GetItemCount(), actionText, imageIndex);
-            m_taskList->SetItem(index, 1, wxString::FromUTF8(task.local.c_str()));
-            m_taskList->SetItem(index, 2, wxString::FromUTF8(task.remote.c_str()));
-            m_taskList->SetItem(index, 3, FormatFileSize(task.size));
-            m_taskList->SetItem(index, 4, wxString::Format("%d%%", task.progress));
-            
+
             // Defensive: fallback for empty status
             wxString statusText = wxString::FromUTF8(task.status.c_str());
             if (statusText.IsEmpty()) {
@@ -864,31 +980,26 @@ void FileTransferDialog::LoadAndDisplayTasks() {
             if (resultText.IsEmpty() && task.status == "completed") {
                 resultText = "success";
             }
-            
-            m_taskList->SetItem(index, 5, TranslationHelper::Tr(statusText));
-            // Result column: icon instead of text (tick = success, cross = failure)
+
+            // Result column: tick/cross glyph for completed tasks
+            wxString resultCell;
             if (task.status == "completed") {
-                int resultImage = (task.result == "success" || resultText == "success") ? 2 : 3;
-                m_taskList->SetItem(index, 6, wxEmptyString);
-                m_taskList->SetItemColumnImage(index, 6, resultImage);
+                resultCell = (task.result == "success" || resultText == "success")
+                                 ? wxString::FromUTF8("\xE2\x9C\x93")
+                                 : wxString::FromUTF8("\xE2\x9C\x97");
             } else {
-                m_taskList->SetItem(index, 6, TranslationHelper::Tr(resultText));
+                resultCell = TranslationHelper::Tr(resultText);
             }
-            
-            // Set color based on status
-            wxColour color;
-            if (task.status == "completed") {
-                if (task.result == "success") {
-                    color = wxColour(0, 128, 0);  // Green
-                } else {
-                    color = wxColour(255, 0, 0);  // Red
-                }
-            } else if (task.status == "transferring") {
-                color = wxColour(0, 0, 255);  // Blue
-            } else {
-                color = wxColour(128, 128, 128);  // Gray
-            }
-            m_taskList->SetItemTextColour(index, color);
+
+            wxVector<wxVariant> cells;
+            cells.push_back(actionText);
+            cells.push_back(wxString::FromUTF8(task.local.c_str()));
+            cells.push_back(wxString::FromUTF8(task.remote.c_str()));
+            cells.push_back(FormatFileSize(task.size));
+            cells.push_back(wxString::Format("%d%%", task.progress));
+            cells.push_back(TranslationHelper::Tr(statusText));
+            cells.push_back(resultCell);
+            m_taskList->AppendItem(cells);
         }
     } catch (const std::exception& e) {
         SSH_LOG("Failed to load task list: " << e.what());

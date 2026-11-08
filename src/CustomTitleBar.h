@@ -23,6 +23,7 @@ public:
     int FindNotebookPage(wxWindow* contentPanel) const;
     const std::vector<ConnectInfo*>& GetTabs() const { return m_tabs; }
     void RelayoutTabs() { LayoutTabs(); Refresh(); }
+    void ApplyPaletteColours();
 
 private:
     void OnPaint(wxPaintEvent& event);

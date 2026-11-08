@@ -16,12 +16,8 @@
 
 CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindow* appWindow)
     : wxPanel(parent, wxID_ANY), m_notebook(notebook), m_tabContainer(nullptr), m_appWindow(appWindow), m_isFullScreen(false) {
-#ifdef __WXMSW__
-    SetBackgroundColour(wxColour(30, 30, 30));
-#else
-    // Mac: follow system appearance
+    // Follow system appearance on all platforms (OnPaint also uses the palette).
     SetBackgroundColour(CurrentUiPalette().titleBg);
-#endif
     
     // Calculate title bar height based on DPI scale
     double dpiScale = 1.0;
@@ -61,16 +57,6 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     m_closeButton = new wxButton(this, wxID_ANY, "X", wxDefaultPosition, wxSize(scaledButtonSize, scaledButtonSize), wxBORDER_NONE);
     m_newTabButton = new wxButton(this, wxID_ANY, "+", wxDefaultPosition, wxSize(scaledNewTabWidth, scaledButtonSize), wxBORDER_NONE);
 
-    m_drawerButton->SetBackgroundColour(wxColour(60, 60, 60));
-    m_drawerButton->SetForegroundColour(wxColour(255, 255, 255));
-    m_minimizeButton->SetBackgroundColour(wxColour(60, 60, 60));
-    m_minimizeButton->SetForegroundColour(wxColour(255, 255, 255));
-    m_maximizeButton->SetBackgroundColour(wxColour(60, 60, 60));
-    m_maximizeButton->SetForegroundColour(wxColour(255, 255, 255));
-    m_closeButton->SetBackgroundColour(wxColour(255, 0, 0));
-    m_closeButton->SetForegroundColour(wxColour(255, 255, 255));
-    m_newTabButton->SetBackgroundColour(wxColour(30, 30, 30));
-    m_newTabButton->SetForegroundColour(wxColour(255, 255, 255));
     wxFont font = m_newTabButton->GetFont();
     font.SetWeight(wxFONTWEIGHT_BOLD);
     m_newTabButton->SetFont(font);
@@ -83,11 +69,6 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
     m_closeButton = nullptr;
     m_newTabButton = new wxButton(this, wxID_ANY, "+", wxDefaultPosition, wxSize(scaledNewTabWidth, scaledButtonSize), wxBORDER_NONE);
 
-    const UiPalette pal = CurrentUiPalette();
-    m_drawerButton->SetBackgroundColour(pal.tabHover);
-    m_drawerButton->SetForegroundColour(pal.textPrimary);
-    m_newTabButton->SetBackgroundColour(wxColour(0, 0, 0, 0));
-    m_newTabButton->SetForegroundColour(pal.textPrimary);
     wxFont font = m_newTabButton->GetFont();
     font.SetWeight(wxFONTWEIGHT_BOLD);
     m_newTabButton->SetFont(font);
@@ -96,7 +77,6 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 #ifdef __WXMSW__
     // Windows: Show title text in custom title bar
     m_titleText = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("oceanTerm"));
-    m_titleText->SetForegroundColour(wxColour(255, 255, 255));
     wxFont titleFont = m_titleText->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     titleFont.SetStyle(wxFONTSTYLE_ITALIC);
@@ -104,7 +84,6 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 #else
     // Mac: Create title text but hide it by default (show in fullscreen)
     m_titleText = new wxStaticText(this, wxID_ANY, TranslationHelper::Tr("oceanTerm"));
-    m_titleText->SetForegroundColour(CurrentUiPalette().textPrimary);
     wxFont titleFont = m_titleText->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     titleFont.SetStyle(wxFONTSTYLE_ITALIC);
@@ -146,6 +125,15 @@ CustomTitleBar::CustomTitleBar(wxWindow* parent, wxSimplebook* notebook, wxWindo
 #endif
 
     SetSizer(m_sizer);
+
+    ApplyPaletteColours();
+
+    // Re-apply theme colours when the OS appearance changes at runtime.
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event) {
+        event.Skip();
+        ApplyPaletteColours();
+        Refresh();
+    });
 
     Bind(wxEVT_PAINT, &CustomTitleBar::OnPaint, this);
     Bind(wxEVT_ERASE_BACKGROUND, &CustomTitleBar::OnEraseBackground, this);
@@ -916,20 +904,38 @@ void CustomTitleBar::OnClose(wxCommandEvent& event) {
     GetParent()->Close();
 }
 
+void CustomTitleBar::ApplyPaletteColours() {
+    const UiPalette pal = CurrentUiPalette();
+    SetBackgroundColour(pal.titleBg);
+    if (m_titleText) {
+        m_titleText->SetForegroundColour(pal.textPrimary);
+        m_titleText->Refresh();
+    }
+    m_drawerButton->SetBackgroundColour(pal.tabHover);
+    m_drawerButton->SetForegroundColour(pal.textPrimary);
+    if (m_minimizeButton) {
+        m_minimizeButton->SetBackgroundColour(pal.tabHover);
+        m_minimizeButton->SetForegroundColour(pal.textPrimary);
+    }
+    if (m_maximizeButton) {
+        m_maximizeButton->SetBackgroundColour(pal.tabHover);
+        m_maximizeButton->SetForegroundColour(pal.textPrimary);
+    }
+    if (m_closeButton) {
+        // Red close button follows the platform convention in both modes.
+        m_closeButton->SetBackgroundColour(wxColour(255, 0, 0));
+        m_closeButton->SetForegroundColour(wxColour(255, 255, 255));
+    }
+    m_newTabButton->SetBackgroundColour(pal.titleBg);
+    m_newTabButton->SetForegroundColour(pal.textPrimary);
+}
+
 void CustomTitleBar::OnPaint(wxPaintEvent& event) {
     wxPaintDC dc(this);
 
-#ifdef __WXMSW__
-    // Windows: Draw background
-    wxSize clientSize = GetClientSize();
-    dc.SetBackground(wxBrush(wxColour(30, 30, 30)));
-    dc.Clear();
-#else
-    // Mac: Draw background color
     wxSize clientSize = GetClientSize();
     dc.SetBackground(wxBrush(CurrentUiPalette().titleBg));
     dc.Clear();
-#endif
 }
 
 void CustomTitleBar::OnEraseBackground(wxEraseEvent& event) {

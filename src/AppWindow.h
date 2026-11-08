@@ -28,8 +28,8 @@ public:
     wxSimplebook* GetNotebook() const { return m_notebook; }
 
 private:
-    CustomTitleBar* m_titleBar;
-    wxSimplebook* m_notebook;
+    CustomTitleBar* m_titleBar = nullptr;
+    wxSimplebook* m_notebook = nullptr;
     
     void OnQuit(wxCommandEvent& event);
     void OnClose(wxCloseEvent& event);
@@ -49,6 +49,13 @@ private:
     wxTimer m_deviceShowTimer;
     TerminalPanel* m_pendingDeviceShowPanel;
     void OnDeviceShowTimer(wxTimerEvent& event);
+
+    // Appearance tracking: wxEVT_SYS_COLOUR_CHANGED is not reliably delivered
+    // on wxMSW for dark-mode toggles, so the system state is also polled.
+    wxTimer m_appearanceTimer;
+    bool m_appWasDark = false;
+    bool m_retheming = false;
+    void RethemeChrome();
     
     void CreateDashboardTab();
     void CreateTerminalTab(const DeviceConfig& device);

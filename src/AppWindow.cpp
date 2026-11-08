@@ -155,12 +155,13 @@ bool MyApp::OnInit() {
         typedef HRESULT (WINAPI *SetProcessDpiAwarenessContext_t)(DPI_AWARENESS_CONTEXT);
         HMODULE user32 = GetModuleHandleW(L"user32.dll");
         if (user32) {
-            SetProcessDpiAwarenessContext_t pSetProcessDpiAwarenessContext = 
+            SetProcessDpiAwarenessContext_t pSetProcessDpiAwarenessContext =
                 (SetProcessDpiAwarenessContext_t)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
             if (pSetProcessDpiAwarenessContext) {
                 pSetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             }
         }
+
 #endif
 
 #if ENABLE_SSH_LOG
@@ -366,6 +367,7 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
     SetDoubleBuffered(true);
 #endif
     const wxColour chromeBg = CurrentUiPalette().bgWindow;
+    ApplyDarkTitleBar(this);
     SetBackgroundColour(chromeBg);
     this->SetThemeEnabled(false);
     m_notebook = new wxSimplebook(this, wxID_ANY);
@@ -374,6 +376,26 @@ AppWindow::AppWindow(const wxString& title, const wxPoint& pos, const wxSize& si
         event.Skip();
         TermGLCanvas::SyncBookVisibility(m_notebook);
     });
+
+    // Re-theme chrome when the OS appearance switches at runtime.
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event) {
+        event.Skip();
+        m_appWasDark = SystemUsesDarkTheme();
+        RethemeChrome();
+    });
+
+    // wxMSW does not reliably deliver wxEVT_SYS_COLOUR_CHANGED for dark-mode
+    // toggles, so also poll the effective appearance and re-theme on change.
+    m_appWasDark = SystemUsesDarkTheme();
+    m_appearanceTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        const bool dark = SystemUsesDarkTheme();
+        if (dark != m_appWasDark) {
+            m_appWasDark = dark;
+            RethemeChrome();
+        }
+    }, m_appearanceTimer.GetId());
+    m_appearanceTimer.Start(2000);
 
     // Both Windows and Mac use custom title bar
     m_titleBar = new CustomTitleBar(this, m_notebook, this);
@@ -430,6 +452,30 @@ void AppWindow::CreateDashboardTab() {
     // Add tab with device list
     DeviceConfig emptyConfig;
     ConnectInfo* homeTab = m_titleBar->AddTab(TranslationHelper::Tr("home"), deviceListPanel, emptyConfig, false, false);
+}
+
+void AppWindow::RethemeChrome() {
+    if (m_retheming) return;
+    m_retheming = true;
+
+    const UiPalette pal = CurrentUiPalette();
+    ApplyDarkTitleBar(this);
+    SetBackgroundColour(pal.bgWindow);
+    if (m_notebook) m_notebook->SetBackgroundColour(pal.bgWindow);
+    if (m_titleBar) m_titleBar->ApplyPaletteColours();
+    // Repaint the whole subtree: widgets that query the palette at paint time
+    // (title bar, tab strip) pick up the new colours immediately. Panels that
+    // cache colours (DeviceListPanel, FileTransferDialog) re-theme themselves
+    // via their own appearance polls — do not reach into children here.
+    std::function<void(wxWindow*)> repaint = [&](wxWindow* w) {
+        if (w->IsBeingDeleted()) return;
+        w->Refresh();
+        const wxWindowList children = w->GetChildren();
+        for (wxWindow* child : children) repaint(child);
+    };
+    repaint(this);
+
+    m_retheming = false;
 }
 
 void AppWindow::CreateTerminalTab(const DeviceConfig& device) {

@@ -11,6 +11,7 @@
 wxDEFINE_EVENT(wxEVT_DEVICE_OPEN_REQUEST, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_DEVICE_DELETE_REQUEST, wxCommandEvent);
 
+
 DeviceRowPanel::DeviceRowPanel(wxWindow* parent, const DeviceConfig& device, const std::string& deviceId, int index, float dpiScale)
     : wxPanel(parent, wxID_ANY), m_deviceId(deviceId), m_device(device) {
 
@@ -143,19 +144,19 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     int controlHeight = dc.GetCharHeight()+4; // Add some padding
 
     // Create a centered panel with DPI-scaled width
-    wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, -1),
-                                       wxTAB_TRAVERSAL | wxBORDER_SIMPLE);
-    centerPanel->SetBackgroundColour(pal.bgWindow);
-    centerPanel->SetMinSize(wxSize(panelWidth, -1));
-    centerPanel->SetMaxSize(wxSize(panelWidth, -1));
-    centerPanel->SetCanFocus(true);
+    m_centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, -1),
+                                wxTAB_TRAVERSAL | wxBORDER_SIMPLE);
+    m_centerPanel->SetBackgroundColour(pal.bgWindow);
+    m_centerPanel->SetMinSize(wxSize(panelWidth, -1));
+    m_centerPanel->SetMaxSize(wxSize(panelWidth, -1));
+    m_centerPanel->SetCanFocus(true);
     wxBoxSizer* centerSizer = new wxBoxSizer(wxVERTICAL);
 
     // Horizontal sizer for search box and add button
     wxBoxSizer* searchSizer = new wxBoxSizer(wxHORIZONTAL);
 
     // Search box with DPI-scaled dimensions
-    m_searchCtrl = new wxSearchCtrl(centerPanel, ID_SEARCH_CTRL, wxEmptyString,
+    m_searchCtrl = new wxSearchCtrl(m_centerPanel, ID_SEARCH_CTRL, wxEmptyString,
                                    wxDefaultPosition, wxSize(searchWidth, controlHeight),
                                    wxTE_PROCESS_ENTER | wxBORDER_SIMPLE | wxWANTS_CHARS);
     m_searchCtrl->ShowSearchButton(false); // Hide built-in search button to reduce left margin
@@ -167,7 +168,7 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
 
     // Add button with DPI-scaled dimensions — keep the native button look,
     // just a slightly bolder "+" glyph.
-    m_addButton = new wxButton(centerPanel, ID_ADD_BUTTON, "+",
+    m_addButton = new wxButton(m_centerPanel, ID_ADD_BUTTON, "+",
                                wxDefaultPosition, wxSize(buttonWidth, controlHeight));
     m_addButton->SetFont(wxFont(static_cast<int>(14 * m_dpiScale), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
 
@@ -176,7 +177,7 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     searchSizer->Add(m_addButton, 0, wxEXPAND | wxALIGN_CENTER_VERTICAL);
 
     // Device list - use wxScrolledWindow with DPI-scaled dimensions
-    m_scrolledWindow = new wxScrolledWindow(centerPanel, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, scrollHeight));
+    m_scrolledWindow = new wxScrolledWindow(m_centerPanel, wxID_ANY, wxDefaultPosition, wxSize(panelWidth, scrollHeight));
     m_scrolledWindow->SetBackgroundColour(pal.bgContent);
     m_scrolledWindow->SetScrollRate(0, static_cast<int>(30 * m_dpiScale)); // Vertical scroll only
 
@@ -191,7 +192,7 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     m_scrolledWindow->FitInside();
 
     // Status bar: device count, right-aligned under the list.
-    m_statusText = new wxStaticText(centerPanel, wxID_ANY, "",
+    m_statusText = new wxStaticText(m_centerPanel, wxID_ANY, "",
         wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
     m_statusText->SetForegroundColour(pal.textFaint);
     m_statusText->SetFont(wxFont(static_cast<int>(11 * m_dpiScale), wxFONTFAMILY_DEFAULT,
@@ -201,11 +202,11 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     centerSizer->Add(searchSizer, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     centerSizer->Add(m_scrolledWindow, 1, wxLEFT | wxRIGHT | wxTOP, 10);
     centerSizer->Add(m_statusText, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
-    centerPanel->SetSizer(centerSizer);
+    m_centerPanel->SetSizer(centerSizer);
 
     // Add stretchable space above and below to center vertically
     mainSizer->AddStretchSpacer(1);
-    mainSizer->Add(centerPanel, 0, wxALIGN_CENTER_HORIZONTAL);
+    mainSizer->Add(m_centerPanel, 0, wxALIGN_CENTER_HORIZONTAL);
     mainSizer->AddStretchSpacer(1);
 
     SetSizer(mainSizer);
@@ -218,6 +219,20 @@ DeviceListPanel::DeviceListPanel(wxWindow* parent)
     // Load devices
     LoadDevices();
     RefreshDeviceList();
+
+    // Re-theme when the OS appearance flips (event delivery is unreliable on
+    // Windows, so poll — same pattern as AppWindow::m_appearanceTimer).
+    m_appWasDark = SystemUsesDarkTheme();
+    m_appearanceTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        const bool dark = SystemUsesDarkTheme();
+        UiThemeDebugStage(dark ? "devicelist:tick dark" : "devicelist:tick light");
+        if (dark != m_appWasDark) {
+            m_appWasDark = dark;
+            ApplyUiPalette();
+        }
+    }, m_appearanceTimer.GetId());
+    m_appearanceTimer.Start(2000);
 }
 
 void DeviceListPanel::LoadDevices() {
@@ -337,6 +352,25 @@ void DeviceListPanel::RefreshDeviceList(const std::string& filter) {
         m_contentPanel->FitInside();
         m_scrolledWindow->FitInside();
     }
+}
+
+void DeviceListPanel::ApplyUiPalette() {
+    UiThemeDebugStage("devicelist:apply");
+    const UiPalette pal = CurrentUiPalette();
+    SetBackgroundColour(pal.bgWindow);
+    if (m_centerPanel) m_centerPanel->SetBackgroundColour(pal.bgWindow);
+    if (m_searchCtrl) {
+        m_searchCtrl->SetBackgroundColour(pal.bgSearch);
+        m_searchCtrl->SetForegroundColour(pal.textPrimary);
+    }
+    if (m_scrolledWindow) m_scrolledWindow->SetBackgroundColour(pal.bgContent);
+    if (m_contentPanel) m_contentPanel->SetBackgroundColour(pal.bgContent);
+    if (m_statusText) m_statusText->SetForegroundColour(pal.textFaint);
+    // Rows and the header cache palette colours at construction; rebuilding
+    // the list applies the new palette while preserving the search filter.
+    RefreshDeviceList(m_searchCtrl ? m_searchCtrl->GetValue().ToStdString() : "");
+    RepaintUiTree(this);
+    Update();
 }
 
 void DeviceListPanel::OnSearch(wxCommandEvent& event) {
