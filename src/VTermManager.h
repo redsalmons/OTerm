@@ -127,6 +127,8 @@ private:
     void update_cell_buffer(VTermRect rect);
     void initialize_cell_buffer();
     void refresh_cell_buffer();
+    void ApplyThemeToVTerm();
+    void SyncThemeIfNeeded();
 
 private:
     // VTerm components
@@ -159,6 +161,7 @@ private:
     bool entering_alternate_screen_;  // Flag to block history during alternate screen entry
     bool initializing_;  // Flag to prevent event processing during initialization
     std::string escape_buffer_;  // Buffer for handling fragmented escape sequences
+    std::string applied_theme_name_;  // Theme last pushed into libvterm
     
     // Callbacks
     DamageCallback damage_callback_;

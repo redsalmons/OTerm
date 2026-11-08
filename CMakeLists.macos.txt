@@ -52,6 +52,7 @@ add_executable(OceanTerm
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
     src/MonospaceFontDialog.cpp
+    src/TerminalTheme.cpp
     src/LocalTerminalManager.cpp
     src/LocalTerminalContainer.cpp
     src/TerminalPanel.cpp

@@ -1,4 +1,6 @@
 #include "TermGLCanvas.h"
+#include "TerminalTheme.h"
+#include "GlobalConfig.h"
 
 #include "TerminalPanel.h"
 
@@ -52,6 +54,19 @@
 #define GL_CLAMP_TO_EDGE 0x812F
 
 #endif
+
+namespace {
+
+// Resolve a packed cell colour reference against the active theme and set it
+// as the current GL colour (0xRRGGBB -> glColor3f).
+void SetCellColorGL(uint32_t ref) {
+    uint32_t rgb = ResolveCellColor(ref, GlobalConfig::GetTheme());
+    glColor3f(((rgb >> 16) & 0xFF) / 255.0f,
+              ((rgb >> 8) & 0xFF) / 255.0f,
+              (rgb & 0xFF) / 255.0f);
+}
+
+} // namespace
 
 
 
@@ -161,9 +176,12 @@ TermGLCanvas::TermGLCanvas(wxWindow* parent, bool createThread)
 
                                    wxBORDER_NONE | wxNO_BORDER | wxTE_PROCESS_ENTER | wxTE_NOHIDESEL | wxWANTS_CHARS | wxTE_RICH2);
 
-    // Set background to blue to match cursor color
+    // Set background to match the cursor colour
 
-    wxColour cursor_color = wxColour(0, 120, 215); // Blue cursor color
+    const TerminalTheme& imeTheme = GlobalConfig::GetTheme();
+    wxColour cursor_color((imeTheme.cursor >> 16) & 0xFF,
+                          (imeTheme.cursor >> 8) & 0xFF,
+                          imeTheme.cursor & 0xFF);
 
     m_imeInputBox->SetBackgroundColour(cursor_color);
 
@@ -946,6 +964,10 @@ void TermGLCanvas::Render() {
     const float rasterScale = GetTerminalScale(ScaleUsage::Raster);
     glViewport(0, 0, wxRound(physW * rasterScale), wxRound(physH * rasterScale));
 
+    const uint32_t clearColor = GlobalConfig::GetTheme().bg;
+    glClearColor(((clearColor >> 16) & 0xFF) / 255.0f,
+                 ((clearColor >> 8) & 0xFF) / 255.0f,
+                 (clearColor & 0xFF) / 255.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     glMatrixMode(GL_PROJECTION);
@@ -993,12 +1015,6 @@ void TermGLCanvas::Render() {
 
     for (const auto& cell : m_screen_cells) {
 
-        // Skip continuation cells (char_code = 0 for wide character continuation)
-
-        if (cell.char_code == 0) continue;
-
-
-
         float x = static_cast<int>(cell.cell_x) * cell_width + margin_x;
 
         float y = (static_cast<int>(cell.cell_y) - m_scroll_offset) * cell_height + margin_y;
@@ -1025,15 +1041,7 @@ void TermGLCanvas::Render() {
 
 
 
-        uint8_t bg_r = cell.bg_color & 0xFF;
-
-        uint8_t bg_g = (cell.bg_color >> 8) & 0xFF;
-
-        uint8_t bg_b = (cell.bg_color >> 16) & 0xFF;
-
-
-
-        glColor3f(bg_r / 255.0f, bg_g / 255.0f, bg_b / 255.0f);
+        SetCellColorGL(cell.bg_color);
 
         glVertex2f(x, y);
 
@@ -1057,7 +1065,12 @@ void TermGLCanvas::Render() {
 
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        glColor4f(0.2f, 0.4f, 0.8f, 0.5f); // Darker blue with more transparency
+        const TerminalTheme& theme = GlobalConfig::GetTheme();
+        const uint32_t sel = theme.selection;
+        glColor4f(((sel >> 16) & 0xFF) / 255.0f,
+                  ((sel >> 8) & 0xFF) / 255.0f,
+                  (sel & 0xFF) / 255.0f,
+                  ((sel >> 24) & 0xFF) / 255.0f);
 
         
 
@@ -1194,13 +1207,7 @@ void TermGLCanvas::Render() {
 
             // 使用真实的前景色
 
-            uint8_t fg_r = cell.fg_color & 0xFF;
-
-            uint8_t fg_g = (cell.fg_color >> 8) & 0xFF;
-
-            uint8_t fg_b = (cell.fg_color >> 16) & 0xFF;
-
-            glColor3f(fg_r / 255.0f, fg_g / 255.0f, fg_b / 255.0f);
+            SetCellColorGL(cell.fg_color);
 
 
 
@@ -1272,10 +1279,7 @@ void TermGLCanvas::Render() {
             // Draw underline at the bottom of the text block, not the cell
             float underline_y = y + leading_offset + text_h - 2.0f;
 
-            uint8_t fg_r = cell.fg_color & 0xFF;
-            uint8_t fg_g = (cell.fg_color >> 8) & 0xFF;
-            uint8_t fg_b = (cell.fg_color >> 16) & 0xFF;
-            glColor3f(fg_r / 255.0f, fg_g / 255.0f, fg_b / 255.0f);
+            SetCellColorGL(cell.fg_color);
 
             glVertex2f(x, underline_y);
             glVertex2f(x + render_width, underline_y);
@@ -1288,7 +1292,10 @@ void TermGLCanvas::Render() {
 
     if (m_cursor_visible && !m_cursor_out_of_bounds) {
 
-        glColor4f(1.0f, 1.0f, 1.0f, 0.5f);
+        const uint32_t cur = GlobalConfig::GetTheme().cursor;
+        glColor4f(((cur >> 16) & 0xFF) / 255.0f,
+                  ((cur >> 8) & 0xFF) / 255.0f,
+                  (cur & 0xFF) / 255.0f, 0.85f);
 
         glEnable(GL_BLEND);
 

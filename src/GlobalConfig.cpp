@@ -19,6 +19,7 @@ std::string GlobalConfig::s_language = "zh_CN";
 std::string GlobalConfig::s_fontName = "";
 int GlobalConfig::s_fontSize = 0;
 int GlobalConfig::s_zoomSteps = 0;
+std::string GlobalConfig::s_themeName = "ocean-dark";
 std::string GlobalConfig::s_masterPassword = "";
 std::string GlobalConfig::x7f3a9k2m5p8q1r4 = "";
 double GlobalConfig::s_dpiScaleFactor = 1.0;
@@ -274,6 +275,24 @@ std::string GlobalConfig::GetSettingsFilePath() {
     return configPath + "/settings.json";
 }
 
+std::string GlobalConfig::GetThemeName() {
+    return s_themeName;
+}
+
+void GlobalConfig::SetThemeName(const std::string& themeName) {
+    // Reject unknown ids so a stale config can't break lookups.
+    for (const auto& t : GetTerminalThemes()) {
+        if (t.id == themeName) {
+            s_themeName = themeName;
+            return;
+        }
+    }
+}
+
+const TerminalTheme& GlobalConfig::GetTheme() {
+    return GetTerminalTheme(s_themeName);
+}
+
 void GlobalConfig::LoadSettings() {
     EnsureConfigMigration();
     std::string settingsPath = GetSettingsFilePath();
@@ -309,6 +328,16 @@ void GlobalConfig::LoadSettings() {
             s_fontSize = 0; // Default to system font size
         }
 
+        if (j.contains("theme")) {
+            std::string theme = j["theme"].get<std::string>();
+            for (const auto& t : GetTerminalThemes()) {
+                if (t.id == theme) {
+                    s_themeName = theme;
+                    break;
+                }
+            }
+        }
+
         if (j.contains("masterPassword")) {
             s_masterPassword = j["masterPassword"].get<std::string>();
         } else {
@@ -333,6 +362,7 @@ void GlobalConfig::SaveSettings() {
     j["language"] = s_language;
     j["fontName"] = s_fontName;
     j["fontSize"] = s_fontSize;
+    j["theme"] = s_themeName;
     j["masterPassword"] = s_masterPassword;
 
     WriteFileAtomic(settingsPath, j.dump(4));

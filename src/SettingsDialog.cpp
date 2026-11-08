@@ -2,6 +2,7 @@
 #include "MonospaceFontDialog.h"
 #include "TranslationHelper.h"
 #include "GlobalConfig.h"
+#include "TerminalTheme.h"
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/statbox.h>
@@ -72,6 +73,38 @@ SettingsDialog::SettingsDialog(wxWindow* parent)
     basicPanel->SetSizer(basicSizer);
     notebook->AddPage(basicPanel, TranslationHelper::Tr("basicConfig"));
 
+    // -------------------------------------------------------------
+    // Tab 2: Theme
+    // -------------------------------------------------------------
+    wxPanel* themePanel = new wxPanel(notebook, wxID_ANY);
+    wxBoxSizer* themeSizer = new wxBoxSizer(wxVERTICAL);
+
+    const auto& themes = GetTerminalThemes();
+    wxArrayString themeNames;
+    int currentThemeIndex = 0;
+    const std::string currentThemeId = GlobalConfig::GetThemeName();
+    for (size_t i = 0; i < themes.size(); ++i) {
+        themeNames.Add(wxString::FromUTF8(TranslationHelper::Tr(themes[i].nameKey).c_str()));
+        if (themes[i].id == currentThemeId) currentThemeIndex = (int)i;
+    }
+
+    wxBoxSizer* themeChoiceSizer = new wxBoxSizer(wxHORIZONTAL);
+    themeChoiceSizer->Add(new wxStaticText(themePanel, wxID_ANY, TranslationHelper::Tr("theme")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    m_themeChoice = new wxChoice(themePanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, themeNames);
+    m_themeChoice->SetSelection(currentThemeIndex);
+    themeChoiceSizer->Add(m_themeChoice, 1, wxEXPAND | wxALL, 5);
+    themeSizer->Add(themeChoiceSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+
+    m_themePreview = new wxStaticText(themePanel, wxID_ANY,
+        "Hello, world! 你好，世界 ABCabc 0123456789");
+    themeSizer->Add(m_themePreview, 0, wxEXPAND | wxALL, 10);
+
+    m_themeChoice->Bind(wxEVT_CHOICE, &SettingsDialog::OnThemeChanged, this);
+    UpdateThemePreview();
+
+    themePanel->SetSizer(themeSizer);
+    notebook->AddPage(themePanel, TranslationHelper::Tr("theme"));
+
     // Add notebook to dialog sizer
     mainSizer->Add(notebook, 1, wxEXPAND | wxALL, 10);
 
@@ -99,6 +132,13 @@ void SettingsDialog::OnOK(wxCommandEvent& event) {
     GlobalConfig::SetFontName(m_fontDisplayText->GetLabel().ToStdString());
     GlobalConfig::SetFontSize(m_fontSizeSpin->GetValue());
 
+    // Save theme
+    const int themeIndex = m_themeChoice->GetSelection();
+    const auto& themes = GetTerminalThemes();
+    if (themeIndex >= 0 && themeIndex < (int)themes.size()) {
+        GlobalConfig::SetThemeName(themes[themeIndex].id);
+    }
+
     GlobalConfig::SaveSettings();
 
     // Reload translations
@@ -121,4 +161,23 @@ void SettingsDialog::OnFontButtonClicked(wxCommandEvent& event) {
             m_fontDisplayText->SetLabel(selectedFont);
         }
     }
+}
+
+void SettingsDialog::OnThemeChanged(wxCommandEvent& event) {
+    UpdateThemePreview();
+}
+
+void SettingsDialog::UpdateThemePreview() {
+    const int index = m_themeChoice->GetSelection();
+    const auto& themes = GetTerminalThemes();
+    if (index < 0 || index >= (int)themes.size()) return;
+
+    const TerminalTheme& theme = themes[index];
+    m_themePreview->SetBackgroundColour(wxColour((theme.bg >> 16) & 0xFF,
+                                                 (theme.bg >> 8) & 0xFF,
+                                                 theme.bg & 0xFF));
+    m_themePreview->SetForegroundColour(wxColour((theme.fg >> 16) & 0xFF,
+                                                 (theme.fg >> 8) & 0xFF,
+                                                 theme.fg & 0xFF));
+    m_themePreview->Refresh();
 }

@@ -290,9 +290,6 @@ msgstr "The master password is used to encrypt locally stored data. If lost, loc
 msgid "addDevice"
 msgstr "Add Device"
 
-msgid "delete"
-msgstr "Delete"
-
 msgid "add"
 msgstr "Open"
 
@@ -314,3 +311,22 @@ msgstr "Close Panel"
 
 msgid "localConnection"
 msgstr "Local Connection"
+
+# Theme settings
+msgid "theme"
+msgstr "Theme"
+
+msgid "themeOceanDark"
+msgstr "Ocean Dark"
+
+msgid "themeOceanLight"
+msgstr "Ocean Light"
+
+msgid "themeSolarizedDark"
+msgstr "Solarized Dark"
+
+msgid "themeDracula"
+msgstr "Dracula"
+
+msgid "themeClassicDark"
+msgstr "Classic Dark"

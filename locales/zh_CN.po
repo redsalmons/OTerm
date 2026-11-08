@@ -290,9 +290,6 @@ msgstr "主密码会用来加密本地存储的数据，如果丢失后，会导
 msgid "addDevice"
 msgstr "添加设备"
 
-msgid "delete"
-msgstr "删除"
-
 msgid "add"
 msgstr "打开"
 
@@ -314,3 +311,22 @@ msgstr "关闭面板"
 
 msgid "localConnection"
 msgstr "本地连接"
+
+# Theme settings
+msgid "theme"
+msgstr "主题"
+
+msgid "themeOceanDark"
+msgstr "深海暗色"
+
+msgid "themeOceanLight"
+msgstr "深海亮色"
+
+msgid "themeSolarizedDark"
+msgstr "Solarized 暗色"
+
+msgid "themeDracula"
+msgstr "Dracula"
+
+msgid "themeClassicDark"
+msgstr "经典深色"

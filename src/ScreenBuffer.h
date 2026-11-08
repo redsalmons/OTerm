@@ -2,6 +2,7 @@
 
 #include <vector>
 #include "CellInstance.h"
+#include "TerminalTheme.h"
 
 // Screen buffer for double buffering
 // Used to safely share screen data between worker thread and UI thread
@@ -36,8 +37,8 @@ struct ScreenBuffer {
                 cell.uv_v = 0;
                 cell.uv_w = 0;
                 cell.uv_h = 0;
-                cell.fg_color = 0;
-                cell.bg_color = 0;
+                cell.fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+                cell.bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
                 cell.char_code = 0;
             }
         }

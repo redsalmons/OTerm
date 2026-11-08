@@ -1,5 +1,7 @@
 #include "VTermManager.h"
 #include "SSHManager.h"
+#include "TerminalTheme.h"
+#include "GlobalConfig.h"
 #include <cstring>
 #include <chrono>
 #ifdef _WIN32
@@ -37,6 +39,10 @@ bool VTermManager::initialize(int rows, int cols) {
 
     // Set UTF8 mode
     vterm_set_utf8(vt_, 1);
+
+    // Inject the active theme so OSC colour queries and palette-aware apps
+    // see the same colours the renderer uses.
+    ApplyThemeToVTerm();
 
     // Obtain screen
     vts_ = vterm_obtain_screen(vt_);
@@ -76,10 +82,12 @@ bool VTermManager::initialize(int rows, int cols) {
 
 int VTermManager::write_input_no_flush(const char* data, int length) {
     if (!vt_ || !data || length <= 0) return -1;
+    SyncThemeIfNeeded();
     return vterm_input_write(vt_, data, length);
 }
 
 void VTermManager::flush_damage() {
+    SyncThemeIfNeeded();
     if (vts_) {
         vterm_screen_flush_damage(vts_);
     }
@@ -142,6 +150,7 @@ int VTermManager::write_input(const char* data, int length) {
         escape_buffer_ = escape_buffer_.substr(escape_buffer_.length() - 100);
     }
 
+    SyncThemeIfNeeded();
     int result = vterm_input_write(vt_, data, length);
 
     // Ensure proper data synchronization by flushing damage
@@ -392,6 +401,42 @@ int VTermManager::vterm_sb_pushline_callback(int cols, const VTermScreenCell *ce
     return 1; // Return success to continue receiving callbacks
 }
 
+void VTermManager::SyncThemeIfNeeded() {
+    if (vt_ && GlobalConfig::GetThemeName() != applied_theme_name_) {
+        ApplyThemeToVTerm();
+    }
+}
+
+void VTermManager::ApplyThemeToVTerm() {
+    if (!vt_) return;
+    VTermState* state = vterm_obtain_state(vt_);
+    if (!state) return;
+
+    const TerminalTheme& theme = GlobalConfig::GetTheme();
+    for (int i = 0; i < 16; ++i) {
+        const uint32_t c = theme.ansi[i];
+        VTermColor col;
+        col.type = VTERM_COLOR_RGB;
+        col.rgb.red = (c >> 16) & 0xFF;
+        col.rgb.green = (c >> 8) & 0xFF;
+        col.rgb.blue = c & 0xFF;
+        vterm_state_set_palette_color(state, i, &col);
+    }
+    VTermColor def_fg, def_bg;
+    const uint32_t fg = theme.fg, bg = theme.bg;
+    def_fg.type = VTERM_COLOR_RGB;
+    def_fg.rgb.red = (fg >> 16) & 0xFF;
+    def_fg.rgb.green = (fg >> 8) & 0xFF;
+    def_fg.rgb.blue = fg & 0xFF;
+    def_bg.type = VTERM_COLOR_RGB;
+    def_bg.rgb.red = (bg >> 16) & 0xFF;
+    def_bg.rgb.green = (bg >> 8) & 0xFF;
+    def_bg.rgb.blue = bg & 0xFF;
+    vterm_state_set_default_colors(state, &def_fg, &def_bg);
+
+    applied_theme_name_ = GlobalConfig::GetThemeName();
+}
+
 void VTermManager::update_cell_buffer(VTermRect rect) {
     // Mark that we have new output for auto-scroll
     has_new_output_ = true;
@@ -399,9 +444,7 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
     // Obtain VTerm state once outside the loop to avoid repeated calls
     VTermState* state = vterm_obtain_state(vt_);
     if (!state) return;
-    VTermColor def_fg, def_bg;
-    vterm_state_get_default_colors(state, &def_fg, &def_bg);
-    
+
     // Update cells in the damaged region
     for (int row = rect.start_row; row < rect.end_row && row < rows_; row++) {
         for (int col = rect.start_col; col < rect.end_col && col < cols_; col++) {
@@ -429,34 +472,33 @@ void VTermManager::update_cell_buffer(VTermRect rect) {
             }
             
             
-            // Extract colors using VTerm's actual color structure
-            uint32_t fg_color = 0xffffffff; // Default white
-            uint32_t bg_color = 0x00000000; // Default black
-            
-            // Convert foreground color from VTermColor to RGB (ABGR format for ImGui)
+            // Pack colours as unresolved references; the renderer resolves them
+            // against the active theme so theme switches apply instantly.
+            uint32_t fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+            uint32_t bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
+
             VTermColor vt_fg = cell.fg;
-            vterm_state_convert_color_to_rgb(state, &vt_fg);
-            // ABGR format: Alpha in high bits, then Blue, Green, Red in low bits
-            fg_color = (0xFF << 24) | 
-                       ((uint32_t)vt_fg.rgb.blue << 16) | 
-                       ((uint32_t)vt_fg.rgb.green << 8) | 
-                       (uint32_t)vt_fg.rgb.red;
-            
-            // Convert background color from VTermColor to RGB (ABGR format for ImGui)
-            VTermColor vt_bg = cell.bg;
-            vterm_state_convert_color_to_rgb(state, &vt_bg);
-            
-            // Core: Handle default background transparency
-            if (vt_bg.rgb.red == def_bg.rgb.red && 
-                vt_bg.rgb.green == def_bg.rgb.green && 
-                vt_bg.rgb.blue == def_bg.rgb.blue) {
-                // Default background = dark gray (matches terminal background)
-                bg_color = (0xFF << 24) | (0x0A << 16) | (0x0A << 8) | 0x0A;
+            if (VTERM_COLOR_IS_DEFAULT_FG(&vt_fg)) {
+                fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+            } else if (VTERM_COLOR_IS_INDEXED(&vt_fg) && vt_fg.indexed.idx < 16) {
+                fg_color = PackCellColorIndexed(vt_fg.indexed.idx);
             } else {
-                bg_color = (0xFF << 24) | 
-                           ((uint32_t)vt_bg.rgb.blue << 16) | 
-                           ((uint32_t)vt_bg.rgb.green << 8) | 
-                           (uint32_t)vt_bg.rgb.red;
+                vterm_state_convert_color_to_rgb(state, &vt_fg);
+                fg_color = PackCellColorRGB((vt_fg.rgb.red << 16) |
+                                            (vt_fg.rgb.green << 8) |
+                                            vt_fg.rgb.blue);
+            }
+
+            VTermColor vt_bg = cell.bg;
+            if (VTERM_COLOR_IS_DEFAULT_BG(&vt_bg)) {
+                bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
+            } else if (VTERM_COLOR_IS_INDEXED(&vt_bg) && vt_bg.indexed.idx < 16) {
+                bg_color = PackCellColorIndexed(vt_bg.indexed.idx);
+            } else {
+                vterm_state_convert_color_to_rgb(state, &vt_bg);
+                bg_color = PackCellColorRGB((vt_bg.rgb.red << 16) |
+                                            (vt_bg.rgb.green << 8) |
+                                            vt_bg.rgb.blue);
             }
             
             // Debug: Print actual RGB values (commented out to reduce noise)
@@ -514,8 +556,8 @@ void VTermManager::initialize_cell_buffer() {
         for (int col = 0; col < cols_; col++) {
             cell_buffer_[row][col] = {
                 .char_code = ' ',
-                .fg_color = 0xffffffff,
-                .bg_color = 0x00000000,
+                .fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG),
+                .bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG),
                 .attrs = 0x0,
                 .dirty = false,
                 .width = 1
@@ -546,14 +588,14 @@ void VTermManager::add_line_to_history(const VTermScreenCell* cells, int cols) {
         terminal_cell.width = cells[col].width;
         
         // Extract colors using VTerm's actual color structure
-        uint32_t fg_color = 0xffffffff; // Default white
-        uint32_t bg_color = 0x00000000; // Default black
+        uint32_t fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG);
+        uint32_t bg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_BG);
         
         // Use proper ANSI color extraction like in the other function
         // Note: This is a simplified version - full implementation would need VTerm color access
         // For now, use basic colors to avoid the red-only issue
         if (cells[col].attrs.bold) {
-            fg_color = 0xFFFFFFFF; // Keep white for bold
+            fg_color = PackCellColorDefault(CELL_COLOR_DEFAULT_FG); // Keep default fg for bold
         }
         if (cells[col].attrs.reverse) {
             // Swap foreground and background for reverse video

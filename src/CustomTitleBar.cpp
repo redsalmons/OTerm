@@ -530,6 +530,21 @@ void CustomTitleBar::OnOverflowTabClicked(wxCommandEvent& event) {
     Refresh();
 }
 
+namespace {
+
+// Repaint every terminal canvas so theme changes apply immediately; colours
+// are resolved against GlobalConfig at render time.
+void RefreshAllCanvases(wxWindow* win) {
+    for (wxWindow* child : win->GetChildren()) {
+        if (auto* canvas = dynamic_cast<TermGLCanvas*>(child)) {
+            canvas->Refresh();
+        }
+        RefreshAllCanvases(child);
+    }
+}
+
+} // namespace
+
 void CustomTitleBar::OnSettings(wxCommandEvent& event) {
     SettingsDialog dialog(this);
     if (dialog.ShowModal() == wxID_OK) {
@@ -537,6 +552,10 @@ void CustomTitleBar::OnSettings(wxCommandEvent& event) {
         // Send event to parent to refresh
         wxCommandEvent refreshEvent(wxEVT_COMMAND_MENU_SELECTED, wxID_REFRESH);
         wxPostEvent(GetParent(), refreshEvent);
+
+        if (m_notebook) {
+            RefreshAllCanvases(m_notebook);
+        }
     }
 }
 

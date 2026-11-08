@@ -3,6 +3,7 @@
 
 #include <wx/wx.h>
 #include <string>
+#include "TerminalTheme.h"
 
 class GlobalConfig {
 public:
@@ -34,6 +35,10 @@ public:
     static std::string GetActiveMasterPassword();
     static void SetActiveMasterPassword(const std::string& password);
 
+    static std::string GetThemeName();
+    static void SetThemeName(const std::string& themeName);
+    static const TerminalTheme& GetTheme();
+
     static void LoadSettings();
     static void SaveSettings();
 
@@ -58,6 +63,7 @@ private:
     static std::string s_fontName;
     static int s_fontSize;
     static int s_zoomSteps;
+    static std::string s_themeName;
     static std::string s_masterPassword;
     static std::string x7f3a9k2m5p8q1r4; // Random variable name for active master password
     static double s_dpiScaleFactor;

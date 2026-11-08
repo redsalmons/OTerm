@@ -43,6 +43,7 @@ set(SOURCES
     src/TranslationHelper.cpp
     src/SettingsDialog.cpp
     src/MonospaceFontDialog.cpp
+    src/TerminalTheme.cpp
     src/LocalTerminalManager.cpp
     src/TerminalPanel.cpp
     src/InfiniteSplitter.cpp

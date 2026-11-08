@@ -15,6 +15,8 @@ public:
 
 private:
     wxChoice* m_languageChoice;
+    wxChoice* m_themeChoice;
+    wxStaticText* m_themePreview;
     wxButton* m_fontButton;
     wxStaticText* m_fontDisplayText;
     wxSpinCtrl* m_fontSizeSpin;
@@ -22,6 +24,8 @@ private:
     void OnOK(wxCommandEvent& event);
     void OnCancel(wxCommandEvent& event);
     void OnFontButtonClicked(wxCommandEvent& event);
+    void OnThemeChanged(wxCommandEvent& event);
+    void UpdateThemePreview();
 
     wxDECLARE_EVENT_TABLE();
 };
