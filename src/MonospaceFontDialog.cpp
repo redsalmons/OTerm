@@ -28,7 +28,10 @@ MonospaceFontDialog::MonospaceFontDialog(wxWindow* parent, const wxString& curre
     wxStaticText* previewLabel = new wxStaticText(panel, wxID_ANY, "Preview:");
     mainSizer->Add(previewLabel, 0, wxALL, 10);
 
-    m_previewText = new wxStaticText(panel, wxID_ANY, "The quick brown fox jumps over the lazy dog\n0123456789");
+    m_previewText = new wxStaticText(panel, wxID_ANY,
+        "The quick brown fox 0123456789\n"
+        "中文混排测试:gypQW012 中文字体效果\n"
+        "-> => != === ... ~~ 中文标点，。！？");
     mainSizer->Add(m_previewText, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
     // wxFontEnumerator doesn't work in this environment, use hardcoded list
@@ -48,10 +51,36 @@ MonospaceFontDialog::MonospaceFontDialog(wxWindow* parent, const wxString& curre
         "Inconsolata",
         "Hack",
         "Roboto Mono",
+        "Fira Mono",
+        "Cousine",
+        "IBM Plex Mono",
+        "Space Mono",
+        "Anonymous Pro",
+        "Victor Mono",
+        "Spline Sans Mono",
+        "Input Mono",
+        "iA Writer Mono",
+        "Berkeley Mono",
+        "Commit Mono",
+        "Geist Mono",
+        "Cascadia Mono",
+        "Cascadia Code",
+        "SF Mono",
+        "Noto Sans Mono",
+        "Noto Sans Mono CJK SC",
+        // CJK-capable monospace fonts: keep Chinese glyphs in the same family
+        "Sarasa Mono SC",
+        "Sarasa Gothic SC",
+        "Maple Mono",
+        "Maple Mono SC",
+        "Maple Mono NF CN",
         // Chinese fonts for Windows
         "Microsoft YaHei UI",
+        "Microsoft YaHei",
         "SimHei",
         "SimSun",
+        "FangSong",
+        "KaiTi",
         "Noto Sans CJK SC"
     };
 
