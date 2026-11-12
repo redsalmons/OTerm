@@ -19,12 +19,11 @@ jobs:
       matrix:
         include:
           - { os: macos-13, name: "macOS 13 Ventura (x86_64)" }
-          - { os: macos-14, name: "macOS 14 Sonoma (arm64)" }
           - { os: macos-15, name: "macOS 15 Sequoia (arm64)" }
           - { os: macos-latest, name: "macOS latest (arm64)" }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: brew install pkg-config wxwidgets libuv libssh2 libvterm nlohmann-json openssl@3
