@@ -83,7 +83,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << EOF
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>CFBundleIconFile</key>

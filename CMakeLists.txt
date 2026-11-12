@@ -3,6 +3,26 @@ project(OceanTerm VERSION 1.0.8 LANGUAGES C CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
+    endif()
+
+    # Prefer project-local vcpkg dependencies when present: they are built
+    # from source with the deployment target above, while Homebrew bottles
+    # currently require macOS 26 and would break the macOS 11+ floor.
+    if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+        set(_oterm_vcpkg_triplet "x64-osx")
+    else()
+        set(_oterm_vcpkg_triplet "arm64-osx")
+    endif()
+    set(_oterm_vcpkg_dir "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${_oterm_vcpkg_triplet}")
+    if(EXISTS "${_oterm_vcpkg_dir}/lib")
+        list(PREPEND CMAKE_PREFIX_PATH "${_oterm_vcpkg_dir}")
+        set(ENV{PKG_CONFIG_PATH} "${_oterm_vcpkg_dir}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        if(EXISTS "${_oterm_vcpkg_dir}/tools/wxwidgets/wx-config")
+            set(WX_CONFIG_EXECUTABLE "${_oterm_vcpkg_dir}/tools/wxwidgets/wx-config" CACHE FILEPATH "wx-config path" FORCE)
+        endif()
+    endif()
 endif()
 
 # Set C++ standard
@@ -125,6 +145,11 @@ else()
         OUTPUT_VARIABLE WX_LIBS
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
+    # vcpkg's wx-config emits SDK framework paths (e.g. .../OpenGL.framework)
+    # which ld64 rejects; rewrite them to -framework <name>.
+    if(APPLE)
+        string(REGEX REPLACE "(/[^ ]*)/([^/ ]+)\\.framework" "-framework \\2" WX_LIBS "${WX_LIBS}")
+    endif()
     separate_arguments(WX_CXXFLAGS_LIST NATIVE_COMMAND "${WX_CXXFLAGS}")
 
     if(APPLE)

@@ -44,6 +44,7 @@ cmake_install.cmake
 Makefile
 *.cmake
 !cmake/SignMacOS.cmake
+!vcpkg-triplets/*.cmake
 
 # Visual Studio generated files
 *.exe
@@ -93,6 +94,7 @@ libvterm
 build-arm64/
 build-x64/
 build-x86/
+build_*/
 package_output/
 package_staging/
 package_staging_arm64/

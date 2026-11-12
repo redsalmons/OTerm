@@ -31,7 +31,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
     <key>CFBundleIconFile</key><string>OceanTerm.icns</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>LSMinimumSystemVersion</key><string>10.15</string>
+    <key>LSMinimumSystemVersion</key><string>11.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
 </dict>
 </plist>
 EOF
@@ -93,14 +94,14 @@ while IFS=$'\t' read -r n r; do
     [ -n "$n" ] && [ -n "$r" ] || continue
     c="$(basename -- "$r")"; c="${c//\"/}"
     ARM_CANON[$n]="$c"; ARM_REAL[$n]="$r"; NEED_ARM[$c]="$r"
-done < <(collect_deps "$ARM64_BIN" "/opt/homebrew/lib")
+done < <(collect_deps "$ARM64_BIN" "vcpkg_installed/arm64-osx/lib")
 
 while IFS=$'\t' read -r n r; do
     n="${n//\"/}"; r="${r//\"/}"
     [ -n "$n" ] && [ -n "$r" ] || continue
     c="$(basename -- "$r")"; c="${c//\"/}"
     X86_CANON[$n]="$c"; X86_REAL[$n]="$r"; NEED_X86[$c]="$r"
-done < <(collect_deps "$X86_BIN" "$HOME/oterm-deps/x86_64/lib")
+done < <(collect_deps "$X86_BIN" "vcpkg_installed/x64-osx/lib")
 
 typeset -A ALL_CANON
 for n in ${(k)NEED_ARM}; do ALL_CANON[$n]=1; done
@@ -171,21 +172,26 @@ if [ -f "OceanTerm.icns" ]; then cp OceanTerm.icns "$APP_BUNDLE/Contents/Resourc
 # Keychain ACLs are bound to the signing identity. Ad-hoc signatures change
 # with every build, so macOS re-prompts for Keychain access after each
 # rebuild. Set OTERM_SIGN_IDENTITY to a stable certificate (e.g. a
-# self-signed "OceanTerm Dev" code-signing cert) to avoid that.
-SIGN_ID="${OTERM_SIGN_IDENTITY:--}"
+# self-signed "OceanTerm Dev" code-signing cert) to avoid that. Defaults to
+# the Developer ID release certificate; pass OTERM_SIGN_IDENTITY=- for ad-hoc.
+SIGN_ID="${OTERM_SIGN_IDENTITY:-Developer ID Application: bo yang (327627V6NR)}"
 SIGN_REQ=()
 if [ "$SIGN_ID" = "-" ]; then
     echo "WARNING: ad-hoc signing; Keychain may re-prompt after each rebuild (set OTERM_SIGN_IDENTITY)" >&2
+    SIGN_FLAGS=(--timestamp=none)
 else
     # Designated requirement independent of cdhash so updates keep Keychain trust
     SIGN_REQ=(--requirements "=designated => identifier \"com.oceanterm.app\" and certificate leaf = H\"$(security find-certificate -c "$SIGN_ID" -Z | awk '/SHA-1/{print $NF}')\"")
+    # Hardened runtime is required for notarization; secure timestamp is
+    # included by default (no --timestamp=none) for Developer ID signatures.
+    SIGN_FLAGS=(--options runtime)
 fi
 echo "Signing with identity: $SIGN_ID"
 for f in "$RES"/*.dylib; do
-    codesign --force --sign "$SIGN_ID" --timestamp=none "$f" || { echo "ERROR: codesign failed for $f" >&2; exit 1; }
+    codesign --force --sign "$SIGN_ID" "${SIGN_FLAGS[@]}" "$f" || { echo "ERROR: codesign failed for $f" >&2; exit 1; }
 done
-codesign --force --sign "$SIGN_ID" --timestamp=none --identifier com.oceanterm.app "${SIGN_REQ[@]}" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" || { echo "ERROR: codesign failed for executable" >&2; exit 1; }
-codesign --force --sign "$SIGN_ID" --timestamp=none --identifier com.oceanterm.app "${SIGN_REQ[@]}" "$APP_BUNDLE" || { echo "ERROR: codesign failed for bundle" >&2; exit 1; }
+codesign --force --sign "$SIGN_ID" "${SIGN_FLAGS[@]}" --identifier com.oceanterm.app "${SIGN_REQ[@]}" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" || { echo "ERROR: codesign failed for executable" >&2; exit 1; }
+codesign --force --sign "$SIGN_ID" "${SIGN_FLAGS[@]}" --identifier com.oceanterm.app "${SIGN_REQ[@]}" "$APP_BUNDLE" || { echo "ERROR: codesign failed for bundle" >&2; exit 1; }
 codesign -v "$APP_BUNDLE" || { echo "ERROR: bundle verification failed" >&2; exit 1; }
 
 # ---------- DMG ----------
@@ -196,6 +202,27 @@ mkdir -p "$BUNDLE_DIR/dmg_staging"
 cp -R "$APP_BUNDLE" "$BUNDLE_DIR/dmg_staging/"
 ln -sf /Applications "$BUNDLE_DIR/dmg_staging/Applications"
 (cd "$BUNDLE_DIR/dmg_staging" && hdiutil create -volname "${APP_NAME}" -srcfolder . -ov -format UDZO "../$DMG_NAME")
+
+# ---------- notarize + staple (opt-in for release builds) ----------
+# Requires a Developer ID signature (OTERM_SIGN_IDENTITY) and a stored
+# notarytool credential profile (OTERM_NOTARY_PROFILE). Create the profile once:
+#   xcrun notarytool store-credentials <profile> --apple-id <id> --team-id <tid> --password <app-specific-pw>
+if [ "${OTERM_NOTARIZE:-1}" = "1" ]; then
+    if [ "$SIGN_ID" = "-" ]; then
+        echo "ERROR: notarization requires a Developer ID identity; set OTERM_SIGN_IDENTITY" >&2
+        exit 1
+    fi
+    PROFILE="${OTERM_NOTARY_PROFILE:-oceanterm}"
+    if [ -z "$PROFILE" ]; then
+        echo "ERROR: set OTERM_NOTARY_PROFILE (see notarytool store-credentials)" >&2
+        exit 1
+    fi
+    echo "Submitting $DMG_NAME for notarization (this can take several minutes)..."
+    xcrun notarytool submit "$BUNDLE_DIR/$DMG_NAME" --keychain-profile "$PROFILE" --wait
+    echo "Stapling notarization ticket to DMG and app bundle..."
+    xcrun stapler staple "$BUNDLE_DIR/$DMG_NAME"
+    xcrun stapler staple "$APP_BUNDLE"
+fi
 
 echo ""
 echo "=== Done ==="
