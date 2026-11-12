@@ -1,0 +1,61 @@
+name: macOS Matrix Test
+
+# Builds and smoke-tests OceanTerm on every macOS runner GitHub offers.
+# macos-13 is a real Intel (x86_64) machine; macos-14/15/26 are Apple Silicon.
+# Release artifacts still come from the local vcpkg pipeline
+# (package_macos_universal.sh, minos 11.0) - this workflow only proves the
+# code builds and launches on each macOS version.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-13, name: "macOS 13 Ventura (x86_64)" }
+          - { os: macos-14, name: "macOS 14 Sonoma (arm64)" }
+          - { os: macos-15, name: "macOS 15 Sequoia (arm64)" }
+          - { os: macos-latest, name: "macOS latest (arm64)" }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install pkg-config wxwidgets libuv libssh2 libvterm nlohmann-json openssl@3
+
+      - name: Configure
+        run: |
+          cmake -B build_ci -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+
+      - name: Build
+        run: cmake --build build_ci -j"$(sysctl -n hw.ncpu)"
+
+      - name: Inspect binary
+        run: |
+          BIN=build_ci/bin/OceanTerm
+          file "$BIN"
+          vtool -show-build "$BIN" | grep -E "platform|minos|sdk"
+          echo "--- linked libraries ---"
+          otool -L "$BIN"
+
+      - name: Smoke test (launch, keep alive 15s)
+        run: |
+          BIN=build_ci/bin/OceanTerm
+          "$BIN" &
+          PID=$!
+          sleep 15
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "OceanTerm still running after 15s - smoke OK"
+            kill "$PID" || true
+          else
+            wait "$PID"; CODE=$?
+            echo "OceanTerm exited early (code $CODE) - smoke FAILED"
+            exit 1
+          fi
