@@ -17,6 +17,11 @@ struct DeviceConfig {
     static std::vector<DeviceConfig> LoadFromFile();
     static void SaveToFile(const std::vector<DeviceConfig>& devices);
 
+    // Normalize pasted PEM/OpenSSH private key material: LF line endings,
+    // per-line whitespace trim (terminal selections pad lines to column
+    // width), blank lines dropped, trailing newline guaranteed.
+    static std::string SanitizeKeyMaterial(const std::string& raw);
+
     // Persist credentials that just authenticated successfully into oc.json
     // (password encrypted via the Keychain/DPAPI vault, or the master password)
     static bool SaveLoginCredentials(const std::string& deviceId,

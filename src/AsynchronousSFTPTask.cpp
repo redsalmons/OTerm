@@ -463,11 +463,14 @@ void AsynchronousSFTPTask::DoStateMachineStep() {
 
             int rc = 0;
             if (m_deviceConfig.auth_method == "key") {
+                // Re-sanitize at use time: keys stored before sanitization
+                // existed may have padded/mangled lines.
+                std::string keyData = DeviceConfig::SanitizeKeyMaterial(m_deviceConfig.password);
                 rc = libssh2_userauth_publickey_frommemory(
                     m_sshSession,
                     m_deviceConfig.username.c_str(), m_deviceConfig.username.length(),
                     nullptr, 0,
-                    m_deviceConfig.password.c_str(), m_deviceConfig.password.length(),
+                    keyData.c_str(), keyData.length(),
                     nullptr
                 );
             } else {

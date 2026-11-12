@@ -338,7 +338,7 @@ void ConnectionDialog::OnSave(wxCommandEvent& event) {
         wxString keyContent = m_keyTextCtrl->GetValue();
         // Replace Chinese dashes with standard dashes
         keyContent.Replace("——", "-----");
-        m_currentDevice.password = keyContent.ToStdString();
+        m_currentDevice.password = DeviceConfig::SanitizeKeyMaterial(keyContent.ToStdString());
     }
 
     // Find and update by group and name, or add as new

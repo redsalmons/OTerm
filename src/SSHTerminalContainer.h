@@ -122,6 +122,7 @@ private:
     // Interactive state
     int m_authRetryCount;
     std::string m_pendingInput;
+    std::string m_keyPassphrase; // passphrase for "key" auth (password field holds the key material)
     bool m_hasDamage;
 
     // Outbound data queued when the SSH channel applies backpressure

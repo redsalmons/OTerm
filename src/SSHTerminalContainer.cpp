@@ -99,7 +99,11 @@ void SSHTerminalContainer::QueueInput(const std::string& input) {
         for (char c : input) {
             if (c == '\r' || c == '\n') {
                 m_vtermManager.write_input("\r\n", 2);
-                m_deviceConfig.password = m_pendingInput;
+                if (m_deviceConfig.auth_method == "key") {
+                    m_keyPassphrase = m_pendingInput;
+                } else {
+                    m_deviceConfig.password = m_pendingInput;
+                }
                 m_pendingInput.clear();
                 
                 m_sshState = SSH_AUTHENTICATING;
@@ -452,18 +456,24 @@ void SSHTerminalContainer::PerformAuthentication() {
     if (!m_sshSession) return;
 
     std::string username = m_deviceConfig.username;
-    std::string password = m_deviceConfig.password;
     int rc = 0;
 
     if (m_deviceConfig.auth_method == "key") {
+        // The private key material lives in the password field. Re-sanitize
+        // at use time so keys stored before sanitization existed (or pasted
+        // with terminal line padding) still authenticate.
+        m_deviceConfig.password = DeviceConfig::SanitizeKeyMaterial(m_deviceConfig.password);
+        const std::string& keyData = m_deviceConfig.password;
+        const char* passphrase = m_keyPassphrase.empty() ? nullptr : m_keyPassphrase.c_str();
         rc = libssh2_userauth_publickey_frommemory(
             m_sshSession,
             username.c_str(), username.length(),
             nullptr, 0,
-            password.c_str(), password.length(),
-            nullptr
+            keyData.c_str(), keyData.length(),
+            passphrase
         );
     } else {
+        std::string password = m_deviceConfig.password;
         rc = libssh2_userauth_password(m_sshSession, username.c_str(), password.c_str());
     }
 
@@ -473,7 +483,7 @@ void SSHTerminalContainer::PerformAuthentication() {
         // Persist the working password to the vault so file transfer and
         // future sessions can authenticate without re-prompting
         if (m_deviceConfig.auth_method != "key") {
-            DeviceConfig::SaveLoginCredentials(m_deviceConfig.id, username, password);
+            DeviceConfig::SaveLoginCredentials(m_deviceConfig.id, username, m_deviceConfig.password);
         }
         m_sshState = SSH_CHANNEL_OPENING;
         OpenSSHChannel();
@@ -487,9 +497,16 @@ void SSHTerminalContainer::PerformAuthentication() {
             SendStatusMessage("\r\nAuthentication failed (3/3). Connection closed.\r\n");
             Cleanup();
         } else {
-            m_deviceConfig.password.clear();
             SendStatusMessage("\r\nAuthentication failed (" + std::to_string(m_authRetryCount) + "/3). Please try again.\r\n");
-            StartPasswordPrompt();
+            if (m_deviceConfig.auth_method == "key") {
+                // Keep the key material; retry input is the key passphrase
+                // (empty input retries with no passphrase).
+                m_sshState = SSH_PROMPTING_PASSWORD;
+                SendStatusMessage("passphrase: ");
+            } else {
+                m_deviceConfig.password.clear();
+                StartPasswordPrompt();
+            }
         }
     }
 }

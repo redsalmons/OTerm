@@ -611,3 +611,22 @@ void DeviceConfig::DeleteCredential(const std::string& deviceId) {
     (void)deviceId;
 #endif
 }
+
+std::string DeviceConfig::SanitizeKeyMaterial(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size() + 1);
+    size_t i = 0;
+    while (i < raw.size()) {
+        size_t end = raw.find('\n', i);
+        if (end == std::string::npos) end = raw.size();
+        size_t b = i, e = end;
+        while (b < e && (raw[b] == ' ' || raw[b] == '\t')) ++b;
+        while (e > b && (raw[e - 1] == ' ' || raw[e - 1] == '\t' || raw[e - 1] == '\r')) --e;
+        if (e > b) {
+            out.append(raw, b, e - b);
+            out.push_back('\n');
+        }
+        i = end + 1;
+    }
+    return out;
+}
